@@ -1,0 +1,190 @@
+open import Pervasives_extra
+open import Sail2_values
+open import Sail2_prompt_monad
+open import Sail2_operators
+open import Capabilities
+
+(* TODO: Maybe add a read_kind for instruction fetches, so that we can
+   distinguish loads from fetches in events and don't need to carry around the
+   is_fetch parameter below *)
+type acctype = Load | Store | Fetch
+
+type isa 'cap 'regval 'instr 'e =
+  <| instr_sem : 'instr -> monad 'regval unit 'e;
+     instr_fetch : monad 'regval 'instr 'e;
+     tag_granule : nat;
+     PCC : (* trace 'regval -> *) set register_name;
+     KCC : (* trace 'regval -> *) set register_name;
+     IDC : (* trace 'regval -> *) set register_name;
+     caps_of_regval : 'regval -> set 'cap;
+     invokes_caps : 'instr -> trace 'regval -> bool;
+     instr_raises_ex : 'instr -> trace 'regval -> bool;
+     fetch_raises_ex : trace 'regval -> bool;
+     exception_targets : set 'regval -> set 'cap;
+     privileged_regs : (* trace 'regval -> *) set register_name;
+     translation_tables : trace 'regval -> set nat;
+     translate_address : nat -> acctype -> trace 'regval -> maybe nat |>
+
+let writes_mem_val_at_idx i t = Maybe.bind (index t i) writes_mem_val
+let writes_mem_cap_at_idx i t = Maybe.bind (index t i) writes_mem_cap
+let writes_to_reg_at_idx i t = Maybe.bind (index t i) writes_to_reg
+let writes_reg_caps_at_idx ISA i t = maybe Set.empty (writes_reg_caps ISA.caps_of_regval) (index t i)
+let reads_mem_val_at_idx i t = Maybe.bind (index t i) reads_mem_val
+let reads_mem_cap_at_idx i t = Maybe.bind (index t i) reads_mem_cap
+let reads_from_reg_at_idx i t = Maybe.bind (index t i) reads_from_reg
+let reads_reg_caps_at_idx ISA i t = maybe Set.empty (reads_reg_caps ISA.caps_of_regval) (index t i)
+
+val address_range : nat -> nat -> list nat
+let address_range start len = genlist (fun n -> start + n) len
+
+val address_tag_aligned : forall 'cap 'regval 'instr 'e.
+  isa 'cap 'regval 'instr 'e -> nat -> bool
+let address_tag_aligned ISA addr = (addr mod ISA.tag_granule = 0)
+
+val cap_reg_written_before_idx : forall 'cap 'regval 'instr 'e. Capability 'cap, Eq 'cap, SetType 'cap =>
+  isa 'cap 'regval 'instr 'e -> nat -> register_name -> trace 'regval -> bool
+let cap_reg_written_before_idx ISA i r t = (exists j. j < i && writes_to_reg_at_idx j t = Just r && not (writes_reg_caps_at_idx ISA j t = {}))
+
+val system_access_permitted_before_idx : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
+  isa 'cap 'regval 'instr 'e -> nat -> trace 'regval -> bool
+let system_access_permitted_before_idx ISA i t =
+  (exists j r c.
+     j < i &&
+     reads_from_reg_at_idx j t = Just r &&
+     not (cap_reg_written_before_idx ISA j r t) &&
+     c IN (reads_reg_caps_at_idx ISA j t) &&
+     r IN ISA.PCC && r NIN ISA.privileged_regs &&
+     is_tagged c && not (is_sealed c) &&
+     (get_perms c).permit_system_access)
+
+val permits_cap_load : forall 'cap. Capability 'cap => 'cap -> nat -> nat -> bool
+let permits_cap_load c vaddr sz =
+  (is_tagged c && not (is_sealed c) &&
+   Set.fromList (address_range vaddr sz) subset (get_mem_region c) &&
+   (get_perms c).permit_load_capability)
+
+val available_caps : forall 'cap 'regval 'instr 'e. Capability 'cap, Eq 'cap, SetType 'cap =>
+  isa 'cap 'regval 'instr 'e -> nat -> trace 'regval -> set 'cap
+let rec available_caps ISA i t = match i with
+  | 0 -> Set.empty
+  | i+1 ->
+     let caps_of e =
+       (match reads_mem_cap e with
+          | Just (_, _, c) -> Set.singleton c
+          | Nothing -> Set.empty
+        end)
+       union
+       (match reads_from_reg e with
+          | Just r ->
+             if (((r IN ISA.PCC || r IN ISA.IDC) --> not (cap_reg_written_before_idx ISA i r t)) &&
+                 (system_access_permitted_before_idx ISA i t || not (r IN ISA.privileged_regs)))
+             then reads_reg_caps ISA.caps_of_regval e
+             else Set.empty
+          | Nothing -> Set.empty
+        end)
+     in
+     let new_caps = maybe Set.empty caps_of (index t i) in
+     (available_caps ISA i t) union new_caps
+end
+
+declare termination_argument available_caps = automatic
+
+val read_reg_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap, Eq 'regval =>
+  isa 'cap 'regval 'instr 'e -> bool -> trace 'regval -> bool
+let read_reg_axiom ISA has_ex t =
+  (forall i r v.
+     (index t i = Just (E_read_reg r v) && r IN ISA.privileged_regs)
+     -->
+     (system_access_permitted_before_idx ISA i t ||
+      (has_ex (*&& r IN ISA.KCC*))))
+
+val store_cap_mem_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
+  isa 'cap 'regval 'instr 'e -> trace 'regval -> bool
+let store_cap_mem_axiom ISA t =
+  (forall i c addr sz.
+     (writes_mem_cap_at_idx i t = Just (addr, sz, c))
+     -->
+     (cap_derivable (available_caps ISA i t) c))
+
+val store_cap_reg_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, SetType 'regval, Eq 'cap, Eq 'regval =>
+  isa 'cap 'regval 'instr 'e -> bool -> bool -> trace 'regval -> bool
+let store_cap_reg_axiom ISA has_ex invokes_caps t =
+  (forall i c r.
+     (writes_to_reg_at_idx i t = Just r && c IN (writes_reg_caps_at_idx ISA i t))
+     -->
+     (cap_derivable (available_caps ISA i t) c ||
+     (has_ex &&
+      ((*exists r' v' j.
+         j < i &&
+         index t j = Just (E_read_reg r' v') &&*)
+         c IN ISA.exception_targets {v' | exists r' j. j < i && index t j = Just (E_read_reg r' v') && r' IN ISA.KCC} &&
+         (*reads_from_reg_at_idx j t = Just r' &&
+         c' IN (reads_reg_caps_at_idx ISA j t) &&
+         leq_cap c c' &&
+         r' IN (ISA.KCC (*take j t*)) &&*)
+         r IN (ISA.PCC (*take i t*)))) ||
+     (exists cc cd.
+        invokes_caps &&
+        cap_derivable (available_caps ISA i t) cc &&
+        cap_derivable (available_caps ISA i t) cd &&
+        invokable cc cd &&
+        ((leq_cap c (unseal cc true) && r IN ISA.PCC) ||
+         (leq_cap c (unseal cd true) && r IN ISA.IDC)))))
+
+val load_mem_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
+  isa 'cap 'regval 'instr 'e -> bool -> trace 'regval -> bool
+let load_mem_axiom ISA is_fetch t =
+  (forall i paddr sz v tag.
+     (reads_mem_val_at_idx i t = Just (paddr, sz, v, tag) &&
+      not (paddr IN (ISA.translation_tables (take i t))))
+     -->
+     (exists c' vaddr.
+        cap_derivable (available_caps ISA i t) c' && is_tagged c' && not (is_sealed c') &&
+        ISA.translate_address vaddr (if is_fetch then Fetch else Load) (take i t) = Just paddr &&
+        Set.fromList (address_range vaddr sz) subset (get_mem_region c') &&
+        (if is_fetch then (get_perms c').permit_execute else (get_perms c').permit_load) &&
+	(is_fetch --> tag = B0) &&
+        (tag <> B0 --> (get_perms c').permit_load_capability && sz = ISA.tag_granule && address_tag_aligned ISA paddr)))
+
+val mem_val_is_cap : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
+  isa 'cap 'regval 'instr 'e -> list memory_byte -> bitU -> bool
+let mem_val_is_cap _ v t = (exists c. cap_of_mem_bytes v t = Just (c : 'cap))
+
+val mem_val_is_local_cap : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
+  isa 'cap 'regval 'instr 'e -> list memory_byte -> bitU -> bool
+let mem_val_is_local_cap _ v t = (exists c. cap_of_mem_bytes v t = Just (c : 'cap) && not (get_global c))
+
+val store_tag_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
+  isa 'cap 'regval 'instr 'e -> trace 'regval -> bool
+let store_tag_axiom ISA t =
+  (forall i paddr sz v tag.
+     (writes_mem_val_at_idx i t = Just (paddr, sz, v, tag))
+     -->
+     (List.length v = sz &&
+      (tag = B0 || tag = B1) &&
+      (tag = B1 --> address_tag_aligned ISA paddr && sz = ISA.tag_granule)))
+
+val store_mem_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
+  isa 'cap 'regval 'instr 'e -> trace 'regval -> bool
+let store_mem_axiom ISA t =
+  (forall i paddr sz v tag.
+     (writes_mem_val_at_idx i t = Just (paddr, sz, v, tag) &&
+      not (paddr IN (ISA.translation_tables (take i t))))
+     -->
+     (exists c' vaddr.
+        cap_derivable (available_caps ISA i t) c' && is_tagged c' && not (is_sealed c') &&
+        ISA.translate_address vaddr Store (take i t) = Just paddr &&
+        Set.fromList (address_range vaddr sz) subset (get_mem_region c') &&
+        (get_perms c').permit_store &&
+        ((mem_val_is_cap ISA v tag && tag = B1) --> (get_perms c').permit_store_capability) &&
+        (mem_val_is_local_cap ISA v tag && tag = B1 --> (get_perms c').permit_store_local_capability)))
+
+val cheri_axioms : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, SetType 'regval, Eq 'cap, Eq 'regval =>
+  isa 'cap 'regval 'instr 'e -> bool -> bool -> bool -> trace 'regval -> bool
+let cheri_axioms ISA is_fetch has_ex invokes_caps t =
+  store_cap_mem_axiom ISA t &&
+  store_cap_reg_axiom ISA has_ex invokes_caps t &&
+  read_reg_axiom ISA has_ex t &&
+  load_mem_axiom ISA is_fetch t &&
+  store_tag_axiom ISA t &&
+  store_mem_axiom ISA t

@@ -1,0 +1,147 @@
+open import Pervasives_extra
+open import Sail2_values
+open import Sail2_prompt_monad
+
+type perms =
+  <| permit_ccall : bool;
+     permit_execute : bool;
+     permit_load : bool;
+     permit_load_capability : bool;
+     permit_seal : bool;
+     permit_store : bool;
+     permit_store_capability : bool;
+     permit_store_local_capability : bool;
+     permit_system_access : bool;
+     permit_unseal : bool |>
+
+class (Capability 'c)
+  val is_tagged : 'c -> bool
+  val is_sealed : 'c -> bool
+  val get_mem_region : 'c -> set nat
+  val get_obj_type : 'c -> nat
+  val get_perms : 'c -> perms
+  val get_cursor : 'c -> nat
+  val get_global : 'c -> bool
+  val set_tag : 'c -> bool -> 'c
+  val set_seal : 'c -> bool -> 'c
+  val set_obj_type : 'c -> nat -> 'c
+  val set_perms : 'c -> perms -> 'c
+  val set_global : 'c -> bool -> 'c
+  val cap_of_mem_bytes : list memory_byte -> bitU -> maybe 'c
+end
+
+val seal : forall 'cap. Capability 'cap => 'cap -> nat -> 'cap
+let seal c obj_type = set_seal (set_obj_type c obj_type) true
+
+val unseal : forall 'cap. Capability 'cap => 'cap -> bool -> 'cap
+let unseal c global = set_seal (set_obj_type (set_global c (global && get_global c)) 0) false
+
+val leq_perms : perms -> perms -> bool
+let leq_perms p1 p2 =
+  (p1.permit_ccall --> p2.permit_ccall) &&
+  (p1.permit_execute --> p2.permit_execute) &&
+  (p1.permit_load --> p2.permit_load) &&
+  (p1.permit_load_capability --> p2.permit_load_capability) &&
+  (p1.permit_store --> p2.permit_store) &&
+  (p1.permit_store_capability --> p2.permit_store_capability) &&
+  (p1.permit_store_local_capability --> p2.permit_store_local_capability) &&
+  (p1.permit_system_access --> p2.permit_system_access) &&
+  (p1.permit_unseal --> p2.permit_unseal)
+
+val leq_cap : forall 'cap. Capability 'cap, Eq 'cap => 'cap -> 'cap -> bool
+let leq_cap c1 c2 =
+  (c1 = c2) ||
+  (not (is_tagged c1)) ||
+    ((is_tagged c2) &&
+     (not (is_sealed c1) && not (is_sealed c2)) &&
+     ((get_mem_region c1) subset (get_mem_region c2)) &&
+     (get_global c1 --> get_global c2) &&
+     (leq_perms (get_perms c1) (get_perms c2)))
+
+val invokable : forall 'cap. Capability 'cap => 'cap -> 'cap -> bool
+let invokable cc cd =
+  let pc = get_perms cc in
+  let pd = get_perms cd in
+  is_tagged cc && is_tagged cd &&
+  is_sealed cc && is_sealed cd &&
+  pc.permit_ccall && pd.permit_ccall &&
+  get_obj_type cc = get_obj_type cd &&
+  pc.permit_execute && (get_cursor cc IN get_mem_region cc) &&
+  not pd.permit_execute
+
+(* Derivation of capabilities, bounded by derivation depth to guarantee termination *)
+val cap_derivable_bounded : forall 'cap. Capability 'cap, SetType 'cap, Eq 'cap => nat -> set 'cap -> 'cap -> bool
+let rec cap_derivable_bounded n C c = match n with
+  | 0 -> (c IN C)
+  | n+1 ->
+     (exists c'. cap_derivable_bounded n C c' && leq_cap c c') ||
+     (exists c' c''.
+        cap_derivable_bounded n C c' &&
+        cap_derivable_bounded n C c'' &&
+        is_tagged c' && is_tagged c'' && not (is_sealed c'') &&
+        (is_sealed c' && (get_perms c'').permit_unseal && get_obj_type c' = get_cursor c'' && unseal c' (get_global c'') = c ||
+         not (is_sealed c') && (get_perms c'').permit_seal && seal c' (get_cursor c'') = c))
+end
+
+declare termination_argument cap_derivable_bounded = automatic
+
+(* TODO: Prove an upper bound for the derivation depth.  For a finite set of n
+   capabilities, it seems a derivation depth of n+1 should be enough: If all
+   but one capabilities in C are sealed, up to n-1 unsealing operations and
+   possibly a restriction and a sealing operation might be necessary to derive
+   the desired capability. *)
+let cap_derivable C c = (exists n. cap_derivable_bounded n C c)
+
+val reads_from_reg : forall 'regval. event 'regval -> maybe register_name
+let reads_from_reg e = match e with
+  | E_read_reg r _ -> Just r
+  | _ -> Nothing
+end
+
+val reads_reg_caps : forall 'regval 'cap. Capability 'cap, SetType 'cap =>
+  ('regval -> set 'cap) -> event 'regval -> set 'cap
+let reads_reg_caps caps_of_regval e = match e with
+  | E_read_reg _ v -> Set.filter is_tagged (caps_of_regval v)
+  | _ -> Set.empty
+end
+
+val writes_to_reg : forall 'regval. event 'regval -> maybe register_name
+let writes_to_reg e = match e with
+  | E_write_reg r _ -> Just r
+  | _ -> Nothing
+end
+
+val writes_reg_caps : forall 'regval 'cap. Capability 'cap, SetType 'cap =>
+  ('regval -> set 'cap) -> event 'regval -> set 'cap
+let writes_reg_caps caps_of_regval e = match e with
+  | E_write_reg _ v -> Set.filter is_tagged (caps_of_regval v)
+  | _ -> Set.empty
+end
+
+val reads_mem_val : forall 'regval. event 'regval -> maybe (nat * nat * list memory_byte * bitU)
+let reads_mem_val e = match e with
+  | E_read_memt _ addr sz (v, t) -> Just (addr, sz, v, t)
+  | E_read_mem _ addr sz v -> Just (addr, sz, v, B0)
+  | _ -> Nothing
+end
+
+val reads_mem_cap : forall 'regval 'cap. Capability 'cap =>
+  event 'regval -> maybe (nat * nat * 'cap)
+let reads_mem_cap e =
+  Maybe.bind (reads_mem_val e) (fun (addr, sz, v, t) ->
+  Maybe.bind (cap_of_mem_bytes v t) (fun c ->
+  if is_tagged c then Just (addr, sz, c) else Nothing))
+
+val writes_mem_val : forall 'regval. event 'regval -> maybe (nat * nat * list memory_byte * bitU)
+let writes_mem_val e = match e with
+  | E_write_memt _ addr sz v t _ -> Just (addr, sz, v, t)
+  | E_write_mem _ addr sz v _ -> Just (addr, sz, v, B0)
+  | _ -> Nothing
+end
+
+val writes_mem_cap : forall 'regval 'cap. Capability 'cap =>
+  event 'regval -> maybe (nat * nat * 'cap)
+let writes_mem_cap e =
+  Maybe.bind (writes_mem_val e) (fun (addr, sz, v, t) ->
+  Maybe.bind (cap_of_mem_bytes v t) (fun c ->
+  if is_tagged c then Just (addr, sz, c) else Nothing))
