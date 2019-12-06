@@ -1,4 +1,6 @@
 open Yojson.Basic.Util
+open Arch
+open Lemma
 
 module StringSet = Set.Make(String)
 module StringMap = Map.Make(String)
