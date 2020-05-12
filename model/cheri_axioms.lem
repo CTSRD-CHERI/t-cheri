@@ -34,9 +34,6 @@ let reads_mem_cap_at_idx i t = Maybe.bind (index t i) reads_mem_cap
 let reads_from_reg_at_idx i t = Maybe.bind (index t i) reads_from_reg
 let reads_reg_caps_at_idx ISA i t = maybe Set.empty (reads_reg_caps ISA.caps_of_regval) (index t i)
 
-val address_range : nat -> nat -> list nat
-let address_range start len = genlist (fun n -> start + n) len
-
 val address_tag_aligned : forall 'cap 'regval 'instr 'e.
   isa 'cap 'regval 'instr 'e -> nat -> bool
 let address_tag_aligned ISA addr = (addr mod ISA.tag_granule = 0)

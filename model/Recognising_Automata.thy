@@ -1470,7 +1470,7 @@ begin
 
 definition paddr_in_mem_region :: "'cap \<Rightarrow> acctype \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> bool" where
   "paddr_in_mem_region c acctype paddr sz =
-     (\<exists>vaddr. set (address_range vaddr sz) \<subseteq> get_mem_region_method CC c \<and>
+     (\<exists>vaddr. set (address_range vaddr sz) \<subseteq> get_mem_region CC c \<and>
               translate_address ISA vaddr acctype [] = Some paddr)"
 
 definition has_access_permission :: "perms \<Rightarrow> acctype \<Rightarrow> bool \<Rightarrow> bool \<Rightarrow> bool" where

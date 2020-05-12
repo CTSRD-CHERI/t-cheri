@@ -35,6 +35,19 @@ lemma leq_cap_tag_imp[intro]:
   using assms
   by (auto simp: leq_cap_def)
 
+lemma address_range_upt[simp]: "address_range start len = [start ..< start + len]"
+  by (induction len) (auto simp: address_range_def)
+
+lemma get_mem_region_base_upt_top:
+  "get_mem_region CC c = {get_base_method CC c ..< get_top_method CC c}"
+  by (auto simp: get_mem_region_def)
+
+lemma leq_cap_get_mem_region_subseteq:
+  assumes "leq_cap CC c c'" and "is_tagged_method CC c"
+  shows "get_mem_region CC c \<subseteq> get_mem_region CC c'"
+  using assms
+  by (auto simp: leq_cap_def get_mem_region_base_upt_top)
+
 lemma derivable_mono:
   assumes "C \<subseteq> C'"
   shows "derivable C \<subseteq> derivable C'"

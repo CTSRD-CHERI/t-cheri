@@ -98,7 +98,7 @@ inductive_set reachable_caps :: "'regs sequential_state \<Rightarrow> 'cap set" 
     "\<lbrakk>get_aligned_mem_cap addr (tag_granule ISA) s = Some c;
       s_translate_address vaddr Load s = Some addr;
       c' \<in> reachable_caps s; is_tagged_method CC c'; \<not>is_sealed_method CC c';
-      set (address_range vaddr (tag_granule ISA)) \<subseteq> get_mem_region_method CC c';
+      set (address_range vaddr (tag_granule ISA)) \<subseteq> get_mem_region CC c';
       permit_load_capability (get_perms_method CC c');
       is_tagged_method CC c\<rbrakk>
      \<Longrightarrow> c \<in> reachable_caps s"
@@ -497,7 +497,7 @@ proof (induction i rule: less_induct)
           where vaddr: "translate_address ISA vaddr Load (take j t) = Some paddr"
             and c': "c' \<in> derivable (available_caps CC ISA j t)"
                     "is_tagged_method CC c'" "\<not>is_sealed_method CC c'"
-                    "set (address_range vaddr sz) \<subseteq> get_mem_region_method CC c'"
+                    "set (address_range vaddr sz) \<subseteq> get_mem_region CC c'"
                     "permit_load (get_perms_method CC c')"
                     "permit_load_capability (get_perms_method CC c')"
             and sz: "sz = tag_granule ISA"

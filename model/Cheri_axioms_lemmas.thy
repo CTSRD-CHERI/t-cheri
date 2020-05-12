@@ -225,7 +225,7 @@ lemma load_mem_axiomE:
   where "cap_derivable CC (available_caps CC ISA i t) c'"
     and "is_tagged_method CC c'" and "\<not>is_sealed_method CC c'"
     and "translate_address ISA vaddr (if is_fetch then Fetch else Load) (take i t) = Some paddr"
-    and "set (address_range vaddr sz) \<subseteq> get_mem_region_method CC c'"
+    and "set (address_range vaddr sz) \<subseteq> get_mem_region CC c'"
     and "if is_fetch then permit_execute (get_perms_method CC c') else permit_load (get_perms_method CC c')"
     and "is_fetch \<longrightarrow> tag = B0"
     and "tag \<noteq> B0 \<longrightarrow> permit_load_capability (get_perms_method CC c') \<and> sz = tag_granule ISA \<and> address_tag_aligned ISA paddr"

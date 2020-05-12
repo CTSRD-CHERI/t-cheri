@@ -17,7 +17,8 @@ type perms =
 class (Capability 'c)
   val is_tagged : 'c -> bool
   val is_sealed : 'c -> bool
-  val get_mem_region : 'c -> set nat
+  val get_base : 'c -> nat
+  val get_top : 'c -> nat
   val get_obj_type : 'c -> nat
   val get_perms : 'c -> perms
   val get_cursor : 'c -> nat
@@ -35,6 +36,15 @@ let seal c obj_type = set_seal (set_obj_type c obj_type) true
 
 val unseal : forall 'cap. Capability 'cap => 'cap -> bool -> 'cap
 let unseal c global = set_seal (set_obj_type (set_global c (global && get_global c)) 0) false
+
+val address_range : nat -> nat -> list nat
+let address_range start len = genlist (fun n -> start + n) len
+
+val get_mem_region : forall 'cap. Capability 'cap => 'cap -> set nat
+let get_mem_region c =
+  if get_top c < get_base c then {} else
+  let len = get_top c - get_base c in
+  Set.fromList (address_range (get_base c) len)
 
 val leq_perms : perms -> perms -> bool
 let leq_perms p1 p2 =
@@ -54,7 +64,9 @@ let leq_cap c1 c2 =
   (not (is_tagged c1)) ||
     ((is_tagged c2) &&
      (not (is_sealed c1) && not (is_sealed c2)) &&
-     ((get_mem_region c1) subset (get_mem_region c2)) &&
+     (get_base c1 >= get_base c2) &&
+     (get_top c1 <= get_top c2) &&
+     (get_base c1 <= get_top c1) &&
      (get_global c1 --> get_global c2) &&
      (leq_perms (get_perms c1) (get_perms c2)))
 
