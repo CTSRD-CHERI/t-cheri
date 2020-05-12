@@ -91,7 +91,7 @@ inductive_set reachable_caps :: "'regs sequential_state \<Rightarrow> 'cap set" 
   Reg: "\<lbrakk>c \<in> get_reg_caps r s; r \<notin> privileged_regs ISA; is_tagged_method CC c\<rbrakk> \<Longrightarrow> c \<in> reachable_caps s"
 | SysReg:
     "\<lbrakk>c \<in> get_reg_caps r s; r \<in> privileged_regs ISA; c' \<in> reachable_caps s;
-      permit_system_access (get_perms_method CC c'); \<not>is_sealed_method CC c';
+      permits_system_access_method CC c'; \<not>is_sealed_method CC c';
       is_tagged_method CC c\<rbrakk>
      \<Longrightarrow> c \<in> reachable_caps s"
 | Mem:
@@ -99,17 +99,17 @@ inductive_set reachable_caps :: "'regs sequential_state \<Rightarrow> 'cap set" 
       s_translate_address vaddr Load s = Some addr;
       c' \<in> reachable_caps s; is_tagged_method CC c'; \<not>is_sealed_method CC c';
       set (address_range vaddr (tag_granule ISA)) \<subseteq> get_mem_region CC c';
-      permit_load_capability (get_perms_method CC c');
+      permits_load_capability_method CC c';
       is_tagged_method CC c\<rbrakk>
      \<Longrightarrow> c \<in> reachable_caps s"
 | Restrict: "\<lbrakk>c \<in> reachable_caps s; leq_cap CC c' c\<rbrakk> \<Longrightarrow> c' \<in> reachable_caps s"
 | Seal:
     "\<lbrakk>c' \<in> reachable_caps s; c'' \<in> reachable_caps s; is_tagged_method CC c'; is_tagged_method CC c'';
-      \<not>is_sealed_method CC c''; \<not>is_sealed_method CC c'; permit_seal (get_perms_method CC c'')\<rbrakk> \<Longrightarrow>
+      \<not>is_sealed_method CC c''; \<not>is_sealed_method CC c'; permits_seal_method CC c''\<rbrakk> \<Longrightarrow>
      seal CC c' (get_cursor_method CC c'') \<in> reachable_caps s"
 | Unseal:
     "\<lbrakk>c' \<in> reachable_caps s; c'' \<in> reachable_caps s; is_tagged_method CC c'; is_tagged_method CC c'';
-      \<not>is_sealed_method CC c''; is_sealed_method CC c'; permit_unseal (get_perms_method CC c'');
+      \<not>is_sealed_method CC c''; is_sealed_method CC c'; permits_unseal_method CC c'';
       get_obj_type_method CC c' = get_cursor_method CC c''\<rbrakk> \<Longrightarrow>
      unseal CC c' (get_global CC c'') \<in> reachable_caps s"
 
@@ -273,7 +273,7 @@ qed
 lemma system_access_permitted_at_idx_available_caps:
   assumes "system_access_permitted_before_idx CC ISA i t"
   obtains c where "c \<in> available_caps CC ISA i t" and "is_tagged_method CC c"
-    and "\<not>is_sealed_method CC c" and "permit_system_access (get_perms_method CC c)"
+    and "\<not>is_sealed_method CC c" and "permits_system_access_method CC c"
   using assms
   by (auto simp: system_access_permitted_before_idx_def; blast)
 
@@ -439,7 +439,7 @@ proof (induction i rule: less_induct)
           proof cases
             assume r: "r \<in> privileged_regs ISA"
             then obtain c' where c': "c' \<in> reachable_caps s" and "is_tagged_method CC c'"
-              and "\<not>is_sealed_method CC c'" and p: "permit_system_access (get_perms_method CC c')"
+              and "\<not>is_sealed_method CC c'" and p: "permits_system_access_method CC c'"
               using Reg less.IH[OF \<open>j < i\<close>] derivable_refl[of "available_caps CC ISA j t"]
               by (auto elim!: system_access_permitted_at_idx_available_caps)
             then show ?thesis
@@ -498,8 +498,8 @@ proof (induction i rule: less_induct)
             and c': "c' \<in> derivable (available_caps CC ISA j t)"
                     "is_tagged_method CC c'" "\<not>is_sealed_method CC c'"
                     "set (address_range vaddr sz) \<subseteq> get_mem_region CC c'"
-                    "permit_load (get_perms_method CC c')"
-                    "permit_load_capability (get_perms_method CC c')"
+                    "permits_load_method CC c'"
+                    "permits_load_capability_method CC c'"
             and sz: "sz = tag_granule ISA"
             and aligned: "address_tag_aligned ISA paddr"
           using read t axioms \<open>j < length t\<close> \<open>is_tagged_method CC c\<close>
@@ -536,7 +536,7 @@ lemma put_regval_get_mem_cap:
 
 definition system_access_reachable :: "'regs sequential_state \<Rightarrow> bool" where
   "system_access_reachable s \<equiv> \<exists>c \<in> reachable_caps s.
-     permit_system_access (get_perms_method CC c) \<and> \<not>is_sealed_method CC c"
+     permits_system_access_method CC c \<and> \<not>is_sealed_method CC c"
 
 lemma get_reg_cap_intra_domain_trace_reachable:
   assumes r: "c \<in> get_reg_caps r s'"
@@ -559,7 +559,7 @@ proof -
     proof cases
       assume r: "r \<in> privileged_regs ISA"
       with priv obtain c' where c': "c' \<in> reachable_caps s"
-        and "permit_system_access (get_perms_method CC c')" and "\<not>is_sealed_method CC c'"
+        and "permits_system_access_method CC c'" and "\<not>is_sealed_method CC c'"
         by (auto simp: system_access_reachable_def)
       then show ?thesis using Init c tag by (intro reachable_caps.SysReg[OF _ r c']) auto
     next

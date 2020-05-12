@@ -2,17 +2,7 @@ open import Pervasives_extra
 open import Sail2_values
 open import Sail2_prompt_monad
 
-type perms =
-  <| permit_ccall : bool;
-     permit_execute : bool;
-     permit_load : bool;
-     permit_load_capability : bool;
-     permit_seal : bool;
-     permit_store : bool;
-     permit_store_capability : bool;
-     permit_store_local_capability : bool;
-     permit_system_access : bool;
-     permit_unseal : bool |>
+type perms = list bool
 
 class (Capability 'c)
   val is_tagged : 'c -> bool
@@ -29,6 +19,16 @@ class (Capability 'c)
   val set_perms : 'c -> perms -> 'c
   val set_global : 'c -> bool -> 'c
   val cap_of_mem_bytes : list memory_byte -> bitU -> maybe 'c
+  val permits_execute : 'c -> bool
+  val permits_ccall : 'c -> bool
+  val permits_load : 'c -> bool
+  val permits_load_capability : 'c -> bool
+  val permits_seal : 'c -> bool
+  val permits_store : 'c -> bool
+  val permits_store_capability : 'c -> bool
+  val permits_store_local_capability : 'c -> bool
+  val permits_system_access : 'c -> bool
+  val permits_unseal : 'c -> bool
 end
 
 val seal : forall 'cap. Capability 'cap => 'cap -> nat -> 'cap
@@ -46,17 +46,17 @@ let get_mem_region c =
   let len = get_top c - get_base c in
   Set.fromList (address_range (get_base c) len)
 
+val leq_bools : list bool -> list bool -> bool
+let rec leq_bools l1 l2 = match (l1, l2) with
+  | ([], []) -> true
+  | (_::_, []) -> false
+  | ([], _::_) -> false
+  | (b1 :: l1, b2 :: l2) -> (b1 --> b2) && leq_bools l1 l2
+end
+declare termination_argument leq_bools = automatic
+
 val leq_perms : perms -> perms -> bool
-let leq_perms p1 p2 =
-  (p1.permit_ccall --> p2.permit_ccall) &&
-  (p1.permit_execute --> p2.permit_execute) &&
-  (p1.permit_load --> p2.permit_load) &&
-  (p1.permit_load_capability --> p2.permit_load_capability) &&
-  (p1.permit_store --> p2.permit_store) &&
-  (p1.permit_store_capability --> p2.permit_store_capability) &&
-  (p1.permit_store_local_capability --> p2.permit_store_local_capability) &&
-  (p1.permit_system_access --> p2.permit_system_access) &&
-  (p1.permit_unseal --> p2.permit_unseal)
+let leq_perms p1 p2 = leq_bools p1 p2
 
 val leq_cap : forall 'cap. Capability 'cap, Eq 'cap => 'cap -> 'cap -> bool
 let leq_cap c1 c2 =
@@ -72,14 +72,12 @@ let leq_cap c1 c2 =
 
 val invokable : forall 'cap. Capability 'cap => 'cap -> 'cap -> bool
 let invokable cc cd =
-  let pc = get_perms cc in
-  let pd = get_perms cd in
   is_tagged cc && is_tagged cd &&
   is_sealed cc && is_sealed cd &&
-  pc.permit_ccall && pd.permit_ccall &&
+  permits_ccall cc && permits_ccall cd &&
   get_obj_type cc = get_obj_type cd &&
-  pc.permit_execute && (get_cursor cc IN get_mem_region cc) &&
-  not pd.permit_execute
+  permits_execute cc && (get_cursor cc IN get_mem_region cc) &&
+  not (permits_execute cd)
 
 (* Derivation of capabilities, bounded by derivation depth to guarantee termination *)
 val cap_derivable_bounded : forall 'cap. Capability 'cap, SetType 'cap, Eq 'cap => nat -> set 'cap -> 'cap -> bool
@@ -91,8 +89,8 @@ let rec cap_derivable_bounded n C c = match n with
         cap_derivable_bounded n C c' &&
         cap_derivable_bounded n C c'' &&
         is_tagged c' && is_tagged c'' && not (is_sealed c'') &&
-        (is_sealed c' && (get_perms c'').permit_unseal && get_obj_type c' = get_cursor c'' && unseal c' (get_global c'') = c ||
-         not (is_sealed c') && (get_perms c'').permit_seal && seal c' (get_cursor c'') = c))
+        (is_sealed c' && permits_unseal c'' && get_obj_type c' = get_cursor c'' && unseal c' (get_global c'') = c ||
+         not (is_sealed c') && permits_seal c'' && seal c' (get_cursor c'') = c))
 end
 
 declare termination_argument cap_derivable_bounded = automatic

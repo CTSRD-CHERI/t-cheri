@@ -16,12 +16,12 @@ inductive_set derivable :: "'cap set \<Rightarrow> 'cap set" for C :: "'cap set"
 | Restrict: "c' \<in> derivable C \<Longrightarrow> leq_cap CC c c' \<Longrightarrow> c \<in> derivable C"
 | Unseal:
     "\<lbrakk>c' \<in> derivable C; c'' \<in> derivable C; is_tagged_method CC c'; is_tagged_method CC c'';
-      \<not>is_sealed_method CC c''; is_sealed_method CC c'; permit_unseal (get_perms_method CC c'');
+      \<not>is_sealed_method CC c''; is_sealed_method CC c'; permits_unseal_method CC c'';
       get_obj_type_method CC c' = get_cursor_method CC c''\<rbrakk> \<Longrightarrow>
      unseal CC c' (get_global_method CC c'') \<in> derivable C"
 | Seal:
     "\<lbrakk>c' \<in> derivable C; c'' \<in> derivable C; is_tagged_method CC c'; is_tagged_method CC c'';
-      \<not>is_sealed_method CC c''; \<not>is_sealed_method CC c'; permit_seal (get_perms_method CC c'')\<rbrakk> \<Longrightarrow>
+      \<not>is_sealed_method CC c''; \<not>is_sealed_method CC c'; permits_seal_method CC c''\<rbrakk> \<Longrightarrow>
      seal CC c' (get_cursor_method CC c'') \<in> derivable C"
 
 lemma leq_cap_refl[simp, intro]:

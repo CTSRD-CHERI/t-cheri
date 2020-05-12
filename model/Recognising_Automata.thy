@@ -1473,17 +1473,17 @@ definition paddr_in_mem_region :: "'cap \<Rightarrow> acctype \<Rightarrow> nat 
      (\<exists>vaddr. set (address_range vaddr sz) \<subseteq> get_mem_region CC c \<and>
               translate_address ISA vaddr acctype [] = Some paddr)"
 
-definition has_access_permission :: "perms \<Rightarrow> acctype \<Rightarrow> bool \<Rightarrow> bool \<Rightarrow> bool" where
-  "has_access_permission perms acctype is_cap is_local_cap =
+definition has_access_permission :: "'cap \<Rightarrow> acctype \<Rightarrow> bool \<Rightarrow> bool \<Rightarrow> bool" where
+  "has_access_permission c acctype is_cap is_local_cap =
      (case acctype of
-        Fetch \<Rightarrow> permit_execute perms
-      | Load \<Rightarrow> permit_load perms \<and> (is_cap \<longrightarrow> permit_load_capability perms)
-      | Store \<Rightarrow> permit_store perms \<and> (is_cap \<longrightarrow> permit_store_capability perms) \<and> (is_local_cap \<longrightarrow> permit_store_local_capability perms))"
+        Fetch \<Rightarrow> permits_execute_method CC c
+      | Load \<Rightarrow> permits_load_method CC c \<and> (is_cap \<longrightarrow> permits_load_capability_method CC c)
+      | Store \<Rightarrow> permits_store_method CC c \<and> (is_cap \<longrightarrow> permits_store_capability_method CC c) \<and> (is_local_cap \<longrightarrow> permits_store_local_capability_method CC c))"
 
 definition authorises_access :: "'cap \<Rightarrow> acctype \<Rightarrow> bool \<Rightarrow> bool \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> bool" where
   "authorises_access c acctype is_cap is_local_cap paddr sz =
      (is_tagged_method CC c \<and> \<not>is_sealed_method CC c \<and> paddr_in_mem_region c acctype paddr sz \<and>
-      has_access_permission (get_perms_method CC c) acctype is_cap is_local_cap)"
+      has_access_permission c acctype is_cap is_local_cap)"
 
 definition access_enabled :: "('cap, 'regval) axiom_state \<Rightarrow> acctype \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> memory_byte list \<Rightarrow> bitU \<Rightarrow> bool" where
   "access_enabled s acctype paddr sz v tag =

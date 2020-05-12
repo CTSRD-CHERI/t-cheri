@@ -52,13 +52,13 @@ let system_access_permitted_before_idx ISA i t =
      c IN (reads_reg_caps_at_idx ISA j t) &&
      r IN ISA.PCC && r NIN ISA.privileged_regs &&
      is_tagged c && not (is_sealed c) &&
-     (get_perms c).permit_system_access)
+     permits_system_access c)
 
 val permits_cap_load : forall 'cap. Capability 'cap => 'cap -> nat -> nat -> bool
 let permits_cap_load c vaddr sz =
   (is_tagged c && not (is_sealed c) &&
    Set.fromList (address_range vaddr sz) subset (get_mem_region c) &&
-   (get_perms c).permit_load_capability)
+   permits_load_capability c)
 
 val available_caps : forall 'cap 'regval 'instr 'e. Capability 'cap, Eq 'cap, SetType 'cap =>
   isa 'cap 'regval 'instr 'e -> nat -> trace 'regval -> set 'cap
@@ -139,9 +139,9 @@ let load_mem_axiom ISA is_fetch t =
         cap_derivable (available_caps ISA i t) c' && is_tagged c' && not (is_sealed c') &&
         ISA.translate_address vaddr (if is_fetch then Fetch else Load) (take i t) = Just paddr &&
         Set.fromList (address_range vaddr sz) subset (get_mem_region c') &&
-        (if is_fetch then (get_perms c').permit_execute else (get_perms c').permit_load) &&
+        (if is_fetch then permits_execute c' else permits_load c') &&
 	(is_fetch --> tag = B0) &&
-        (tag <> B0 --> (get_perms c').permit_load_capability && sz = ISA.tag_granule && address_tag_aligned ISA paddr)))
+        (tag <> B0 --> permits_load_capability c' && sz = ISA.tag_granule && address_tag_aligned ISA paddr)))
 
 val mem_val_is_cap : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
   isa 'cap 'regval 'instr 'e -> list memory_byte -> bitU -> bool
@@ -172,9 +172,9 @@ let store_mem_axiom ISA t =
         cap_derivable (available_caps ISA i t) c' && is_tagged c' && not (is_sealed c') &&
         ISA.translate_address vaddr Store (take i t) = Just paddr &&
         Set.fromList (address_range vaddr sz) subset (get_mem_region c') &&
-        (get_perms c').permit_store &&
-        ((mem_val_is_cap ISA v tag && tag = B1) --> (get_perms c').permit_store_capability) &&
-        (mem_val_is_local_cap ISA v tag && tag = B1 --> (get_perms c').permit_store_local_capability)))
+        permits_store c' &&
+        ((mem_val_is_cap ISA v tag && tag = B1) --> permits_store_capability c') &&
+        (mem_val_is_local_cap ISA v tag && tag = B1 --> permits_store_local_capability c')))
 
 val cheri_axioms : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, SetType 'regval, Eq 'cap, Eq 'regval =>
   isa 'cap 'regval 'instr 'e -> bool -> bool -> bool -> trace 'regval -> bool

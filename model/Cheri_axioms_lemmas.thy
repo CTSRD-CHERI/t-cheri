@@ -166,7 +166,7 @@ fun allows_system_reg_access :: "register_name set \<Rightarrow> 'regval event \
   "allows_system_reg_access accessible_regs (E_read_reg r v) =
      (\<exists>c \<in> caps_of_regval ISA v.
         is_tagged_method CC c \<and> \<not>is_sealed_method CC c \<and>
-        permit_system_access (get_perms_method CC c) \<and>
+        permits_system_access_method CC c \<and>
         r \<in> PCC ISA \<inter> accessible_regs)"
 | "allows_system_reg_access accessible_regs _ = False"
 
@@ -226,9 +226,9 @@ lemma load_mem_axiomE:
     and "is_tagged_method CC c'" and "\<not>is_sealed_method CC c'"
     and "translate_address ISA vaddr (if is_fetch then Fetch else Load) (take i t) = Some paddr"
     and "set (address_range vaddr sz) \<subseteq> get_mem_region CC c'"
-    and "if is_fetch then permit_execute (get_perms_method CC c') else permit_load (get_perms_method CC c')"
+    and "if is_fetch then permits_execute_method CC c' else permits_load_method CC c'"
     and "is_fetch \<longrightarrow> tag = B0"
-    and "tag \<noteq> B0 \<longrightarrow> permit_load_capability (get_perms_method CC c') \<and> sz = tag_granule ISA \<and> address_tag_aligned ISA paddr"
+    and "tag \<noteq> B0 \<longrightarrow> permits_load_capability_method CC c' \<and> sz = tag_granule ISA \<and> address_tag_aligned ISA paddr"
   using assms
   unfolding load_mem_axiom_def
   by blast
