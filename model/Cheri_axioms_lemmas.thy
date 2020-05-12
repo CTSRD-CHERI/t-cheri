@@ -217,6 +217,22 @@ abbreviation instr_sem_ISA ("\<lbrakk>_\<rbrakk>") where "\<lbrakk>instr\<rbrakk
 
 end
 
+lemma load_mem_axiomE:
+  assumes "load_mem_axiom CC ISA is_fetch t"
+    and "reads_mem_val_at_idx i t = Some (paddr, sz, v, tag)"
+    and "paddr \<notin> translation_tables ISA (take i t)"
+  obtains c' vaddr
+  where "cap_derivable CC (available_caps CC ISA i t) c'"
+    and "is_tagged_method CC c'" and "\<not>is_sealed_method CC c'"
+    and "translate_address ISA vaddr (if is_fetch then Fetch else Load) (take i t) = Some paddr"
+    and "set (address_range vaddr sz) \<subseteq> get_mem_region_method CC c'"
+    and "if is_fetch then permit_execute (get_perms_method CC c') else permit_load (get_perms_method CC c')"
+    and "is_fetch \<longrightarrow> tag = B0"
+    and "tag \<noteq> B0 \<longrightarrow> permit_load_capability (get_perms_method CC c') \<and> sz = tag_granule ISA \<and> address_tag_aligned ISA paddr"
+  using assms
+  unfolding load_mem_axiom_def
+  by blast
+
 (*lemma store_cap_reg_axiom_invoked_caps_mono:
   fixes invoked_caps :: "('cap \<times> 'cap) set"
   assumes "store_cap_reg_axiom CC ISA has_ex invoked_caps t"

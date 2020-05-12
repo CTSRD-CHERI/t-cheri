@@ -503,8 +503,8 @@ proof (induction i rule: less_induct)
             and sz: "sz = tag_granule ISA"
             and aligned: "address_tag_aligned ISA paddr"
           using read t axioms \<open>j < length t\<close> \<open>is_tagged_method CC c\<close>
-          unfolding cheri_axioms_def load_mem_axiom_def reads_mem_cap_def
-          by (fastforce simp: reads_mem_val_at_idx_def bind_eq_Some_conv cap_derivable_iff_derivable split: if_splits)
+          unfolding cheri_axioms_def
+          by (auto elim!: load_mem_axiomE simp: reads_mem_val_at_idx_def cap_derivable_iff_derivable)
         have s_vaddr: "s_translate_address vaddr Load s = Some paddr"
           using vaddr t \<open>j < length t\<close>
           by (blast intro: translate_address_sound[of "take j t"] elim: runTraceS_nth_split)

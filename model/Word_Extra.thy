@@ -5,7 +5,6 @@ theory Word_Extra
 imports 
   Main
   "HOL-Word.Word"
-  "HOL-Lattice.Lattice"
   "HOL-Eisbach.Eisbach_Tools"
 begin
 (*>*)
@@ -397,12 +396,12 @@ using nat_diff_distrib'
 by auto
 
 lemma uint_not_mask:
-  shows "uint (NOT mask n::'a::len word) = 
+  shows "uint (NOT (mask n)::'a::len word) = 
          (if LENGTH('a) \<le> n then 0 else 2 ^ LENGTH('a) - 2 ^ n)"
 by (auto simp: uint_not uint_max_word uint_mask)
 
 corollary unat_not_mask:
-  shows "unat (NOT mask n::'a::len word) = 
+  shows "unat (NOT (mask n)::'a::len word) = 
          (if LENGTH('a) \<le> n then 0 else 2 ^ LENGTH('a) - 2 ^ n)"
 by (auto simp: unat_not unat_max_word unat_mask)
 
@@ -433,74 +432,74 @@ lemma mask_and_mask [simp]:
 by (intro word_eqI) (auto simp: word_size word_ops_nth_size)
 
 lemma not_mask_and_not_mask [simp]:
-  shows "NOT mask n AND NOT mask m = NOT mask (max m n)"
+  shows "NOT (mask n) AND NOT (mask m) = NOT (mask (max m n))"
 by (intro word_eqI) (auto simp: word_size word_ops_nth_size)
 
 lemma mask_and_not_mask [simp]:
   assumes "n \<le> m"
-  shows "mask n AND NOT mask m = 0"
+  shows "(mask n) AND NOT (mask m) = 0"
 using assms
 by (intro word_eqI) (auto simp: word_size word_ops_nth_size)
 
 corollary not_mask_and_mask [simp]:
   assumes "m \<le> n"
-  shows "NOT mask n AND mask m = 0"
+  shows "NOT (mask n) AND (mask m) = 0"
 using assms 
 unfolding word_bool_alg.conj.commute[where a="NOT _"]
 by simp
 
 lemma word_and_mask_and_word_and_not_mask [simp]:
-  shows "(x AND mask n) AND (y AND NOT mask n) = 0"
+  shows "(x AND (mask n)) AND (y AND NOT (mask n)) = 0"
 unfolding word_bool_alg.conj.commute[where b="NOT _"]
 unfolding word_bool_alg.conj.assoc[where b="mask _"]
-   word_bool_alg.conj.assoc[where b="NOT mask _", THEN sym]
+   word_bool_alg.conj.assoc[where b="NOT (mask _)", THEN sym]
 by simp
 
 corollary word_and_not_mask_and_word_and_mask [simp]:
-  shows "(x AND NOT mask n) AND (y AND mask n) = 0"
-unfolding word_bool_alg.conj.commute[where a="_ AND NOT mask _"]
+  shows "(x AND NOT (mask n)) AND (y AND (mask n)) = 0"
+unfolding word_bool_alg.conj.commute[where a="_ AND NOT (mask _)"]
 by simp
 
 lemma word_and_not_mask_or_word_and_mask [simp]:
-  shows "(x AND NOT mask n) OR (x AND mask n) = x"
+  shows "(x AND NOT (mask n)) OR (x AND (mask n)) = x"
 by (intro word_eqI)
    (auto simp: word_size word_ops_nth_size)
 
 corollary word_and_mask_or_word_and_not_mask [simp]:
-  shows "(x AND mask n) OR (x AND NOT mask n) = x"
+  shows "(x AND (mask n)) OR (x AND NOT (mask n)) = x"
 using trans[OF word_bool_alg.disj.commute 
                word_and_not_mask_or_word_and_mask] .
 
 lemma word_and_not_mask_plus_word_and_mask [simp]:
-  shows "(x AND NOT mask n) + (x AND mask n) = x"
-using word_plus_and_or[where x="x AND NOT mask n" and y="x AND mask n"]
+  shows "(x AND NOT (mask n)) + (x AND (mask n)) = x"
+using word_plus_and_or[where x="x AND NOT (mask n)" and y="x AND (mask n)"]
 by simp
 
 corollary word_and_mask_plus_word_and_not_mask [simp]:
-  shows "(x AND mask n) + (x AND NOT mask n) = x"
+  shows "(x AND (mask n)) + (x AND NOT (mask n)) = x"
 using trans[OF ab_semigroup_add_class.add.commute
                word_and_not_mask_plus_word_and_mask] .
 
 corollary word_minus_word_and_mask [simp]:
-  shows "x - (x AND mask n) = (x AND NOT mask n)"
+  shows "x - (x AND (mask n)) = (x AND NOT (mask n))"
 by (simp add: diff_eq_eq)
 
 corollary word_minus_word_and_not_mask [simp]:
-  shows "x - (x AND NOT mask n) = (x AND mask n)"
+  shows "x - (x AND NOT (mask n)) = (x AND (mask n))"
 by (simp add: diff_eq_eq)
 
 corollary word_and_mask_minus_word [simp]:
-  shows "(x AND mask n) - x = - (x AND NOT mask n)"
+  shows "(x AND mask n) - x = - (x AND NOT (mask n))"
 by (simp add: diff_eq_eq)
 
 corollary word_and_not_mask_minus_word [simp]:
-  shows "(x AND NOT mask n) - x = - (x AND mask n)"
+  shows "(x AND NOT (mask n)) - x = - (x AND (mask n))"
 by (simp add: diff_eq_eq)
 
 lemma uint_word_and_not_mask_plus_uint_word_and_mask [simp]:
-  shows "uint (x AND NOT mask n) + uint (x AND mask n) = uint x"
+  shows "uint (x AND NOT (mask n)) + uint (x AND (mask n)) = uint x"
 proof -
-  have "x AND NOT mask n \<le> (x AND NOT mask n) + (x AND mask n)"
+  have "x AND NOT (mask n) \<le> (x AND NOT (mask n)) + (x AND (mask n))"
     using word_and_le2
     by auto
   from uint_plus_simple[OF this]
@@ -508,17 +507,17 @@ proof -
 qed
 
 corollary uint_word_and_mask_plus_uint_word_and_not_mask [simp]:
-  shows "uint (x AND mask n) + uint (x AND NOT mask n) = uint x"
+  shows "uint (x AND (mask n)) + uint (x AND NOT (mask n)) = uint x"
 using trans[OF ab_semigroup_add_class.add.commute
                uint_word_and_not_mask_plus_uint_word_and_mask] .
 
 corollary unat_word_and_not_mask_plus_unat_word_and_mask [simp]:
-  shows "unat (x AND NOT mask n) + unat (x AND mask n) = unat x"
+  shows "unat (x AND NOT (mask n)) + unat (x AND (mask n)) = unat x"
 unfolding unat_def
 by (simp add: nat_add_distrib[THEN sym])
 
 corollary unat_word_and_mask_plus_unat_word_and_not_mask [simp]:
-  shows "unat (x AND mask n) + unat (x AND NOT mask n) = unat x"
+  shows "unat (x AND (mask n)) + unat (x AND NOT (mask n)) = unat x"
 unfolding unat_def
 by (simp add: nat_add_distrib[THEN sym])
 
@@ -551,19 +550,19 @@ by simp
 lemma word_and_not_mask [simp]:
   fixes x :: "('a :: len) word"
   assumes "len_of TYPE('a) \<le> m"
-  shows "(x AND NOT mask m) = 0"
+  shows "(x AND NOT (mask m)) = 0"
 using assms
 by (intro word_eqI)
    (auto simp: word_size word_ops_nth_size)
 
 lemma uint_and_not_mask:
   fixes x :: "'a::len word"
-  shows "uint (x AND NOT mask n) = 
+  shows "uint (x AND NOT (mask n)) = 
          (if LENGTH('a) \<le> n then 0 else 2 ^ n * (uint x div 2 ^ n))"
 proof -
-  have "uint (x AND NOT mask n) + uint (x AND mask n) = uint x"
+  have "uint (x AND NOT (mask n)) + uint (x AND mask n) = uint x"
     by simp
-  hence "uint (x AND NOT mask n) = uint x - uint (x AND mask n)"
+  hence "uint (x AND NOT (mask n)) = uint x - uint (x AND mask n)"
     by arith
   also have "... = uint x - uint x mod 2 ^ min n LENGTH('a)"
     by (simp add: uint_and_mask)
@@ -590,7 +589,7 @@ qed
 
 corollary unat_and_not_mask:
   fixes x :: "'a::len word"
-  shows "unat (x AND NOT mask n) = 
+  shows "unat (x AND NOT (mask n)) = 
          (if LENGTH('a) \<le> n then 0 else 2 ^ n * (unat x div 2 ^ n))"
 unfolding unat_def uint_and_not_mask
 by (simp add: nat_div_distrib nat_mult_distrib nat_power_eq)
@@ -644,8 +643,8 @@ using uint_and_mask_plus_uint_and_mask_less_size[OF assms]
 unfolding uint_add_lem .
 
 lemma uint_word_and_mask_plus_word_and_not_mask:
-  shows "uint ((x AND mask n) + (y AND NOT mask n)) = 
-         uint (x AND mask n) + uint (y AND NOT mask n)"
+  shows "uint ((x AND mask n) + (y AND NOT (mask n))) = 
+         uint (x AND mask n) + uint (y AND NOT (mask n))"
 proof (cases "n \<le> LENGTH('a)")
   case True
   hence [simp]: "min n LENGTH('a) = n"
@@ -662,40 +661,40 @@ proof (cases "n \<le> LENGTH('a)")
   have "uint y \<le> 2 ^ LENGTH('a) - 1"
     by auto
   from zdiv_mono1[where b="2 ^ n", OF this]
-  have "uint (y AND NOT mask n) \<le> 2 ^ n * (2 ^ LENGTH('a) div 2 ^ n - 1)"
+  have "uint (y AND NOT (mask n)) \<le> 2 ^ n * (2 ^ LENGTH('a) div 2 ^ n - 1)"
     unfolding uint_and_not_mask
     using True
     by auto
   also have "... = 2 ^ LENGTH('a) - 2 ^ n"
     unfolding right_diff_distrib zmde
     by simp
-  finally have "uint (x AND mask n) + uint (y AND NOT mask n) < 2 ^ LENGTH('a)"
+  finally have "uint (x AND (mask n)) + uint (y AND NOT (mask n)) < 2 ^ LENGTH('a)"
     using x by auto
   from uint_add_lem[THEN iffD1, OF this]
   show ?thesis .
 qed simp
 
 corollary uint_word_and_not_mask_plus_word_and_mask:
-  shows "uint ((x AND NOT mask n) + (y AND mask n)) = 
-         uint (x AND NOT mask n) + uint (y AND mask n)"
+  shows "uint ((x AND NOT (mask n)) + (y AND mask n)) = 
+         uint (x AND NOT (mask n)) + uint (y AND mask n)"
 by (simp add: uint_word_and_mask_plus_word_and_not_mask add.commute)
 
 corollary unat_word_and_mask_plus_word_and_not_mask:
-  shows "unat ((x AND mask n) + (y AND NOT mask n)) = 
-         unat (x AND mask n) + unat (y AND NOT mask n)"
+  shows "unat ((x AND mask n) + (y AND NOT (mask n))) = 
+         unat (x AND mask n) + unat (y AND NOT (mask n))"
 unfolding unat_def uint_word_and_mask_plus_word_and_not_mask
 using nat_add_distrib 
 by auto
 
 corollary unat_word_and_not_mask_plus_word_and_mask:
-  shows "unat ((x AND NOT mask n) + (y AND mask n)) = 
-         unat (x AND NOT mask n) + unat (y AND mask n)"
+  shows "unat ((x AND NOT (mask n)) + (y AND mask n)) = 
+         unat (x AND NOT (mask n)) + unat (y AND mask n)"
 by (simp add: unat_word_and_mask_plus_word_and_not_mask add.commute)
 
 lemma not_mask_eq_plus:
-  shows "x + (y AND NOT mask n) AND NOT mask n = (x AND NOT mask n) + (y AND NOT mask n)"
+  shows "x + (y AND NOT (mask n)) AND NOT (mask n) = (x AND NOT (mask n)) + (y AND NOT (mask n))"
 proof -
-  have "x + (y AND NOT mask n) AND NOT mask n = x + y - (y AND mask n) AND NOT mask n"
+  have "x + (y AND NOT (mask n)) AND NOT (mask n) = x + y - (y AND mask n) AND NOT (mask n)"
     by (simp add: add_diff_eq[THEN sym])
   also have "... = x + y - (y AND mask n) - ((x + y - (y AND mask n)) AND mask n)"
     by simp
@@ -704,27 +703,27 @@ proof -
     by simp
   also have "... = x - (x AND mask n) + y - (y AND mask n)"
     by simp
-  also have "... = (x AND NOT mask n) + (y AND NOT mask n)"
+  also have "... = (x AND NOT (mask n)) + (y AND NOT (mask n))"
     by simp
   finally show ?thesis .
 qed
 
 corollary not_mask_eq_plus_commuted:
-  shows "(x AND NOT mask n) + y AND NOT mask n = (x AND NOT mask n) + (y AND NOT mask n)"
+  shows "(x AND NOT (mask n)) + y AND NOT (mask n) = (x AND NOT (mask n)) + (y AND NOT (mask n))"
 using not_mask_eq_plus[where x=y and y=x]
 by (simp add: add.commute)
 
 lemma not_mask_eq_minus:
-  shows "x - (y AND NOT mask n) AND NOT mask n = (x AND NOT mask n) - (y AND NOT mask n)"
+  shows "x - (y AND NOT (mask n)) AND NOT (mask n) = (x AND NOT (mask n)) - (y AND NOT (mask n))"
 proof -
-  have "x - (y AND NOT mask n) AND NOT mask n = x - y + (y AND mask n) AND NOT mask n"
+  have "x - (y AND NOT (mask n)) AND NOT (mask n) = x - y + (y AND mask n) AND NOT (mask n)"
     by (simp add: diff_diff_eq2[THEN sym] diff_add_eq)
   also have "... = x - y + (y AND mask n) - (x - y + (y AND mask n) AND mask n)"
     by simp
   also have "... = x - y + (y AND mask n) - (x AND mask n)"
     unfolding mask_eqs
     by simp
-  also have "... = (x AND NOT mask n) - (y AND NOT mask n)"
+  also have "... = (x AND NOT (mask n)) - (y AND NOT (mask n))"
     by (simp add: diff_diff_eq2[THEN sym] diff_add_eq)
   finally show ?thesis .
 qed
@@ -760,16 +759,16 @@ qed simp
 corollary word_plus_and_not_mask:
   fixes x y :: "'a::len word"
   assumes "(x AND mask n) + (y AND mask n) \<le> mask n"
-  shows "x + y AND NOT mask n = (x AND NOT mask n) + (y AND NOT mask n)"
+  shows "x + y AND NOT (mask n) = (x AND NOT (mask n)) + (y AND NOT (mask n))"
 proof -
-  have "x + y AND NOT mask n = (x + y) - (x + y AND mask n)"
+  have "x + y AND NOT (mask n) = (x + y) - (x + y AND mask n)"
     by simp
   also have "... = (x + y) - ((x AND mask n) + (y AND mask n))"
     unfolding word_plus_and_mask[OF assms] ..
   also have "... = (x -  (x AND mask n)) + (y - (y AND mask n))"
     using add_diff_eq diff_add_eq diff_diff_add
     by (metis (no_types, hide_lams))
-  also have "... = (x AND NOT mask n) + (y AND NOT mask n)"
+  also have "... = (x AND NOT (mask n)) + (y AND NOT (mask n))"
     by simp
   finally show ?thesis .
 qed
@@ -798,7 +797,7 @@ qed
 lemma word_power_of_two_difference:
   assumes "n \<le> m"
       and "n \<le> LENGTH('a)"
-  shows "(2::'a::len word) ^ m - 2 ^ n = mask m AND NOT mask n"
+  shows "(2::'a::len word) ^ m - 2 ^ n = mask m AND NOT (mask n)"
 proof (cases "m \<le> LENGTH('a)")
   case True
   have "(2::'a::len word) ^ m - 2 ^ n = word_of_int (2 ^ m - 2 ^ n)"
@@ -808,10 +807,10 @@ proof (cases "m \<le> LENGTH('a)")
   also have "... = word_of_int ((2 ^ m - 1) AND NOT (2 ^ n - 1))"
     using assms int_power_of_two_difference
     by simp
-  also have "... = word_of_int (2 ^ m - 1) AND NOT word_of_int (2 ^ n - 1)"
+  also have "... = word_of_int (2 ^ m - 1) AND NOT (word_of_int (2 ^ n - 1))"
     unfolding word_and_def word_not_def wils1
     by simp
-  also have "... = mask m AND NOT mask n"
+  also have "... = mask m AND NOT (mask n)"
     unfolding mask_def shiftl_1 word_sub_wi word_of_int_2p[THEN sym] int_word_uint 
     using mod_power_lem assms True
     by (auto simp: word_of_int_minus)
@@ -841,7 +840,7 @@ by (intro word_eqI) (auto simp: word_size word_ops_nth_size)
 
 lemma and_shiftl_not_mask [simp]:
   assumes "m \<le> n"
-  shows "(x << n) AND NOT mask m = x << n"
+  shows "(x << n) AND NOT (mask m) = x << n"
 using assms
 by (intro word_eqI)
    (auto simp: word_size word_ops_nth_size nth_shiftl)
@@ -1354,7 +1353,7 @@ lemma word_cat_slice_zero [simp]:
   fixes x :: "'a::len word"
   assumes "LENGTH('b) = n"
       and "LENGTH('c) = LENGTH('a) - n"
-  shows "word_cat (slice n x::'c::len0 word) (0::'b::len0 word) = x AND NOT mask n"
+  shows "word_cat (slice n x::'c::len0 word) (0::'b::len0 word) = x AND NOT (mask n)"
 using assms
 by (intro word_eqI)
   (auto simp: word_size nth_word_cat nth_slice word_ops_nth_size)
@@ -1445,11 +1444,11 @@ lemma slice_eq_imp_and_not_mask_eq:
   fixes x y :: "'a::len word"
   assumes length: "LENGTH('a) \<le> LENGTH('b) + n"
       and slice: "(slice n x::'b::len0 word) = slice n y"
-  shows "(x AND NOT mask n) = (y AND NOT mask n)"
+  shows "(x AND NOT (mask n)) = (y AND NOT (mask n))"
 proof (intro word_eqI impI, simp add: word_size)
   fix i
   assume "i < LENGTH('a)"
-  thus "(x AND NOT mask n) !! i = (y AND NOT mask n) !! i"
+  thus "(x AND NOT (mask n)) !! i = (y AND NOT (mask n)) !! i"
     using length test_bit_cong[OF slice, where x="i - n"]
     by (auto simp: word_size nth_slice word_ops_nth_size)
 qed
@@ -1457,7 +1456,7 @@ qed
 lemma and_not_mask_eq_imp_slice_eq:
   fixes x y :: "'a::len word"
   assumes length: "LENGTH('b) + n \<le> LENGTH('a)"
-      and mask: "(x AND NOT mask n) = (y AND NOT mask n)"
+      and mask: "(x AND NOT (mask n)) = (y AND NOT (mask n))"
   shows "(slice n x::'b::len0 word) = slice n y"
 proof (intro word_eqI impI, simp add: word_size)
   fix i
@@ -1471,7 +1470,7 @@ lemma eq_slice_eq_and_not_mask:
   fixes x y :: "'a::len word"
   assumes "LENGTH('a) = LENGTH('b) + n"
   shows "((slice n x::'b::len0 word) = slice n y) = 
-         ((x AND NOT mask n) = (y AND NOT mask n))"
+         ((x AND NOT (mask n)) = (y AND NOT (mask n)))"
 using assms 
 using slice_eq_imp_and_not_mask_eq[where 'b='b and x=x and y=y and n=n]
 using and_not_mask_eq_imp_slice_eq[where 'b='b and x=x and y=y and n=n]
@@ -1521,7 +1520,7 @@ subsection \<open>Aligned inequalities\<close>
 lemma le_and_not_mask:
   fixes x y :: "'a::len word"
   assumes "x \<le> y"
-  shows "x AND NOT mask n \<le> y AND NOT mask n"
+  shows "x AND NOT (mask n) \<le> y AND NOT (mask n)"
 proof -
   have "uint x \<le> uint y"
     using assms unfolding word_le_def by simp
@@ -1536,29 +1535,29 @@ qed
 lemma le_right_and_not_mask:
   assumes "(ucast x::'b::len0 word) = 0"
       and "n = LENGTH('b)"
-  shows "(x \<le> y AND NOT mask n) = (x \<le> y)"
+  shows "(x \<le> y AND NOT (mask n)) = (x \<le> y)"
 proof
-  assume "x \<le> y AND NOT mask n"
+  assume "x \<le> y AND NOT (mask n)"
   thus "x \<le> y"
-    using word_and_le2[where a=y and y="NOT mask n"]
+    using word_and_le2[where a=y and y="NOT (mask n)"]
     by auto
 next
   have [simp]: "x AND mask n = 0"
     using assms eq_ucast_eq_and_mask[where x=x and y=0]
     by auto
-  have [simp]: "x AND NOT mask n = x"
+  have [simp]: "x AND NOT (mask n) = x"
     using word_and_not_mask_plus_word_and_mask[where x=x and n=n]
     by simp
   assume "x \<le> y"
   from le_and_not_mask[where n=n, OF this]
-  show "x \<le> y AND NOT mask n"
+  show "x \<le> y AND NOT (mask n)"
     by simp
 qed
 
 corollary less_left_and_not_mask:
   assumes "(ucast y::'b::len0 word) = 0"
       and "n = LENGTH('b)"
-  shows "(x AND NOT mask n < y) = (x < y)"
+  shows "(x AND NOT (mask n) < y) = (x < y)"
 using le_right_and_not_mask[where x=y and y=x, OF assms]
 by auto
 
@@ -1566,7 +1565,7 @@ lemma word_and_mask_and_not_mask_size:
   fixes x :: "'a::len word"
   assumes "n \<le> m"
       and "n \<le> LENGTH('a)"
-  shows "(x AND mask m) AND NOT mask n \<le> 2 ^ m - 2 ^ n"
+  shows "(x AND mask m) AND NOT (mask n) \<le> 2 ^ m - 2 ^ n"
 unfolding word_power_of_two_difference[OF assms]
 using le_and_not_mask[OF word_and_le1[where y=x and a="mask m"]]
 by simp
@@ -1575,266 +1574,10 @@ corollary word_and_not_mask_and_mask_size:
   fixes x :: "'a::len word"
   assumes "n \<le> m"
       and "n \<le> LENGTH('a)"
-  shows "(x AND NOT mask n) AND mask m \<le> 2 ^ m - 2 ^ n"
+  shows "(x AND NOT (mask n)) AND mask m \<le> 2 ^ m - 2 ^ n"
 using word_and_mask_and_not_mask_size[OF assms]
 using word_bool_alg.conj.assoc word_bool_alg.conj.commute
 by metis
-
-(*subsection \<open>Complete lattice over words\<close>
-
-text \<open>Because @{typ "'a word"} is already an instantiation of the type class @{class order}, we
-cannot create a class instance of @{class lattice} using a different order. We can, however, create
-an interpretation of @{class lattice} using a different order.\<close>
-
-subsubsection \<open>Interpretation of @{class order}\<close>
-
-definition bitwise_less_eq :: "'a::len0 word \<Rightarrow> 'a::len0 word \<Rightarrow> bool" where
-  "bitwise_less_eq w w' = (\<forall>i < len_of TYPE('a). w !! i \<longrightarrow> w' !! i)"
-
-abbreviation (out) bitwise_less :: "'a::len0 word \<Rightarrow> 'a::len0 word \<Rightarrow> bool" where
-  "bitwise_less x y \<equiv> (bitwise_less_eq x y) \<and> \<not>(bitwise_less_eq y x)"
-
-interpretation bitwise_order: 
-  order bitwise_less_eq bitwise_less
-proof standard
-  fix x :: "'a word"
-  show "bitwise_less_eq x x"
-    unfolding bitwise_less_eq_def
-    by simp
-next
-  fix x y z :: "'a word"
-  assume "bitwise_less_eq x y"
-     and "bitwise_less_eq y z"
-  thus   "bitwise_less_eq x z"
-    unfolding bitwise_less_eq_def
-    by auto
-next
-  fix x y :: "'a word"
-  assume "bitwise_less_eq x y"
-     and "bitwise_less_eq y x"
-  thus   "x = y"
-    unfolding bitwise_less_eq_def
-    by (intro word_eqI) (auto simp add: word_size)
-qed simp
-
-subsubsection \<open>Interpretation of @{class order_bot}\<close>
-
-abbreviation (out) bitwise_bot :: "'a::len0 word" where
-  "bitwise_bot \<equiv> 0"
-
-interpretation bitwise_order_bot: 
-  order_bot bitwise_bot bitwise_less_eq bitwise_less
-proof standard
-  fix a :: "'a word"
-  show "bitwise_less_eq bitwise_bot a"
-    unfolding bitwise_less_eq_def
-    by simp
-qed
-
-subsubsection \<open>Interpretation of @{class order_top}\<close>
-
-abbreviation (out) bitwise_top :: "'a::len word" where
-  "bitwise_top \<equiv> max_word"
-
-interpretation bitwise_order_top: 
-  order_top bitwise_less_eq bitwise_less bitwise_top
-proof standard
-  fix a :: "'a word"
-  show "bitwise_less_eq a bitwise_top"
-    unfolding bitwise_less_eq_def
-    by simp
-qed
-
-subsubsection \<open>Interpretation of @{class semilattice_inf}\<close>
-
-abbreviation (out) bitwise_inf :: "'a::len0 word \<Rightarrow> 'a::len0 word \<Rightarrow> 'a::len0 word" where
-  "bitwise_inf a b \<equiv> a AND b"
-
-interpretation bitwise_semilattice_inf: 
-  semilattice_inf bitwise_inf bitwise_less_eq bitwise_less
-proof standard
-  fix a b :: "'a word"
-  show "bitwise_less_eq (bitwise_inf a b) a"
-    unfolding bitwise_less_eq_def 
-    by (simp add: word_ops_nth_size word_size)
-next
-  fix a b :: "'a word"
-  show "bitwise_less_eq (bitwise_inf a b) b"
-    unfolding bitwise_less_eq_def 
-    by (simp add: word_ops_nth_size word_size)
-next
-  fix x y z :: "'a word"
-  assume "bitwise_less_eq x y"
-     and "bitwise_less_eq x z"
-  thus   "bitwise_less_eq x (bitwise_inf y z)"
-    unfolding bitwise_less_eq_def 
-    by (simp add: word_ops_nth_size word_size)
-
-(* I don't understand the warning *)
-qed
-
-subsubsection \<open>Interpretation of @{class semilattice_sup}\<close>
-
-abbreviation (out) bitwise_sup :: "'a::len0 word \<Rightarrow> 'a::len0 word \<Rightarrow> 'a::len0 word" where
-  "bitwise_sup a b \<equiv> a OR b"
-
-interpretation bitwise_semilattice_sup: 
-  semilattice_sup bitwise_sup bitwise_less_eq bitwise_less
-proof standard
-  fix a b :: "'a word"
-  show "bitwise_less_eq a (bitwise_sup a b)"
-    unfolding bitwise_less_eq_def 
-    by (simp add: word_ops_nth_size word_size)
-next
-  fix a b :: "'a word"
-  show "bitwise_less_eq b (bitwise_sup a b)"
-    unfolding bitwise_less_eq_def 
-    by (simp add: word_ops_nth_size word_size)
-next
-  fix x y z :: "'a word"
-  assume "bitwise_less_eq y x"
-     and "bitwise_less_eq z x"
-  thus   "bitwise_less_eq (bitwise_sup y z) x"
-    unfolding bitwise_less_eq_def 
-    by (simp add: word_ops_nth_size word_size)
-
-(* I don't understand the warning *)
-qed
-
-subsubsection \<open>Interpretation of @{class distrib_lattice}\<close>
-
-interpretation bitwise_distrib_lattice: 
-  distrib_lattice bitwise_inf bitwise_less_eq bitwise_less bitwise_sup
-by standard (fact word_oa_dist2)
-
-subsubsection \<open>Interpretation of @{class boolean_algebra}\<close>
-
-abbreviation (out) bitwise_uminus :: "'a::len0 word \<Rightarrow> 'a::len0 word" where
-  "bitwise_uminus a \<equiv> NOT a"
-
-abbreviation (out) bitwise_minus :: "'a::len0 word \<Rightarrow> 'a::len0 word \<Rightarrow> 'a::len0 word" where
-  "bitwise_minus a b \<equiv> bitwise_inf a (bitwise_uminus b)"
-
-interpretation bitwise_boolean_algebra: 
-  boolean_algebra 
-    bitwise_minus bitwise_uminus bitwise_inf bitwise_less_eq 
-    bitwise_less bitwise_sup bitwise_bot bitwise_top
-by standard simp_all
-
-subsubsection \<open>Interpretation of @{class complete_lattice}\<close>
-
-(*
-fun list_Inf :: "nat \<Rightarrow> ('a :: Inf) list set \<Rightarrow> 'a list" where
-  "list_Inf 0       A = []" |
-  "list_Inf (Suc n) A = (Inf (list.hd ` A)) # (list_Inf n (list.tl ` A))"
-
-definition bitwise_Inf :: "('a::len0) word set \<Rightarrow> 'a word" where
-  "bitwise_Inf A = of_bl (list_Inf (len_of TYPE('a)) (to_bl ` A))"
-
-fun list_Sup :: "nat \<Rightarrow> ('a :: Sup) list set \<Rightarrow> 'a list" where
-  "list_Sup 0       A = []" |
-  "list_Sup (Suc n) A = (Sup (list.hd ` A)) # (list_Sup n (list.tl ` A))"
-
-definition bitwise_Sup :: "('a::len0) word set \<Rightarrow> 'a word" where
-  "bitwise_Sup A = of_bl (list_Sup (len_of TYPE('a)) (to_bl ` A))"
-*)
-
-definition bitwise_Inf  :: "('a::len0) word set \<Rightarrow> 'a word" where
-  "bitwise_Inf A = (BITS i. \<forall>x\<in>A. x !! i)"
-
-definition bitwise_Sup  :: "('a::len0) word set \<Rightarrow> 'a word" where
-  "bitwise_Sup A = (BITS i. \<exists>x\<in>A. x !! i)"
-
-lemma nth_bitwise_Inf:
-  fixes A :: "'a ::len0 word set"
-  shows "bitwise_Inf A !! i = ((\<forall>x\<in>A. x !! i) \<and> i < len_of TYPE('a))"
-unfolding bitwise_Inf_def test_bit.eq_norm
-by simp
-
-lemma nth_bitwise_Sup:
-  fixes A :: "'a ::len0 word set"
-  shows "bitwise_Sup A !! i = ((\<exists>x\<in>A. x !! i) \<and> i < len_of TYPE('a))"
-unfolding bitwise_Sup_def test_bit.eq_norm
-by simp
-
-lemma setbits_True [simp]:
-  shows "(BITS i. True) = bitwise_top"
-apply (intro word_eqI)
-unfolding word_size test_bit.eq_norm
-by simp
-
-lemma setbits_False [simp]:
-  shows "(BITS i. False) = bitwise_bot"
-apply (intro word_eqI)
-unfolding word_size test_bit.eq_norm
-by simp
-
-interpretation bitwise_complete_lattice: 
-  complete_lattice 
-    bitwise_Inf bitwise_Sup bitwise_inf bitwise_less_eq 
-    bitwise_less bitwise_sup bitwise_bot bitwise_top
-proof standard
-  fix x :: "'a word" and A 
-  assume "x \<in> A"
-  thus   "bitwise_less_eq (bitwise_Inf A) x"
-    unfolding bitwise_less_eq_def nth_bitwise_Inf
-    by auto
-next
-  fix z :: "'a word" and A 
-  assume "\<And>x. x \<in> A \<Longrightarrow> bitwise_less_eq z x"
-  thus   "bitwise_less_eq z (bitwise_Inf A)"
-    unfolding bitwise_less_eq_def nth_bitwise_Inf
-    by auto
-next
-  fix x :: "'a word" and A 
-  assume "x \<in> A"
-  thus   "bitwise_less_eq x (bitwise_Sup A)"
-    unfolding bitwise_less_eq_def nth_bitwise_Sup
-    by auto
-next
-  fix z :: "'a word" and A 
-  assume "\<And>x. x \<in> A \<Longrightarrow> bitwise_less_eq x z"
-  thus   "bitwise_less_eq (bitwise_Sup A) z"
-    unfolding bitwise_less_eq_def nth_bitwise_Sup
-    by auto
-next
-  show "bitwise_Inf {} = bitwise_top"
-    unfolding bitwise_Inf_def
-    by simp
-next
-  show "bitwise_Sup {} = bitwise_bot"
-    unfolding bitwise_Sup_def
-    by simp
-qed*)
-
-(*subsubsection \<open>Interpretation of @{class complete_distrib_lattice}\<close>
-
-interpretation bitwise_complete_distrib_lattice: 
-  complete_distrib_lattice 
-    bitwise_Inf bitwise_Sup bitwise_inf bitwise_less_eq 
-    bitwise_less bitwise_sup bitwise_bot bitwise_top
-proof standard
-  fix a :: "'a word" and B
-  show "bitwise_sup a (bitwise_Inf B) = bitwise_complete_lattice.INFIMUM B (bitwise_sup a)"
-    apply (intro word_eqI)
-    unfolding word_size 
-    by (simp add: word_ao_nth nth_bitwise_Inf)
-next
-  fix a :: "'a word" and B
-  show "bitwise_inf a (bitwise_Sup B) = bitwise_complete_lattice.SUPREMUM B (bitwise_inf a)"
-    apply (intro word_eqI)
-    unfolding word_size 
-    by (simp add: word_ao_nth nth_bitwise_Sup)
-qed
-
-subsubsection \<open>Interpretation of @{class complete_boolean_algebra}\<close>
-
-interpretation bitwise_complete_boolean_algebra: 
-  complete_boolean_algebra 
-    bitwise_Inf bitwise_Sup bitwise_inf bitwise_less_eq 
-    bitwise_less bitwise_sup bitwise_bot bitwise_top
-    bitwise_minus bitwise_uminus
-by standard*)
 
 (*<*)
 end

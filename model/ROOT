@@ -1,0 +1,5 @@
+session "Sail-T-CHERI" = Sail +
+  theories [document = false]
+    Properties
+    Recognising_Automata
+    Word_Extra
