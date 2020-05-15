@@ -6,7 +6,7 @@ locale CHERI_ISA = Capability_ISA CC ISA
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa" +
   fixes fetch_assms :: "'regval trace \<Rightarrow> bool" and instr_assms :: "'regval trace \<Rightarrow> bool"
   assumes instr_cheri_axioms: "\<And>t instr. hasTrace t \<lbrakk>instr\<rbrakk> \<Longrightarrow> instr_assms t \<Longrightarrow> cheri_axioms CC ISA False (instr_raises_ex ISA instr t) (invokes_caps ISA instr t) t"
-    and fetch_cheri_axioms: "\<And>t. hasTrace t (instr_fetch ISA) \<Longrightarrow> fetch_assms t \<Longrightarrow> cheri_axioms CC ISA True (fetch_raises_ex ISA t) False t"
+    and fetch_cheri_axioms: "\<And>t. hasTrace t (instr_fetch ISA) \<Longrightarrow> fetch_assms t \<Longrightarrow> cheri_axioms CC ISA True (fetch_raises_ex ISA t) {} t"
     and instr_assms_appendE: "\<And>t t' instr. instr_assms (t @ t') \<Longrightarrow> Run \<lbrakk>instr\<rbrakk> t () \<Longrightarrow> instr_assms t \<and> fetch_assms t'"
     and fetch_assms_appendE: "\<And>t t' instr. fetch_assms (t @ t') \<Longrightarrow> Run (instr_fetch ISA) t instr \<Longrightarrow> fetch_assms t \<and> instr_assms t'"
 
@@ -107,6 +107,10 @@ inductive_set reachable_caps :: "'regs sequential_state \<Rightarrow> 'cap set" 
     "\<lbrakk>c' \<in> reachable_caps s; c'' \<in> reachable_caps s; is_tagged_method CC c'; is_tagged_method CC c'';
       \<not>is_sealed_method CC c''; \<not>is_sealed_method CC c'; permits_seal_method CC c''\<rbrakk> \<Longrightarrow>
      seal CC c' (get_cursor_method CC c'') \<in> reachable_caps s"
+| SealEntry:
+    "\<lbrakk>c' \<in> reachable_caps s; \<not>is_sealed_method CC c'; permits_execute_method CC c';
+      is_sentry_method CC (seal CC c' otype)\<rbrakk> \<Longrightarrow>
+     seal CC c' otype \<in> reachable_caps s"
 | Unseal:
     "\<lbrakk>c' \<in> reachable_caps s; c'' \<in> reachable_caps s; is_tagged_method CC c'; is_tagged_method CC c'';
       \<not>is_sealed_method CC c''; is_sealed_method CC c'; permits_unseal_method CC c'';
@@ -286,7 +290,10 @@ lemma writes_reg_cap_nth_provenance[consumes 5]:
   | (Exception) v' r' j where "c \<in> exception_targets ISA {v. \<exists>r j. j < i \<and> j < length t \<and> t ! j = E_read_reg r v \<and> r \<in> KCC ISA}" (* "leq_cap CC c c'"*)
     (*and "t ! j = E_read_reg r' v'" and "j < i"*) (*and "c' \<in> caps_of_regval ISA v'"*)
     (*and "r' \<in> KCC ISA"*) and "r \<in> PCC ISA" and "has_ex"
-  | (CCall) cc cd c' where "inv_caps" (*"(cc, cd) \<in> inv_caps"*) and "invokable CC cc cd"
+  | (Sentry) cs where "c \<in> inv_caps" and "cs \<in> derivable (available_caps CC ISA i t)"
+    and "is_sentry_method CC cs" and "is_sealed_method CC cs"
+    and "leq_cap CC c (unseal CC cs True)" and "r \<in> PCC ISA"
+  | (CCall) cc cd where "c \<in> inv_caps" and "invokable CC cc cd"
     and "cc \<in> derivable (available_caps CC ISA i t)"
     and "cd \<in> derivable (available_caps CC ISA i t)"
     and "(r \<in> PCC ISA \<and> leq_cap CC c (unseal CC cc True)) \<or>
@@ -541,7 +548,7 @@ definition system_access_reachable :: "'regs sequential_state \<Rightarrow> bool
 lemma get_reg_cap_intra_domain_trace_reachable:
   assumes r: "c \<in> get_reg_caps r s'"
     (*and t: "hasTrace t (instr_sem ISA instr)"*) and s': "s_run_trace t s = Some s'"
-    and axioms: "cheri_axioms CC ISA is_fetch False False t"
+    and axioms: "cheri_axioms CC ISA is_fetch False {} t"
     (*and no_exception: "\<not>hasException t (instr_sem ISA instr)"
     and no_ccall: "invoked_caps ISA instr t = {}"*)
     and translation_table_addrs_invariant: "s_invariant s_translation_tables t s"
@@ -573,17 +580,18 @@ proof -
       using c tag by auto
     then have "c \<in> derivable (available_caps CC ISA j t)"
       using axioms tag \<open>j < length t\<close>
-      unfolding cheri_axioms_def store_cap_reg_axiom_def
-      by (fastforce simp: cap_derivable_iff_derivable)
+      unfolding cheri_axioms_def
+      by (auto elim!: store_cap_reg_axiomE simp: cap_derivable_iff_derivable)
     moreover have "derivable (available_caps CC ISA j t) \<subseteq> reachable_caps s"
       using axioms s' translation_table_addrs_invariant no_caps_in_translation_tables
       by (intro derivable_available_caps_subseteq_reachable_caps)
-    ultimately show ?thesis by auto
+    ultimately show ?thesis
+      by auto
   qed
 qed
 
 lemma reachable_caps_trace_intradomain_monotonicity:
-  assumes axioms: "cheri_axioms CC ISA is_fetch False False t"
+  assumes axioms: "cheri_axioms CC ISA is_fetch False {} t"
     and s': "s_run_trace t s = Some s'"
     and addr_trans_inv: "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t s"
     and translation_table_addrs_invariant: "s_invariant s_translation_tables t s"
@@ -638,7 +646,7 @@ lemma reachable_caps_instr_trace_intradomain_monotonicity:
     and ta: "instr_assms t"
     and s': "s_run_trace t s = Some s'"
     and no_exception: "\<not>instr_raises_ex ISA instr t"
-    and no_ccall: "\<not>invokes_caps ISA instr t"
+    and no_invoked_caps: "invokes_caps ISA instr t = {}"
     and addr_trans_inv: "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t s"
     and translation_table_addrs_invariant: "s_invariant s_translation_tables t s"
     and no_caps_in_translation_tables: "s_invariant_holds no_caps_in_translation_tables t s"
@@ -677,15 +685,15 @@ fun instrs_raise_ex :: "('cap, 'regval, 'instr, 'e) isa \<Rightarrow> nat \<Righ
                   instrs_raise_ex ISA bound t''))))"
 | "instrs_raise_ex ISA 0 t = False"
 
-fun instrs_invoke_caps :: "('cap, 'regval, 'instr, 'e) isa \<Rightarrow> nat \<Rightarrow> 'regval trace \<Rightarrow> bool" where
+fun instrs_invoke_caps :: "('cap, 'regval, 'instr, 'e) isa \<Rightarrow> nat \<Rightarrow> 'regval trace \<Rightarrow> 'cap set" where
   "instrs_invoke_caps ISA (Suc bound) t =
-    (\<exists>tf t'. t = tf @ t' \<and> hasTrace tf (instr_fetch ISA) \<and>
+    {c. (\<exists>tf t'. t = tf @ t' \<and> hasTrace tf (instr_fetch ISA) \<and>
           (\<exists>instr ti t''. t' = ti @ t'' \<and>
              runTrace tf (instr_fetch ISA) = Some (Done instr) \<and>
              hasTrace ti (instr_sem ISA instr) \<and>
-             (invokes_caps ISA instr ti \<or>
-              instrs_invoke_caps ISA bound t'')))"
-| "instrs_invoke_caps ISA 0 t = False"
+             (c \<in> invokes_caps ISA instr ti \<or>
+              c \<in> instrs_invoke_caps ISA bound t'')))}"
+| "instrs_invoke_caps ISA 0 t = {}"
 
 context CHERI_ISA_State
 begin
@@ -695,7 +703,7 @@ lemma reachable_caps_instrs_trace_intradomain_monotonicity:
     and ta: "fetch_assms t"
     and s': "s_run_trace t s = Some s'"
     and no_exception: "\<not>instrs_raise_ex ISA n t"
-    and no_ccall: "\<not>instrs_invoke_caps ISA n t"
+    and no_invoked_caps_reachable: "instrs_invoke_caps ISA n t = {}"
     and addr_trans_inv: "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t s"
     and translation_table_addrs_invariant: "s_invariant s_translation_tables t s"
     and no_caps_in_translation_tables: "s_invariant_holds no_caps_in_translation_tables t s"
@@ -766,9 +774,9 @@ next
         using Bind ta' instr_assms_appendE
         by auto
       have no_exception': "\<not>fetch_raises_ex ISA tf" "\<not>instr_raises_ex ISA instr ti"
-        and no_ccall': "\<not>invokes_caps ISA instr ti"
+        and no_ccall': "invokes_caps ISA instr ti = {}"
         and no_exception'': "\<not>instrs_raise_ex ISA n t''"
-        and no_ccall'': "\<not>instrs_invoke_caps ISA n t''"
+        and no_ccall'': "instrs_invoke_caps ISA n t'' = {}"
         using ti tf Suc.prems Bind \<open>t = tf @ t'\<close>
         using \<open>Run (instr_fetch ISA) tf instr\<close>
         by (auto simp: runTrace_iff_Traces)

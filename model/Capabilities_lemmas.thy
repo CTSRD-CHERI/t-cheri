@@ -23,6 +23,10 @@ inductive_set derivable :: "'cap set \<Rightarrow> 'cap set" for C :: "'cap set"
     "\<lbrakk>c' \<in> derivable C; c'' \<in> derivable C; is_tagged_method CC c'; is_tagged_method CC c'';
       \<not>is_sealed_method CC c''; \<not>is_sealed_method CC c'; permits_seal_method CC c''\<rbrakk> \<Longrightarrow>
      seal CC c' (get_cursor_method CC c'') \<in> derivable C"
+| SealEntry:
+    "\<lbrakk>c' \<in> derivable C; \<not>is_sealed_method CC c'; permits_execute_method CC c';
+      is_sentry_method CC (seal CC c' otype)\<rbrakk> \<Longrightarrow>
+     seal CC c' otype \<in> derivable C"
 
 lemma leq_cap_refl[simp, intro]:
   "leq_cap CC c c"
@@ -131,6 +135,12 @@ next
     then have "cap_derivable_bounded CC (Suc (max n' n'')) C (seal CC c' (get_cursor_method CC c''))"
       using Seal.hyps
       by auto
+    then show ?case by blast
+  next
+    case (SealEntry c' otype)
+    then obtain n where "cap_derivable_bounded CC n C c'"
+      by blast
+    then have "cap_derivable_bounded CC (Suc n) C (seal CC c' otype)" using SealEntry.hyps by auto
     then show ?case by blast
   qed
   then show "cap_derivable CC C c" by (simp add: cap_derivable_def)
