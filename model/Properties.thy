@@ -115,7 +115,7 @@ inductive_set reachable_caps :: "'regs sequential_state \<Rightarrow> 'cap set" 
     "\<lbrakk>c' \<in> reachable_caps s; c'' \<in> reachable_caps s; is_tagged_method CC c'; is_tagged_method CC c'';
       \<not>is_sealed_method CC c''; is_sealed_method CC c'; permits_unseal_method CC c'';
       get_obj_type_method CC c' = get_cursor_method CC c''\<rbrakk> \<Longrightarrow>
-     unseal CC c' (get_global CC c'') \<in> reachable_caps s"
+     unseal CC c' (get_global_method CC c'') \<in> reachable_caps s"
 
 lemma derivable_subseteq_reachableI:
   assumes "C \<subseteq> reachable_caps s"
