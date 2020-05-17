@@ -73,6 +73,16 @@ qed
 
 lemma derivable_refl: "C \<subseteq> derivable C" by (auto intro: derivable.intros)
 
+lemma derivable_empty: "derivable {} = {}"
+proof -
+  { fix c
+    assume "c \<in> derivable {}"
+    then have "False"
+      by induction auto
+  }
+  then show ?thesis by auto
+qed
+
 lemma derivable_union_subseteq_absorb:
   assumes "C' \<subseteq> derivable C"
   shows "derivable (C \<union> C') = derivable C"
@@ -92,6 +102,14 @@ proof
   assume "c \<in> derivable (C - C')"
   then show "c \<in> derivable C" by induction (auto intro: derivable.intros)
 qed
+
+lemma derivable_Int1_subset:
+  "derivable (A \<inter> B) \<subseteq> derivable A"
+  by (intro derivable_mono) auto
+
+lemma derivable_Int2_subset:
+  "derivable (A \<inter> B) \<subseteq> derivable B"
+  by (intro derivable_mono) auto
 
 lemma cap_derivable_iff_derivable: "cap_derivable CC C c \<longleftrightarrow> c \<in> derivable C"
 proof

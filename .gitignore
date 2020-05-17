@@ -1,2 +1,5 @@
 _build
 *.native
+*.thy~
+model/Capabilities.thy
+model/Cheri_axioms.thy
