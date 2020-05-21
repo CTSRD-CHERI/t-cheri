@@ -5,9 +5,7 @@ begin
 locale Capabilities =
   fixes CC :: "'cap Capability_class"
   assumes is_tagged_set_tag[simp]: "\<And>c tag. is_tagged_method CC (set_tag_method CC c tag) = tag"
-    and is_tagged_set_seal[simp]: "\<And>c s. is_tagged_method CC (set_seal_method CC c s) = is_tagged_method CC c"
-    and is_tagged_set_obj_type[simp]: "\<And>c t. is_tagged_method CC (set_obj_type_method CC c t) = is_tagged_method CC c"
-    and is_tagged_set_perms[simp]: "\<And>c p. is_tagged_method CC (set_perms_method CC c p) = is_tagged_method CC c"
+    and is_tagged_seal[simp]: "\<And>c t. is_tagged_method CC (seal_method CC c t) = is_tagged_method CC c"
     and is_tagged_cap_of_mem_bytes[simp]: "\<And>c bytes tag. cap_of_mem_bytes_method CC bytes tag = Some c \<Longrightarrow> is_tagged_method CC c \<longleftrightarrow> tag = B1"
 begin
 
@@ -18,15 +16,16 @@ inductive_set derivable :: "'cap set \<Rightarrow> 'cap set" for C :: "'cap set"
     "\<lbrakk>c' \<in> derivable C; c'' \<in> derivable C; is_tagged_method CC c'; is_tagged_method CC c'';
       \<not>is_sealed_method CC c''; is_sealed_method CC c'; permits_unseal_method CC c'';
       get_obj_type_method CC c' = get_cursor_method CC c''\<rbrakk> \<Longrightarrow>
-     unseal CC c' (get_global_method CC c'') \<in> derivable C"
+     clear_global_unless CC (is_global_method CC c'') (unseal_method CC c') \<in> derivable C"
 | Seal:
     "\<lbrakk>c' \<in> derivable C; c'' \<in> derivable C; is_tagged_method CC c'; is_tagged_method CC c'';
-      \<not>is_sealed_method CC c''; \<not>is_sealed_method CC c'; permits_seal_method CC c''\<rbrakk> \<Longrightarrow>
-     seal CC c' (get_cursor_method CC c'') \<in> derivable C"
+      \<not>is_sealed_method CC c''; \<not>is_sealed_method CC c';
+      permits_seal_method CC c''; get_cursor_method CC c'' \<in> get_mem_region CC c''\<rbrakk> \<Longrightarrow>
+     seal_method CC c' (get_cursor_method CC c'') \<in> derivable C"
 | SealEntry:
     "\<lbrakk>c' \<in> derivable C; \<not>is_sealed_method CC c'; permits_execute_method CC c';
-      is_sentry_method CC (seal CC c' otype)\<rbrakk> \<Longrightarrow>
-     seal CC c' otype \<in> derivable C"
+      is_sentry_method CC (seal_method CC c' otype)\<rbrakk> \<Longrightarrow>
+     seal_method CC c' otype \<in> derivable C"
 
 lemma leq_cap_refl[simp, intro]:
   "leq_cap CC c c"
@@ -138,7 +137,7 @@ next
     then have "cap_derivable_bounded CC (max n' n'') C c'"
       and "cap_derivable_bounded CC (max n' n'') C c''"
       by (auto intro: cap_derivable_bounded_gteq)
-    then have "cap_derivable_bounded CC (Suc (max n' n'')) C (unseal CC c' (get_global_method CC c''))"
+    then have "cap_derivable_bounded CC (Suc (max n' n'')) C (clear_global_unless CC (is_global_method CC c'') (unseal_method CC c'))"
       using Unseal.hyps
       by auto
     then show ?case by blast
@@ -150,7 +149,7 @@ next
     then have "cap_derivable_bounded CC (max n' n'') C c'"
       and "cap_derivable_bounded CC (max n' n'') C c''"
       by (auto intro: cap_derivable_bounded_gteq)
-    then have "cap_derivable_bounded CC (Suc (max n' n'')) C (seal CC c' (get_cursor_method CC c''))"
+    then have "cap_derivable_bounded CC (Suc (max n' n'')) C (seal_method CC c' (get_cursor_method CC c''))"
       using Seal.hyps
       by auto
     then show ?case by blast
@@ -158,7 +157,9 @@ next
     case (SealEntry c' otype)
     then obtain n where "cap_derivable_bounded CC n C c'"
       by blast
-    then have "cap_derivable_bounded CC (Suc n) C (seal CC c' otype)" using SealEntry.hyps by auto
+    then have "cap_derivable_bounded CC (Suc n) C (seal_method CC c' otype)"
+      using SealEntry.hyps
+      by auto
     then show ?case by blast
   qed
   then show "cap_derivable CC C c" by (simp add: cap_derivable_def)

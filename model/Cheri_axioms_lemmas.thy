@@ -228,7 +228,7 @@ lemma load_mem_axiomE:
     and "set (address_range vaddr sz) \<subseteq> get_mem_region CC c'"
     and "if is_fetch then permits_execute_method CC c' else permits_load_method CC c'"
     and "is_fetch \<longrightarrow> tag = B0"
-    and "tag \<noteq> B0 \<longrightarrow> permits_load_capability_method CC c' \<and> sz = tag_granule ISA \<and> address_tag_aligned ISA paddr"
+    and "tag \<noteq> B0 \<longrightarrow> permits_load_cap_method CC c' \<and> sz = tag_granule ISA \<and> address_tag_aligned ISA paddr"
   using assms
   unfolding load_mem_axiom_def
   by blast
@@ -242,12 +242,12 @@ lemma store_cap_reg_axiomE:
     and "c \<in>  exception_targets ISA {v'. \<exists>r' j. j < i \<and> index t j = Some (E_read_reg r' v') \<and> r' \<in> KCC ISA}"
   | (Sentry) cs where "c \<in> invoked_caps" and "cap_derivable CC (available_caps CC ISA i t) cs"
     and "is_sentry_method CC cs" and "is_sealed_method CC cs"
-    and "leq_cap CC c (unseal CC cs True)" and "r \<in> PCC ISA"
+    and "leq_cap CC c (unseal_method CC cs)" and "r \<in> PCC ISA"
   | (CCall) cc cd where "c \<in> invoked_caps"
     and "cap_derivable CC (available_caps CC ISA i t) cc"
     and "cap_derivable CC (available_caps CC ISA i t) cd"
     and "invokable CC cc cd"
-    and "(leq_cap CC c (unseal CC cc True) \<and> r \<in> PCC ISA) \<or> (leq_cap CC c (unseal CC cd True) \<and> r \<in> IDC ISA)"
+    and "(leq_cap CC c (unseal_method CC cc) \<and> r \<in> PCC ISA) \<or> (leq_cap CC c (unseal_method CC cd) \<and> r \<in> IDC ISA)"
   using assms
   unfolding store_cap_reg_axiom_def
   by blast

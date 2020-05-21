@@ -99,23 +99,23 @@ inductive_set reachable_caps :: "'regs sequential_state \<Rightarrow> 'cap set" 
       s_translate_address vaddr Load s = Some addr;
       c' \<in> reachable_caps s; is_tagged_method CC c'; \<not>is_sealed_method CC c';
       set (address_range vaddr (tag_granule ISA)) \<subseteq> get_mem_region CC c';
-      permits_load_capability_method CC c';
+      permits_load_cap_method CC c';
       is_tagged_method CC c\<rbrakk>
      \<Longrightarrow> c \<in> reachable_caps s"
 | Restrict: "\<lbrakk>c \<in> reachable_caps s; leq_cap CC c' c\<rbrakk> \<Longrightarrow> c' \<in> reachable_caps s"
 | Seal:
     "\<lbrakk>c' \<in> reachable_caps s; c'' \<in> reachable_caps s; is_tagged_method CC c'; is_tagged_method CC c'';
       \<not>is_sealed_method CC c''; \<not>is_sealed_method CC c'; permits_seal_method CC c''\<rbrakk> \<Longrightarrow>
-     seal CC c' (get_cursor_method CC c'') \<in> reachable_caps s"
+     seal_method CC c' (get_cursor_method CC c'') \<in> reachable_caps s"
 | SealEntry:
     "\<lbrakk>c' \<in> reachable_caps s; \<not>is_sealed_method CC c'; permits_execute_method CC c';
-      is_sentry_method CC (seal CC c' otype)\<rbrakk> \<Longrightarrow>
-     seal CC c' otype \<in> reachable_caps s"
+      is_sentry_method CC (seal_method CC c' otype)\<rbrakk> \<Longrightarrow>
+     seal_method CC c' otype \<in> reachable_caps s"
 | Unseal:
     "\<lbrakk>c' \<in> reachable_caps s; c'' \<in> reachable_caps s; is_tagged_method CC c'; is_tagged_method CC c'';
       \<not>is_sealed_method CC c''; is_sealed_method CC c'; permits_unseal_method CC c'';
       get_obj_type_method CC c' = get_cursor_method CC c''\<rbrakk> \<Longrightarrow>
-     unseal CC c' (get_global_method CC c'') \<in> reachable_caps s"
+     clear_global_unless CC (is_global_method CC c'') (unseal_method CC c') \<in> reachable_caps s"
 
 lemma derivable_subseteq_reachableI:
   assumes "C \<subseteq> reachable_caps s"
@@ -150,7 +150,7 @@ where
       s_translate_address vaddr Load s = Some addr;
       c' \<in> reachable_caps_plus C s; is_tagged_method CC c'; \<not>is_sealed_method CC c';
       set (address_range vaddr (tag_granule ISA)) \<subseteq> get_mem_region CC c';
-      permits_load_capability_method CC c';
+      permits_load_cap_method CC c';
       is_tagged_method CC c\<rbrakk>
      \<Longrightarrow> c \<in> reachable_caps_plus C s"
 | Plus: "c \<in> C \<Longrightarrow> c \<in> reachable_caps_plus C s"
@@ -159,17 +159,17 @@ where
     "\<lbrakk>c' \<in> reachable_caps_plus C s; c'' \<in> reachable_caps_plus C s;
       is_tagged_method CC c'; is_tagged_method CC c'';
       \<not>is_sealed_method CC c''; \<not>is_sealed_method CC c'; permits_seal_method CC c''\<rbrakk> \<Longrightarrow>
-     seal CC c' (get_cursor_method CC c'') \<in> reachable_caps_plus C s"
+     seal_method CC c' (get_cursor_method CC c'') \<in> reachable_caps_plus C s"
 | SealEntry:
     "\<lbrakk>c' \<in> reachable_caps_plus C s; \<not>is_sealed_method CC c'; permits_execute_method CC c';
-      is_sentry_method CC (seal CC c' otype)\<rbrakk> \<Longrightarrow>
-     seal CC c' otype \<in> reachable_caps_plus C s"
+      is_sentry_method CC (seal_method CC c' otype)\<rbrakk> \<Longrightarrow>
+     seal_method CC c' otype \<in> reachable_caps_plus C s"
 | Unseal:
     "\<lbrakk>c' \<in> reachable_caps_plus C s; c'' \<in> reachable_caps_plus C s;
       is_tagged_method CC c'; is_tagged_method CC c'';
       \<not>is_sealed_method CC c''; is_sealed_method CC c'; permits_unseal_method CC c'';
       get_obj_type_method CC c' = get_cursor_method CC c''\<rbrakk> \<Longrightarrow>
-     unseal CC c' (get_global_method CC c'') \<in> reachable_caps_plus C s"
+     clear_global_unless CC (is_global_method CC c'') (unseal_method CC c') \<in> reachable_caps_plus C s"
 
 lemma plus_subset_reachable_caps_plus:
   "C \<subseteq> reachable_caps_plus C s"
@@ -390,12 +390,12 @@ lemma writes_reg_cap_nth_provenance[consumes 5]:
     (*and "r' \<in> KCC ISA"*) and "r \<in> PCC ISA" and "has_ex"
   | (Sentry) cs where "c \<in> inv_caps" and "cs \<in> derivable (available_caps CC ISA i t)"
     and "is_sentry_method CC cs" and "is_sealed_method CC cs"
-    and "leq_cap CC c (unseal CC cs True)" and "r \<in> PCC ISA"
+    and "leq_cap CC c (unseal_method CC cs)" and "r \<in> PCC ISA"
   | (CCall) cc cd where "c \<in> inv_caps" and "invokable CC cc cd"
     and "cc \<in> derivable (available_caps CC ISA i t)"
     and "cd \<in> derivable (available_caps CC ISA i t)"
-    and "(r \<in> PCC ISA \<and> leq_cap CC c (unseal CC cc True)) \<or>
-         (r \<in> IDC ISA \<and> leq_cap CC c (unseal CC cd True))"
+    and "(r \<in> PCC ISA \<and> leq_cap CC c (unseal_method CC cc)) \<or>
+         (r \<in> IDC ISA \<and> leq_cap CC c (unseal_method CC cd))"
   using assms
   unfolding cheri_axioms_def store_cap_reg_axiom_def writes_reg_caps_at_idx_def cap_derivable_iff_derivable
   by (elim impE conjE allE[where x = i] allE[where x = c])
@@ -604,7 +604,7 @@ proof (induction i rule: less_induct)
                     "is_tagged_method CC c'" "\<not>is_sealed_method CC c'"
                     "set (address_range vaddr sz) \<subseteq> get_mem_region CC c'"
                     "permits_load_method CC c'"
-                    "permits_load_capability_method CC c'"
+                    "permits_load_cap_method CC c'"
             and sz: "sz = tag_granule ISA"
             and aligned: "address_tag_aligned ISA paddr"
           using read t axioms \<open>j < length t\<close> \<open>is_tagged_method CC c\<close>
@@ -882,7 +882,6 @@ lemma reachable_caps_plus_instrs_trace_intradomain_monotonicity:
     and ta: "fetch_assms t"
     and s': "s_run_trace t s = Some s'"
     and no_exception: "\<not>instrs_raise_ex ISA n t"
-    (* and no_invoked_caps: "instrs_invoke_caps ISA n t = {}" *)
     and addr_trans_inv: "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t s"
     and translation_table_addrs_invariant: "s_invariant s_translation_tables t s"
     and no_caps_in_translation_tables: "s_invariant_holds no_caps_in_translation_tables t s"
@@ -935,9 +934,8 @@ next
         by (auto elim!: final_bind_cases) (auto simp: hasTrace_iff_Traces_final final_def)
       then have "reachable_caps_plus {} s' \<subseteq> reachable_caps_plus ({} \<union> invokes_caps ISA instr t') s''"
         using tf t' s'' Bind Suc.prems invs' ta'
-        (* using invokes_caps_subseteq_instrs_invoke_caps[of ISA tf instr t' n "[]"] *)
         by (intro reachable_caps_plus_instr_trace_intradomain_monotonicity)
-           (auto simp add: runTrace_iff_Traces (*simp del: instrs_invoke_caps.simps*))
+           (auto simp add: runTrace_iff_Traces)
       also have "\<dots> \<subseteq> reachable_caps_plus (instrs_invoke_caps ISA (Suc n) t) s''"
         using instrs_invoke_caps_Suc_union[of ISA tf instr t' n "[]"] Bind *
         by (intro reachable_caps_plus_mono) auto

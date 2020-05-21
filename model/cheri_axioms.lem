@@ -58,7 +58,7 @@ val permits_cap_load : forall 'cap. Capability 'cap => 'cap -> nat -> nat -> boo
 let permits_cap_load c vaddr sz =
   (is_tagged c && not (is_sealed c) &&
    Set.fromList (address_range vaddr sz) subset (get_mem_region c) &&
-   permits_load_capability c)
+   permits_load_cap c)
 
 val available_caps : forall 'cap 'regval 'instr 'e. Capability 'cap, Eq 'cap, SetType 'cap =>
   isa 'cap 'regval 'instr 'e -> nat -> trace 'regval -> set 'cap
@@ -125,15 +125,15 @@ let store_cap_reg_axiom ISA has_ex invoked_caps t =
         cap_derivable (available_caps ISA i t) cs &&
         is_sentry cs &&
         is_sealed cs &&
-        leq_cap c (unseal cs true) &&
+        leq_cap c (unseal cs) &&
         r IN ISA.PCC) ||
      (exists cc cd.
         c IN invoked_caps &&
         cap_derivable (available_caps ISA i t) cc &&
         cap_derivable (available_caps ISA i t) cd &&
         invokable cc cd &&
-        ((leq_cap c (unseal cc true) && r IN ISA.PCC) ||
-         (leq_cap c (unseal cd true) && r IN ISA.IDC)))))
+        ((leq_cap c (unseal cc) && r IN ISA.PCC) ||
+         (leq_cap c (unseal cd) && r IN ISA.IDC)))))
 
 val load_mem_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
   isa 'cap 'regval 'instr 'e -> bool -> trace 'regval -> bool
@@ -148,7 +148,7 @@ let load_mem_axiom ISA is_fetch t =
         Set.fromList (address_range vaddr sz) subset (get_mem_region c') &&
         (if is_fetch then permits_execute c' else permits_load c') &&
 	(is_fetch --> tag = B0) &&
-        (tag <> B0 --> permits_load_capability c' && sz = ISA.tag_granule && address_tag_aligned ISA paddr)))
+        (tag <> B0 --> permits_load_cap c' && sz = ISA.tag_granule && address_tag_aligned ISA paddr)))
 
 val mem_val_is_cap : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
   isa 'cap 'regval 'instr 'e -> list memory_byte -> bitU -> bool
@@ -156,7 +156,7 @@ let mem_val_is_cap _ v t = (exists c. cap_of_mem_bytes v t = Just (c : 'cap))
 
 val mem_val_is_local_cap : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
   isa 'cap 'regval 'instr 'e -> list memory_byte -> bitU -> bool
-let mem_val_is_local_cap _ v t = (exists c. cap_of_mem_bytes v t = Just (c : 'cap) && not (get_global c))
+let mem_val_is_local_cap _ v t = (exists c. cap_of_mem_bytes v t = Just (c : 'cap) && not (is_global c))
 
 val store_tag_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
   isa 'cap 'regval 'instr 'e -> trace 'regval -> bool
@@ -180,8 +180,8 @@ let store_mem_axiom ISA t =
         ISA.translate_address vaddr Store (take i t) = Just paddr &&
         Set.fromList (address_range vaddr sz) subset (get_mem_region c') &&
         permits_store c' &&
-        ((mem_val_is_cap ISA v tag && tag = B1) --> permits_store_capability c') &&
-        (mem_val_is_local_cap ISA v tag && tag = B1 --> permits_store_local_capability c')))
+        ((mem_val_is_cap ISA v tag && tag = B1) --> permits_store_cap c') &&
+        (mem_val_is_local_cap ISA v tag && tag = B1 --> permits_store_local_cap c')))
 
 val cheri_axioms : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, SetType 'regval, Eq 'cap, Eq 'regval =>
   isa 'cap 'regval 'instr 'e -> bool -> bool -> set 'cap -> trace 'regval -> bool

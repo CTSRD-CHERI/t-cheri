@@ -13,30 +13,23 @@ class (Capability 'c)
   val get_obj_type : 'c -> nat
   val get_perms : 'c -> perms
   val get_cursor : 'c -> nat
-  val get_global : 'c -> bool
+  val is_global : 'c -> bool
   val set_tag : 'c -> bool -> 'c
-  val set_seal : 'c -> bool -> 'c
-  val set_obj_type : 'c -> nat -> 'c
-  val set_perms : 'c -> perms -> 'c
-  val set_global : 'c -> bool -> 'c
+  val seal : 'c -> nat -> 'c
+  val unseal : 'c -> 'c
+  val clear_global : 'c -> 'c
   val cap_of_mem_bytes : list memory_byte -> bitU -> maybe 'c
   val permits_execute : 'c -> bool
   val permits_ccall : 'c -> bool
   val permits_load : 'c -> bool
-  val permits_load_capability : 'c -> bool
+  val permits_load_cap : 'c -> bool
   val permits_seal : 'c -> bool
   val permits_store : 'c -> bool
-  val permits_store_capability : 'c -> bool
-  val permits_store_local_capability : 'c -> bool
+  val permits_store_cap : 'c -> bool
+  val permits_store_local_cap : 'c -> bool
   val permits_system_access : 'c -> bool
   val permits_unseal : 'c -> bool
 end
-
-val seal : forall 'cap. Capability 'cap => 'cap -> nat -> 'cap
-let seal c obj_type = set_seal (set_obj_type c obj_type) true
-
-val unseal : forall 'cap. Capability 'cap => 'cap -> bool -> 'cap
-let unseal c global = set_seal (set_obj_type (set_global c (global && get_global c)) 0) false
 
 val address_range : nat -> nat -> list nat
 let address_range start len = genlist (fun n -> start + n) len
@@ -68,7 +61,7 @@ let leq_cap c1 c2 =
      (get_base c1 >= get_base c2) &&
      (get_top c1 <= get_top c2) &&
      (get_base c1 <= get_top c1) &&
-     (get_global c1 --> get_global c2) &&
+     (is_global c1 --> is_global c2) &&
      (leq_perms (get_perms c1) (get_perms c2)))
 
 val invokable : forall 'cap. Capability 'cap => 'cap -> 'cap -> bool
@@ -79,6 +72,9 @@ let invokable cc cd =
   get_obj_type cc = get_obj_type cd &&
   permits_execute cc && (get_cursor cc IN get_mem_region cc) &&
   not (permits_execute cd)
+
+val clear_global_unless : forall 'cap. Capability 'cap => bool -> 'cap -> 'cap
+let clear_global_unless g c = if g then c else clear_global c
 
 (* Derivation of capabilities, bounded by derivation depth to guarantee termination *)
 val cap_derivable_bounded : forall 'cap. Capability 'cap, SetType 'cap, Eq 'cap => nat -> set 'cap -> 'cap -> bool
@@ -91,8 +87,8 @@ let rec cap_derivable_bounded n C c = match n with
         cap_derivable_bounded n C c' &&
         cap_derivable_bounded n C c'' &&
         is_tagged c' && is_tagged c'' && not (is_sealed c'') &&
-        (is_sealed c' && permits_unseal c'' && get_obj_type c' = get_cursor c'' && unseal c' (get_global c'') = c ||
-         not (is_sealed c') && permits_seal c'' && seal c' (get_cursor c'') = c))
+        ((is_sealed c' && permits_unseal c'' && get_obj_type c' = get_cursor c'' && clear_global_unless (is_global c'') (unseal c') = c) ||
+         (not (is_sealed c') && permits_seal c'' && get_cursor c'' IN get_mem_region c'' && seal c' (get_cursor c'') = c)))
 end
 
 declare termination_argument cap_derivable_bounded = automatic
