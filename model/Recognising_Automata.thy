@@ -760,7 +760,7 @@ end*)
 
 locale Write_Cap_Automaton = Capability_ISA CC ISA
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa" +
-  fixes ex_traces :: bool and invocation_traces :: bool
+  fixes ex_traces :: bool and invoked_caps :: "'cap set"
 begin
 
 fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool" where
@@ -769,8 +769,13 @@ fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Righta
          \<longrightarrow>
          (c \<in> derivable (accessed_caps s) \<or>
           (c \<in> exception_targets ISA (read_from_KCC s) \<and> ex_traces \<and> r \<in> PCC ISA) \<or>
-          (\<exists>cc cd. invocation_traces \<and> cc \<in> derivable (accessed_caps s) \<and> cd \<in> derivable (accessed_caps s) \<and>
-                   invokable CC cc cd \<and> (r \<in> PCC ISA \<and> leq_cap CC c (unseal CC cc True) \<or> r \<in> IDC ISA \<and> leq_cap CC c (unseal CC cd True)))))"
+          (\<exists>cs. c \<in> invoked_caps \<and> cs \<in> derivable (accessed_caps s) \<and>
+                is_sentry_method CC cs \<and> is_sealed_method CC cs \<and>
+                leq_cap CC c (unseal_method CC cs) \<and> r \<in> PCC ISA) \<or>
+          (\<exists>cc cd. c \<in> invoked_caps \<and> invokable CC cc cd \<and>
+                   cc \<in> derivable (accessed_caps s) \<and> cd \<in> derivable (accessed_caps s) \<and>
+                   (r \<in> PCC ISA \<and> leq_cap CC c (unseal_method CC cc) \<or>
+                    r \<in> IDC ISA \<and> leq_cap CC c (unseal_method CC cd)))))"
 | "enabled s (E_read_reg r v) = (r \<in> privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> ex_traces))"
 | "enabled s (E_write_memt _ addr sz bytes tag _) =
      (\<forall>c.  cap_of_mem_bytes_method CC bytes tag = Some c \<and> is_tagged_method CC c \<longrightarrow> c \<in> derivable (accessed_caps s))"
@@ -783,9 +788,12 @@ lemma enabled_E_write_reg_cases:
   obtains (Derivable) "c \<in> derivable (accessed_caps s)"
   | (KCC) "c \<in> exception_targets ISA (read_from_KCC s)" and "ex_traces" and
       "r \<in> PCC ISA" and "c \<notin> derivable (accessed_caps s)"
-  | (CCall) cc cd where "invocation_traces" and "invokable CC cc cd" and
+  | (Sentry) cs where "c \<in> invoked_caps" and "cs \<in> derivable (accessed_caps s)" and
+      "is_sentry_method CC cs" and "is_sealed_method CC cs" and
+      "leq_cap CC c (unseal_method CC cs)" and "r \<in> PCC ISA"
+  | (CCall) cc cd where "c \<in> invoked_caps" and "invokable CC cc cd" and
       "cc \<in> derivable (accessed_caps s)" and "cd \<in> derivable (accessed_caps s)" and
-      "r \<in> PCC ISA \<and> leq_cap CC c (unseal CC cc True) \<or> r \<in> IDC ISA \<and> leq_cap CC c (unseal CC cd True)" and
+      "r \<in> PCC ISA \<and> leq_cap CC c (unseal_method CC cc) \<or> r \<in> IDC ISA \<and> leq_cap CC c (unseal_method CC cd)" and
       "c \<notin> derivable (accessed_caps s)"
   using assms by (cases "c \<in> derivable (accessed_caps s)") auto
 
@@ -828,7 +836,7 @@ lemma index_eq_some': "(index l n = Some x) = (n < length l \<and> l ! n = x)"
 
 lemma recognises_store_cap_reg_read_reg_axioms:
   assumes t: "accepts t"
-  shows "store_cap_reg_axiom CC ISA ex_traces invocation_traces t"
+  shows "store_cap_reg_axiom CC ISA ex_traces invoked_caps t"
     and "store_cap_mem_axiom CC ISA t"
     and "read_reg_axiom CC ISA ex_traces t"
 proof -
@@ -836,7 +844,7 @@ proof -
     using assms (*read_from_KCC_run_take_eq[of "length t" t]*)
     unfolding accepts_from_iff_all_enabled_final read_reg_axiom_def
     by (auto elim!: enabled.elims)
-  show "store_cap_reg_axiom CC ISA ex_traces invocation_traces t"
+  show "store_cap_reg_axiom CC ISA ex_traces invoked_caps t"
   proof (unfold store_cap_reg_axiom_def, intro allI impI, goal_cases Idx)
     case (Idx i c r)
     then show ?case
@@ -865,6 +873,10 @@ proof -
           using (*j i v'[symmetric] r'*) KCC
           unfolding index_eq_some'
           by (auto simp: cap_derivable_iff_derivable read_from_KCC_run_take_eq)
+      next
+        case (Sentry cs)
+        then show ?thesis
+          by (auto simp: cap_derivable_iff_derivable)
       next
         case (CCall cc cd)
         then show ?thesis
@@ -1367,10 +1379,10 @@ lemma if_derivable_capsI[derivable_capsI]:
 end
 
 locale Write_Cap_Inv_Automaton =
-  Write_Cap_Automaton CC ISA ex_traces invocation_traces +
+  Write_Cap_Automaton CC ISA ex_traces invoked_caps +
   State_Invariant get_regval set_regval invariant inv_regs
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
-    and ex_traces :: bool and invocation_traces :: bool
+    and ex_traces :: bool and invoked_caps :: "'cap set"
     and get_regval :: "string \<Rightarrow> 'regstate \<Rightarrow> 'regval option"
     and set_regval :: "string \<Rightarrow> 'regval \<Rightarrow> 'regstate \<Rightarrow> 'regstate option"
     and invariant :: "'regstate \<Rightarrow> bool" and inv_regs :: "register_name set"
@@ -1421,7 +1433,7 @@ lemma traces_enabled_reg_axioms:
   assumes "traces_enabled m initial regs" and "hasTrace t m"
     and "reads_regs_from inv_regs t regs" and "invariant regs"
     and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
-  shows "store_cap_reg_axiom CC ISA ex_traces invocation_traces t"
+  shows "store_cap_reg_axiom CC ISA ex_traces invoked_caps t"
     and "store_cap_mem_axiom CC ISA t"
     and "read_reg_axiom CC ISA ex_traces t"
   using assms
@@ -1477,8 +1489,9 @@ definition has_access_permission :: "'cap \<Rightarrow> acctype \<Rightarrow> bo
   "has_access_permission c acctype is_cap is_local_cap =
      (case acctype of
         Fetch \<Rightarrow> permits_execute_method CC c
-      | Load \<Rightarrow> permits_load_method CC c \<and> (is_cap \<longrightarrow> permits_load_capability_method CC c)
-      | Store \<Rightarrow> permits_store_method CC c \<and> (is_cap \<longrightarrow> permits_store_capability_method CC c) \<and> (is_local_cap \<longrightarrow> permits_store_local_capability_method CC c))"
+      | Load \<Rightarrow> permits_load_method CC c \<and> (is_cap \<longrightarrow> permits_load_cap_method CC c)
+      | Store \<Rightarrow> permits_store_method CC c \<and> (is_cap \<longrightarrow> permits_store_cap_method CC c) \<and>
+                 (is_local_cap \<longrightarrow> permits_store_local_cap_method CC c))"
 
 definition authorises_access :: "'cap \<Rightarrow> acctype \<Rightarrow> bool \<Rightarrow> bool \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> bool" where
   "authorises_access c acctype is_cap is_local_cap paddr sz =
