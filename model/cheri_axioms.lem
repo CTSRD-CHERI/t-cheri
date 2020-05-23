@@ -6,8 +6,9 @@ open import Capabilities
 
 (* TODO: Maybe add a read_kind for instruction fetches, so that we can
    distinguish loads from fetches in events and don't need to carry around the
-   is_fetch parameter below *)
-type acctype = Load | Store | Fetch
+   is_fetch parameter below.  Similarly, a {read,write}_kind for translation
+   table accesses would be useful. *)
+type acctype = Load | Store | Fetch | PTW (* page table walk *)
 
 type isa 'cap 'regval 'instr 'e =
   <| instr_sem : 'instr -> monad 'regval unit 'e;
@@ -22,7 +23,7 @@ type isa 'cap 'regval 'instr 'e =
      fetch_raises_ex : trace 'regval -> bool;
      exception_targets : set 'regval -> set 'cap;
      privileged_regs : (* trace 'regval -> *) set register_name;
-     translation_tables : trace 'regval -> set nat;
+     is_translation_event : event 'regval -> bool;
      translate_address : nat -> acctype -> trace 'regval -> maybe nat |>
 
 let writes_mem_val_at_idx i t = Maybe.bind (index t i) writes_mem_val
@@ -33,6 +34,10 @@ let reads_mem_val_at_idx i t = Maybe.bind (index t i) reads_mem_val
 let reads_mem_cap_at_idx i t = Maybe.bind (index t i) reads_mem_cap
 let reads_from_reg_at_idx i t = Maybe.bind (index t i) reads_from_reg
 let reads_reg_caps_at_idx ISA i t = maybe Set.empty (reads_reg_caps ISA.caps_of_regval) (index t i)
+let translation_event_at_idx ISA i t = match (index t i) with
+  | Just e -> ISA.is_translation_event e
+  | Nothing -> false
+end
 
 val address_tag_aligned : forall 'cap 'regval 'instr 'e.
   isa 'cap 'regval 'instr 'e -> nat -> bool
@@ -67,7 +72,8 @@ let rec available_caps ISA i t = match i with
   | i+1 ->
      let caps_of e =
        (match reads_mem_cap e with
-          | Just (_, _, c) -> Set.singleton c
+          | Just (_, _, c) ->
+             if ISA.is_translation_event e then Set.empty else Set.singleton c
           | Nothing -> Set.empty
         end)
        union
@@ -140,7 +146,7 @@ val load_mem_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'ca
 let load_mem_axiom ISA is_fetch t =
   (forall i paddr sz v tag.
      (reads_mem_val_at_idx i t = Just (paddr, sz, v, tag) &&
-      not (paddr IN (ISA.translation_tables (take i t))))
+      not (translation_event_at_idx ISA i t))
      -->
      (exists c' vaddr.
         cap_derivable (available_caps ISA i t) c' && is_tagged c' && not (is_sealed c') &&
@@ -173,7 +179,7 @@ val store_mem_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'c
 let store_mem_axiom ISA t =
   (forall i paddr sz v tag.
      (writes_mem_val_at_idx i t = Just (paddr, sz, v, tag) &&
-      not (paddr IN (ISA.translation_tables (take i t))))
+      not (translation_event_at_idx ISA i t))
      -->
      (exists c' vaddr.
         cap_derivable (available_caps ISA i t) c' && is_tagged c' && not (is_sealed c') &&

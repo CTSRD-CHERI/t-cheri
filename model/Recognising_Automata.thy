@@ -1446,8 +1446,7 @@ end
 locale Capability_ISA_Fixed_Translation = Capability_ISA CC ISA
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa" +
   fixes translation_assm :: "'regval trace \<Rightarrow> bool"
-  assumes fixed_translation_tables: "\<And>i t. translation_assm t \<Longrightarrow> translation_tables ISA (take i t) = translation_tables ISA []"
-    and fixed_translation: "\<And>i t addr load. translation_assm t \<Longrightarrow> translate_address ISA addr load (take i t) = translate_address ISA addr load []"
+  assumes fixed_translation: "\<And>i t addr load. translation_assm t \<Longrightarrow> translate_address ISA addr load (take i t) = translate_address ISA addr load []"
 
 fun non_store_event :: "'regval event \<Rightarrow> bool" where
   "non_store_event (E_write_mem _ paddr sz v _) = False"
@@ -1498,25 +1497,43 @@ definition authorises_access :: "'cap \<Rightarrow> acctype \<Rightarrow> bool \
      (is_tagged_method CC c \<and> \<not>is_sealed_method CC c \<and> paddr_in_mem_region c acctype paddr sz \<and>
       has_access_permission c acctype is_cap is_local_cap)"
 
+definition legal_store :: "nat \<Rightarrow> memory_byte list \<Rightarrow> bitU \<Rightarrow> bool" where
+  "legal_store sz v tag \<longleftrightarrow> (tag = B0 \<or> tag = B1) \<and> sz = length v"
+
 definition access_enabled :: "('cap, 'regval) axiom_state \<Rightarrow> acctype \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> memory_byte list \<Rightarrow> bitU \<Rightarrow> bool" where
   "access_enabled s acctype paddr sz v tag =
      ((tag \<noteq> B0 \<longrightarrow> address_tag_aligned ISA paddr \<and> sz = tag_granule ISA) \<and>
-      (case acctype of Load \<Rightarrow> True
-         | Store \<Rightarrow> (tag = B0 \<or> tag = B1) \<and> length v = sz
-         | Fetch \<Rightarrow> tag = B0) \<and>
-      (paddr \<in> translation_tables ISA [] \<or>
+      (acctype = Fetch \<longrightarrow> tag = B0) \<and>
+      (acctype = PTW \<or>
        (\<exists>c' \<in> derivable (accessed_caps s).
           let is_cap = tag \<noteq> B0 in
           let is_local_cap = mem_val_is_local_cap CC ISA v tag \<and> tag = B1 in
           authorises_access c' acctype is_cap is_local_cap paddr sz)))"
 
-lemmas access_enabled_defs = access_enabled_def authorises_access_def paddr_in_mem_region_def has_access_permission_def
+lemmas access_enabled_defs = access_enabled_def authorises_access_def paddr_in_mem_region_def
+  has_access_permission_def legal_store_def
 
 fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool" where
-  "enabled s (E_write_mem _ paddr sz v _) = access_enabled s Store paddr sz v B0"
-| "enabled s (E_write_memt _ paddr sz v tag _) = access_enabled s Store paddr sz v tag"
-| "enabled s (E_read_mem _ paddr sz v) = access_enabled s (if is_fetch then Fetch else Load) paddr sz v B0"
-| "enabled s (E_read_memt _ paddr sz v_tag) = access_enabled s (if is_fetch then Fetch else Load) paddr sz (fst v_tag) (snd v_tag)"
+  "enabled s (E_write_mem wk paddr sz v r) =
+     (let acctype = if is_translation_event ISA (E_write_mem wk paddr sz v r) then PTW else Store in
+      access_enabled s acctype paddr sz v B0 \<and> legal_store sz v B0)"
+| "enabled s (E_write_memt wk paddr sz v tag r) =
+     (let acctype = if is_translation_event ISA (E_write_memt wk paddr sz v tag r) then PTW else Store in
+      access_enabled s acctype paddr sz v tag \<and> legal_store sz v tag)"
+| "enabled s (E_read_mem rk paddr sz v) =
+     (let acctype =
+        if is_translation_event ISA (E_read_mem rk paddr sz v) then PTW else
+        if is_fetch then Fetch else
+        Load
+      in
+      access_enabled s acctype paddr sz v B0)"
+| "enabled s (E_read_memt rk paddr sz v_tag) =
+     (let acctype =
+        if is_translation_event ISA (E_read_memt rk paddr sz v_tag) then PTW else
+        if is_fetch then Fetch else
+        Load
+      in
+      access_enabled s acctype paddr sz (fst v_tag) (snd v_tag))"
 | "enabled s _ = True"
 
 sublocale Cap_Axiom_Automaton where enabled = enabled ..
@@ -1527,7 +1544,8 @@ lemma accepts_store_mem_axiom:
   using accepts_from_nth_enabledI[OF **]
   unfolding store_mem_axiom_def
   unfolding writes_mem_val_at_idx_def cap_derivable_iff_derivable
-  unfolding fixed_translation_tables[OF *] fixed_translation[OF *]
+  unfolding translation_event_at_idx_def
+  unfolding fixed_translation[OF *]
   by (fastforce simp: access_enabled_defs bind_eq_Some_conv elim!: writes_mem_val.elims)
 
 lemma accepts_store_tag_axiom:
@@ -1535,15 +1553,16 @@ lemma accepts_store_tag_axiom:
   shows "store_tag_axiom CC ISA t"
   using accepts_from_nth_enabledI[OF assms]
   unfolding store_tag_axiom_def writes_mem_val_at_idx_def
-  by (fastforce simp: access_enabled_defs bind_eq_Some_conv elim!: writes_mem_val.elims)
+  by (fastforce simp: access_enabled_defs bind_eq_Some_conv Let_def elim!: writes_mem_val.elims)
 
 lemma accepts_load_mem_axiom:
   assumes *: "translation_assm t" and  **: "accepts t"
   shows "load_mem_axiom CC ISA is_fetch t"
   unfolding load_mem_axiom_def
   unfolding reads_mem_val_at_idx_def cap_derivable_iff_derivable
-  unfolding fixed_translation_tables[OF *] fixed_translation[OF *]
-  by (auto simp: bind_eq_Some_conv elim!: reads_mem_val.elims dest!: accepts_from_nth_enabledI[OF **] split del: if_split;
+  unfolding translation_event_at_idx_def
+  unfolding fixed_translation[OF *]
+  by (auto split: option.splits elim!: reads_mem_val.elims dest!: accepts_from_nth_enabledI[OF **] split del: if_split;
       cases is_fetch; fastforce simp: access_enabled_defs)
 
 lemma non_mem_event_enabledI:

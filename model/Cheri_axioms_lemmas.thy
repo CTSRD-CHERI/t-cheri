@@ -116,6 +116,7 @@ lemma available_caps_cases:
     and "r \<in> PCC ISA \<or> r \<in> IDC ISA \<longrightarrow> \<not>cap_reg_written_before_idx CC ISA j r t"
     and "r \<in> privileged_regs ISA \<longrightarrow> system_access_permitted_before_idx CC ISA j t"
   | (Mem) wk paddr bytes j sz where "t ! j = E_read_memt wk paddr sz (bytes, B1)"
+    and "\<not>is_translation_event ISA (t ! j)"
     and "cap_of_mem_bytes_method CC bytes B1 = Some c"
     and "j < i" and "j < length t" and "is_tagged_method CC c"
   using assms
@@ -151,7 +152,8 @@ lemma member_accessed_reg_capsE[elim!]:
 fun accessed_mem_caps :: "'regval event \<Rightarrow> 'cap set" where
   "accessed_mem_caps (E_read_memt rk a sz val) =
      (case cap_of_mem_bytes_method CC (fst val) (snd val) of
-        Some c \<Rightarrow> if is_tagged_method CC c then {c} else {}
+        Some c \<Rightarrow>
+         if is_tagged_method CC c \<and> \<not>is_translation_event ISA (E_read_memt rk a sz val) then {c} else {}
       | None \<Rightarrow> {})"
 | "accessed_mem_caps _ = {}"
 
@@ -220,7 +222,7 @@ end
 lemma load_mem_axiomE:
   assumes "load_mem_axiom CC ISA is_fetch t"
     and "reads_mem_val_at_idx i t = Some (paddr, sz, v, tag)"
-    and "paddr \<notin> translation_tables ISA (take i t)"
+    and "\<not>translation_event_at_idx ISA i t"
   obtains c' vaddr
   where "cap_derivable CC (available_caps CC ISA i t) c'"
     and "is_tagged_method CC c'" and "\<not>is_sealed_method CC c'"

@@ -27,11 +27,9 @@ locale CHERI_ISA_State = CHERI_ISA CC ISA + Register_Accessors read_regval write
   and read_regval :: "register_name \<Rightarrow> 'regs \<Rightarrow> 'regval option"
   and write_regval :: "register_name \<Rightarrow> 'regval \<Rightarrow> 'regs \<Rightarrow> 'regs option" +
   (* State versions of ISA model parameters *)
-  fixes s_translation_tables :: "'regs sequential_state \<Rightarrow> nat set"
-    and s_translate_address :: "nat \<Rightarrow> acctype \<Rightarrow> 'regs sequential_state \<Rightarrow> nat option"
+  fixes s_translate_address :: "nat \<Rightarrow> acctype \<Rightarrow> 'regs sequential_state \<Rightarrow> nat option"
   assumes read_absorb_write: "\<And>r v s s'. write_regval r v s = Some s' \<Longrightarrow> read_regval r s' = Some v"
     and read_ignore_write: "\<And>r r' v s s'. write_regval r v s = Some s' \<Longrightarrow> r' \<noteq> r \<Longrightarrow> read_regval r' s' = read_regval r' s"
-    and translation_tables_sound: "\<And>t s. s_allows_trace t s \<Longrightarrow> translation_tables ISA t \<subseteq> s_translation_tables s"
     and translate_address_sound: "\<And>t s vaddr paddr load.
           s_allows_trace t s \<Longrightarrow>
           translate_address ISA vaddr load t = Some paddr \<Longrightarrow>
@@ -513,16 +511,9 @@ proof -
     by (cases rule: get_mem_cap_run_trace_cases) (auto intro: that)
 qed
 
-definition no_caps_in_translation_tables :: "'regs sequential_state \<Rightarrow> bool" where
-  "no_caps_in_translation_tables s \<equiv>
-     \<forall>addr sz c. get_mem_cap addr sz s = Some c \<and> is_tagged_method CC c \<longrightarrow>
-                 addr \<notin> s_translation_tables s"
-
 lemma derivable_available_caps_subseteq_reachable_caps:
   assumes axioms: "cheri_axioms CC ISA is_fetch has_ex inv_caps t"
     and t: "s_run_trace t s = Some s'"
-    and translation_table_addrs_invariant: "s_invariant s_translation_tables t s"
-    and no_caps_in_translation_tables: "s_invariant_holds no_caps_in_translation_tables t s"
   shows "derivable (available_caps CC ISA i t) \<subseteq> reachable_caps s"
 proof (induction i rule: less_induct)
   case (less i)
@@ -570,34 +561,9 @@ proof (induction i rule: less_induct)
         case (Mem wk paddr bytes j sz)
         note read = \<open>t ! j = E_read_memt wk paddr sz (bytes, B1)\<close>
         note bytes = \<open>cap_of_mem_bytes_method CC bytes B1 = Some c\<close>
-        have addr: "paddr \<notin> translation_tables ISA (take j t)"
-        proof
-          assume paddr_j: "paddr \<in> translation_tables ISA (take j t)"
-          then have "paddr \<in> s_translation_tables s"
-            using translation_tables_sound[of "take j t" s] t \<open>j < length t\<close>
-            by (auto elim: runTraceS_nth_split)
-          moreover have "paddr \<notin> s_translation_tables s"
-          proof -
-            obtain s''
-              where s'': "s_run_trace (take j t) s = Some s''"
-                and c_s'': "get_mem_cap paddr sz s'' = Some c"
-              using t \<open>j < length t\<close> read bytes \<open>is_tagged_method CC c\<close>
-              by (cases rule: runTraceS_nth_split; cases "t ! j")
-                 (auto simp: bind_eq_Some_conv reads_mem_cap_def split: if_splits)
-            moreover have "no_caps_in_translation_tables s''"
-              using no_caps_in_translation_tables s''
-              using s_invariant_takeI[of no_caps_in_translation_tables t s j]
-              using s_invariant_run_trace_eq[of no_caps_in_translation_tables "take j t" s s'']
-              by auto
-            moreover have "s_translation_tables s'' = s_translation_tables s"
-              using translation_table_addrs_invariant s''
-              by (intro s_invariant_run_trace_eq) (auto intro: s_invariant_takeI)
-            ultimately show ?thesis
-              using \<open>is_tagged_method CC c\<close>
-              by (fastforce simp: no_caps_in_translation_tables_def bind_eq_Some_conv)
-          qed
-          ultimately show False by blast
-        qed
+        have "\<not>translation_event_at_idx ISA j t"
+          using Mem
+          by (auto simp: translation_event_at_idx_def)
         then obtain vaddr c'
           where vaddr: "translate_address ISA vaddr Load (take j t) = Some paddr"
             and c': "c' \<in> derivable (available_caps CC ISA j t)"
@@ -650,8 +616,6 @@ lemma get_reg_cap_intra_domain_trace_reachable:
     and C: "invoked_caps \<subseteq> C"
     (*and no_exception: "\<not>hasException t (instr_sem ISA instr)"
     and no_ccall: "invoked_caps ISA instr t = {}"*)
-    and translation_table_addrs_invariant: "s_invariant s_translation_tables t s"
-    and no_caps_in_translation_tables: "s_invariant_holds no_caps_in_translation_tables t s"
     and tag: "is_tagged_method CC c"
     and priv: "r \<in> privileged_regs ISA \<longrightarrow> system_access_reachable_plus C s"
   (* TODO: shows "c \<in> reachable_caps s \<or> (r \<in> (PCC ISA \<union> IDC ISA) \<and> c \<in> invoked_caps)" *)
@@ -699,7 +663,7 @@ proof -
         unfolding cheri_axioms_def
         by (auto elim!: store_cap_reg_axiomE simp: cap_derivable_iff_derivable)
       moreover have "derivable (available_caps CC ISA j t) \<subseteq> reachable_caps s"
-        using axioms s' translation_table_addrs_invariant no_caps_in_translation_tables
+        using axioms s'
         by (intro derivable_available_caps_subseteq_reachable_caps)
       ultimately show ?thesis
         using reachable_caps_subset_plus plus_subset_reachable_caps_plus[of invoked_caps s]
@@ -712,8 +676,6 @@ lemma reachable_caps_trace_intradomain_monotonicity:
   assumes axioms: "cheri_axioms CC ISA is_fetch False invoked_caps t"
     and s': "s_run_trace t s = Some s'"
     and addr_trans_inv: "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t s"
-    and translation_table_addrs_invariant: "s_invariant s_translation_tables t s"
-    and no_caps_in_translation_tables: "s_invariant_holds no_caps_in_translation_tables t s"
   shows "reachable_caps_plus C s' \<subseteq> reachable_caps_plus (C \<union> invoked_caps) s"
 proof
   fix c
@@ -722,12 +684,12 @@ proof
   proof induction
     case (Reg r c)
     then show ?case
-      using axioms s' translation_table_addrs_invariant no_caps_in_translation_tables
+      using axioms s'
       by (intro get_reg_cap_intra_domain_trace_reachable) auto
   next
     case (SysReg r c c')
     then show ?case
-      using axioms s' translation_table_addrs_invariant no_caps_in_translation_tables
+      using axioms s'
       by (intro get_reg_cap_intra_domain_trace_reachable) (auto simp: system_access_reachable_plus_def)
   next
     case (Mem addr c vaddr c')
@@ -768,8 +730,6 @@ lemma reachable_caps_plus_instr_trace_intradomain_monotonicity:
     and s': "s_run_trace t s = Some s'"
     and no_exception: "\<not>instr_raises_ex ISA instr t"
     and addr_trans_inv: "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t s"
-    and translation_table_addrs_invariant: "s_invariant s_translation_tables t s"
-    and no_caps_in_translation_tables: "s_invariant_holds no_caps_in_translation_tables t s"
   shows "reachable_caps_plus C s' \<subseteq> reachable_caps_plus (C \<union> invokes_caps ISA instr t) s"
   using assms instr_cheri_axioms[OF t ta]
   by (intro reachable_caps_trace_intradomain_monotonicity) auto
@@ -781,8 +741,6 @@ lemma reachable_caps_instr_trace_intradomain_monotonicity:
     and no_exception: "\<not>instr_raises_ex ISA instr t"
     and invoked_caps_reachable: "invokes_caps ISA instr t \<subseteq> reachable_caps s"
     and addr_trans_inv: "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t s"
-    and translation_table_addrs_invariant: "s_invariant s_translation_tables t s"
-    and no_caps_in_translation_tables: "s_invariant_holds no_caps_in_translation_tables t s"
   shows "reachable_caps s' \<subseteq> reachable_caps s"
 proof -
   have "reachable_caps_plus {} s' \<subseteq> reachable_caps_plus ({} \<union> invokes_caps ISA instr t) s"
@@ -799,8 +757,6 @@ lemma reachable_caps_plus_fetch_trace_intradomain_monotonicity:
     and s': "s_run_trace t s = Some s'"
     and no_exception: "\<not>fetch_raises_ex ISA t"
     and addr_trans_inv: "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t s"
-    and translation_table_addrs_invariant: "s_invariant s_translation_tables t s"
-    and no_caps_in_translation_tables: "s_invariant_holds no_caps_in_translation_tables t s"
   shows "reachable_caps_plus C s' \<subseteq> reachable_caps_plus C s"
 proof -
   have "reachable_caps_plus C s' \<subseteq> reachable_caps_plus (C \<union> {}) s"
@@ -883,8 +839,6 @@ lemma reachable_caps_plus_instrs_trace_intradomain_monotonicity:
     and s': "s_run_trace t s = Some s'"
     and no_exception: "\<not>instrs_raise_ex ISA n t"
     and addr_trans_inv: "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t s"
-    and translation_table_addrs_invariant: "s_invariant s_translation_tables t s"
-    and no_caps_in_translation_tables: "s_invariant_holds no_caps_in_translation_tables t s"
   shows "reachable_caps s' \<subseteq> reachable_caps_plus (instrs_invoke_caps ISA n t) s"
 proof (use assms in \<open>induction n arbitrary: s t\<close>)
   case 0
@@ -917,10 +871,7 @@ next
       by (auto simp: hasTrace_iff_Traces_final final_def)
     have invs':
       "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t' s''"
-      "s_invariant s_translation_tables t' s''"
-      "s_invariant_holds no_caps_in_translation_tables t' s''"
       using tf s'' Bind Suc.prems
-      using s_invariant_run_trace_eq[of no_caps_in_translation_tables tf s s'']
       by (auto simp: s_invariant_append)
     have ta': "fetch_assms tf" "instr_assms t'"
       using Bind Suc.prems fetch_assms_appendE
@@ -951,10 +902,7 @@ next
         by (auto simp: hasTrace_iff_Traces_final final_def)
       have invs'':
         "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t'' s'''"
-        "s_invariant s_translation_tables t'' s'''"
-        "s_invariant_holds no_caps_in_translation_tables t'' s'''"
         using invs' s''' Bind
-        using s_invariant_run_trace_eq[of no_caps_in_translation_tables ti s'' s''']
         by (auto simp: s_invariant_append)
       have ta'': "instr_assms ti" "fetch_assms t''"
         using Bind ta' instr_assms_appendE
@@ -992,8 +940,6 @@ lemma reachable_caps_instrs_trace_intradomain_monotonicity:
     and no_exception: "\<not>instrs_raise_ex ISA n t"
     and invoked_caps_reachable: "instrs_invoke_caps ISA n t \<subseteq> reachable_caps s"
     and addr_trans_inv: "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t s"
-    and translation_table_addrs_invariant: "s_invariant s_translation_tables t s"
-    and no_caps_in_translation_tables: "s_invariant_holds no_caps_in_translation_tables t s"
   shows "reachable_caps s' \<subseteq> reachable_caps s"
 proof -
   from assms have "reachable_caps s' \<subseteq> reachable_caps_plus (instrs_invoke_caps ISA n t) s"
