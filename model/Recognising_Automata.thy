@@ -892,6 +892,449 @@ qed
 
 end
 
+locale Cap_Axiom_Assm_Automaton = Cap_Axiom_Automaton CC ISA enabled
+  for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
+    and enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool" +
+  fixes ex_traces :: bool
+    and ev_assms :: "'regval event \<Rightarrow> bool"
+  assumes non_cap_event_enabled: "\<And>e. non_cap_event e \<Longrightarrow> enabled s e"
+    and read_non_special_regs_enabled: "\<And>r v. r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> privileged_regs ISA \<Longrightarrow> enabled s (E_read_reg r v)"
+begin
+
+definition "trace_assms t \<equiv> \<forall>e \<in> set t. ev_assms e"
+
+lemma trace_assms_append[iff]: "trace_assms (t1 @ t2) \<longleftrightarrow> trace_assms t1 \<and> trace_assms t2"
+  by (auto simp: trace_assms_def)
+
+definition "isException m \<equiv> ((\<exists>e. m = Exception e) \<or> (\<exists>msg. m = Fail msg)) \<and> ex_traces"
+
+definition finished :: "('regval,'a,'ex) monad \<Rightarrow> bool" where
+  "finished m = ((\<exists>a. m = Done a) \<or> isException m)"
+
+lemma finishedE:
+  assumes "finished m"
+  obtains (Done) a where "m = Done a"
+  | (Ex) "isException m"
+  using assms
+  by (auto simp: finished_def)
+
+lemma finished_cases:
+  assumes "finished m"
+  obtains (Done) a where "m = Done a" | (Fail) msg where "m = Fail msg" | (Ex) e where "m = Exception e"
+  using assms
+  by (auto simp: finished_def isException_def)
+
+lemma finished_Done[intro, simp]:
+  "finished (Done a)"
+  by (auto simp: finished_def)
+
+lemma finished_Fail[intro, simp]:
+  "finished (Fail msg) \<Longrightarrow> finished (Fail msg')"
+  unfolding finished_def isException_def
+  by auto
+
+lemma finished_Exception[intro, simp]:
+  "finished (Exception e) \<Longrightarrow> finished (Exception e')"
+  unfolding finished_def isException_def
+  by auto
+
+lemma finished_isException[intro, simp]:
+  "isException m \<Longrightarrow> finished m"
+  by (auto simp: finished_def)
+
+lemma finished_bind_left:
+  assumes "finished (m \<bind> f)"
+  shows "finished m"
+  using assms
+  unfolding finished_def isException_def
+  by (cases m) auto
+
+definition
+  "traces_enabled m s \<equiv>
+     \<forall>t m'. (m, t, m') \<in> Traces \<and> finished m' \<and> trace_assms t \<longrightarrow> trace_enabled s t"
+
+lemma traces_enabled_accepts_fromI:
+  assumes "hasTrace t m" and "traces_enabled m s" and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
+    and "trace_assms t"
+  shows "accepts_from s t"
+  using assms
+  unfolding traces_enabled_def finished_def isException_def
+  unfolding hasTrace_iff_Traces_final hasException_iff_Traces_Exception hasFailure_iff_Traces_Fail
+  unfolding runTrace_iff_Traces[symmetric]
+  by (intro trace_enabled_acceptI) (auto elim!: final_cases)
+
+named_theorems traces_enabledI
+
+lemma traces_enabled_bind[traces_enabledI]:
+  assumes "traces_enabled m s"
+    and "\<And>t a. Run m t a \<Longrightarrow> trace_assms t \<Longrightarrow> traces_enabled (f a) (run s t)"
+  shows "traces_enabled (m \<bind> f) s"
+  using assms
+  by (auto simp: traces_enabled_def trace_enabled_append_iff
+      elim!: bind_Traces_cases dest!: finished_bind_left;
+      fastforce)
+
+lemma non_cap_trace_enabledI:
+  assumes "non_cap_trace t"
+  shows "trace_enabled s t"
+  using assms
+  by (induction t) (auto simp: non_cap_event_enabled non_cap_event_axiom_step_inv)
+
+lemma non_cap_exp_trace_enabledI:
+  assumes m: "non_cap_exp m"
+    and t: "(m, t, m') \<in> Traces"
+  shows "trace_enabled s t"
+  by (cases rule: non_cap_exp_Traces_cases[OF m t])
+     (auto intro: non_cap_trace_enabledI read_non_special_regs_enabled simp: trace_enabled_append_iff)
+
+lemma non_cap_exp_traces_enabledI:
+  assumes "non_cap_exp m"
+  shows "traces_enabled m s"
+  using assms
+  by (auto simp: traces_enabled_def intro: non_cap_exp_trace_enabledI)
+
+lemma traces_enabled_let[traces_enabledI]:
+  assumes "traces_enabled (f y) s"
+  shows "traces_enabled (let x = y in f x) s"
+  using assms
+  by auto
+
+lemma traces_enabled_case_prod[traces_enabledI]:
+  assumes "\<And>x y. z = (x, y) \<Longrightarrow> traces_enabled (f x y) s"
+  shows "traces_enabled (case z of (x, y) \<Rightarrow> f x y) s"
+  using assms
+  by auto
+
+lemma traces_enabled_if[traces_enabledI]:
+  assumes "c \<Longrightarrow> traces_enabled m1 s" and "\<not>c \<Longrightarrow> traces_enabled m2 s"
+  shows "traces_enabled (if c then m1 else m2) s"
+  using assms
+  by auto
+
+lemma traces_enabled_if_ignore_cond:
+  assumes "traces_enabled m1 s" and "traces_enabled m2 s"
+  shows "traces_enabled (if c then m1 else m2) s"
+  using assms
+  by auto
+
+lemma traces_enabled_and_boolM[traces_enabledI]:
+  assumes "traces_enabled m1 s"
+    and "\<And>t. Run m1 t True \<Longrightarrow> traces_enabled m2 (run s t)"
+  shows "traces_enabled (and_boolM m1 m2) s"
+  using assms
+  by (auto simp: and_boolM_def intro!: traces_enabledI intro: non_cap_exp_traces_enabledI non_cap_expI)
+
+lemma traces_enabled_or_boolM[traces_enabledI]:
+  assumes "traces_enabled m1 s"
+    and "\<And>t. Run m1 t False \<Longrightarrow> traces_enabled m2 (run s t)"
+  shows "traces_enabled (or_boolM m1 m2) s"
+  using assms
+  by (auto simp: or_boolM_def intro!: traces_enabledI intro: non_cap_exp_traces_enabledI non_cap_expI)
+
+lemma traces_enabled_foreachM_inv:
+  assumes "\<And>x vars s. P vars s \<Longrightarrow> x \<in> set xs \<Longrightarrow> traces_enabled (body x vars) s"
+    and "\<And>x vars s t vars'. P vars s \<Longrightarrow> x \<in> set xs \<Longrightarrow> Run (body x vars) t vars' \<Longrightarrow> P vars' (run s t)"
+    and "P vars s"
+  shows "traces_enabled (foreachM xs vars body) s"
+  by (use assms in \<open>induction xs arbitrary: vars s\<close>;
+      fastforce intro!: traces_enabledI intro: non_cap_exp_traces_enabledI non_cap_expI)
+
+lemma traces_enabled_try_catch:
+  assumes "traces_enabled m s"
+    and "\<And>tm e th m'.
+           \<lbrakk>(m, tm, Exception e) \<in> Traces; (h e, th, m') \<in> Traces; finished m'; trace_assms tm\<rbrakk> \<Longrightarrow>
+           trace_enabled s (tm @ th)"
+  shows "traces_enabled (try_catch m h) s"
+proof -
+  have *: "finished (try_catch m h) \<longleftrightarrow> (\<exists>a. m = Done a) \<or> (\<exists>msg. m = Fail msg \<and> finished m) \<or> (\<exists>e. m = Exception e \<and> (h e, [], h e) \<in> Traces \<and> finished (h e))" for m
+    by (cases m) (auto simp: finished_def isException_def)
+  show ?thesis
+    using assms
+    by (fastforce simp: traces_enabled_def trace_enabled_append_iff * elim!: try_catch_Traces_cases)
+qed
+
+lemma traces_enabled_liftR[traces_enabledI]:
+  assumes "traces_enabled m s"
+  shows "traces_enabled (liftR m) s"
+  using assms
+  unfolding liftR_def
+  by (intro traces_enabled_try_catch) (auto simp: traces_enabled_def)
+
+definition
+  "early_returns_enabled m s \<equiv>
+     traces_enabled m s \<and>
+     (\<forall>t a. (m, t, Exception (Inl a)) \<in> Traces \<and> trace_assms t \<longrightarrow> trace_enabled s t)"
+
+lemma traces_enabled_catch_early_return[traces_enabledI]:
+  assumes "early_returns_enabled m s"
+  shows "traces_enabled (catch_early_return m) s"
+  using assms
+  unfolding catch_early_return_def
+  by (intro traces_enabled_try_catch)
+     (auto simp: traces_enabled_def early_returns_enabled_def split: sum.splits)
+
+lemma liftR_no_early_return[simp]:
+  shows "(liftR m, t, Exception (Inl e)) \<in> Traces \<longleftrightarrow> False"
+  by (induction m arbitrary: t) (auto simp: liftR_def elim: Traces_cases)
+
+lemma early_returns_enabled_liftR[traces_enabledI]:
+  assumes "traces_enabled m s"
+  shows "early_returns_enabled (liftR m) s"
+  using assms
+  by (auto simp: early_returns_enabled_def intro: traces_enabled_liftR)
+
+lemma early_returns_enabled_return[traces_enabledI]:
+  "early_returns_enabled (return a) s"
+  by (auto simp: early_returns_enabled_def traces_enabled_def)
+
+lemma early_returns_enabled_bind[traces_enabledI]:
+  assumes m: "early_returns_enabled m s"
+    and f: "\<And>t a. Run m t a \<Longrightarrow> trace_assms t \<Longrightarrow> early_returns_enabled (f a) (run s t)"
+  shows "early_returns_enabled (m \<bind> f) s"
+proof -
+  { fix t a
+    assume "(m \<bind> f, t, Exception (Inl a)) \<in> Traces" and t: "trace_assms t"
+    then have "trace_enabled s t"
+    proof (cases rule: bind_Traces_cases)
+      case (Left m'')
+      then consider "m'' = Exception (Inl a)" | a' where "m'' = Done a'" and "f a' = Exception (Inl a)"
+        by (cases m'') auto
+      then show ?thesis
+        using Left m t
+        by cases (auto simp: early_returns_enabled_def traces_enabled_def)
+    next
+      case (Bind tm am tf)
+      then show ?thesis
+        using Bind m f[of tm am] t
+        by (auto simp: trace_enabled_append_iff early_returns_enabled_def traces_enabled_def)
+    qed
+  }
+  then show ?thesis
+    using assms
+    by (auto intro: traces_enabled_bind simp: early_returns_enabled_def)
+qed
+
+lemma early_returns_enabled_early_return[traces_enabledI]:
+  "early_returns_enabled (early_return a) s"
+  by (auto simp: early_returns_enabled_def early_return_def throw_def traces_enabled_def)
+
+lemma early_returns_enabled_let[traces_enabledI]:
+  assumes "early_returns_enabled (f y) s"
+  shows "early_returns_enabled (let x = y in f x) s"
+  using assms
+  by auto
+
+lemma early_returns_enabled_case_prod[traces_enabledI]:
+  assumes "\<And>x y. z = (x, y) \<Longrightarrow> early_returns_enabled (f x y) s"
+  shows "early_returns_enabled (case z of (x, y) \<Rightarrow> f x y) s"
+  using assms
+  by auto
+
+lemma early_returns_enabled_if[traces_enabledI]:
+  assumes "c \<Longrightarrow> early_returns_enabled m1 s" and "\<not>c \<Longrightarrow> early_returns_enabled m2 s"
+  shows "early_returns_enabled (if c then m1 else m2) s"
+  using assms
+  by auto
+
+lemma early_returns_enabled_if_ignore_cond:
+  assumes "early_returns_enabled m1 s" and "early_returns_enabled m2 s"
+  shows "early_returns_enabled (if c then m1 else m2) s"
+  using assms
+  by auto
+
+lemma early_returns_enabled_and_boolM[traces_enabledI]:
+  assumes "early_returns_enabled m1 s"
+    and "\<And>t. Run m1 t True \<Longrightarrow> early_returns_enabled m2 (run s t)"
+  shows "early_returns_enabled (and_boolM m1 m2) s"
+  using assms
+  by (auto simp: and_boolM_def intro!: traces_enabledI intro: non_cap_exp_traces_enabledI non_cap_expI)
+
+lemma early_returns_enabled_or_boolM[traces_enabledI]:
+  assumes "early_returns_enabled m1 s"
+    and "\<And>t. Run m1 t False \<Longrightarrow> early_returns_enabled m2 (run s t)"
+  shows "early_returns_enabled (or_boolM m1 m2) s"
+  using assms
+  by (auto simp: or_boolM_def intro!: traces_enabledI intro: non_cap_exp_traces_enabledI non_cap_expI)
+
+lemma early_returns_enabled_foreachM_inv:
+  assumes "\<And>x vars s. P vars s \<Longrightarrow> x \<in> set xs \<Longrightarrow> early_returns_enabled (body x vars) s"
+    and "\<And>x vars s t vars'. P vars s \<Longrightarrow> x \<in> set xs \<Longrightarrow> Run (body x vars) t vars' \<Longrightarrow> P vars' (run s t)"
+    and "P vars s"
+  shows "early_returns_enabled (foreachM xs vars body) s"
+  by (use assms in \<open>induction xs arbitrary: vars s\<close>;
+      fastforce intro!: traces_enabledI intro: non_cap_exp_traces_enabledI non_cap_expI)
+
+lemma non_cap_exp_Run_inv_traces_enabled_runE:
+  assumes "Run m1 t a" and "non_cap_exp m1" and "traces_enabled m2 s"
+  shows "traces_enabled m2 (run s t)"
+  using assms
+  by (auto simp: non_cap_exp_Run_run_invI)
+
+lemma non_cap_exp_Run_inv_early_returns_enabled_runE:
+  assumes "Run m1 t a" and "non_cap_exp m1" and "early_returns_enabled m2 s"
+  shows "early_returns_enabled m2 (run s t)"
+  using assms
+  by (auto simp: non_cap_exp_Run_run_invI)
+
+lemma accessible_regs_no_writes_run:
+  assumes t: "Run m t a"
+    and m: "runs_no_reg_writes_to {r} m"
+    and s: "r \<in> accessible_regs s"
+  shows "r \<in> accessible_regs (run s t)"
+proof -
+  have no_write: "\<forall>v. E_write_reg r v \<notin> set t"
+    using m t
+    by (auto simp: runs_no_reg_writes_to_def)
+  show ?thesis
+  proof (use s no_write in \<open>induction t arbitrary: s\<close>)
+    case (Cons e t)
+    then have "r \<in> accessible_regs (axiom_step s e)" and "\<forall>v. E_write_reg r v \<notin> set t"
+      by (auto simp: accessible_regs_def)
+    from Cons.IH[OF this] show ?case by auto
+  qed auto
+qed
+
+lemma no_reg_writes_to_mono:
+  assumes "runs_no_reg_writes_to Rs m"
+    and "Rs' \<subseteq> Rs"
+  shows "runs_no_reg_writes_to Rs' m"
+  using assms
+  by (auto simp: runs_no_reg_writes_to_def)
+
+lemma accessible_regs_no_writes_run_subset:
+  assumes t: "Run m t a" and m: "runs_no_reg_writes_to Rs m"
+    and Rs: "Rs \<subseteq> accessible_regs s"
+  shows "Rs \<subseteq> accessible_regs (run s t)"
+  using t Rs no_reg_writes_to_mono[OF m]
+  by (auto intro: accessible_regs_no_writes_run)
+
+(*method accessible_regsI uses simp assms =
+  (match conclusion in \<open>Rs \<subseteq> accessible_regs (run s t)\<close> for Rs s t \<Rightarrow>
+     \<open>match premises in t: \<open>Run_inv m t a regs\<close> for m a regs \<Rightarrow>
+        \<open>rule accessible_regs_no_writes_run_subset[OF t],
+         solves \<open>use assms in \<open>no_reg_writes_toI simp: simp\<close>,
+         accessible_regsI simp: simp assms: assms\<close>\<close>\<close>
+   \<bar> \<open>Rs \<subseteq> accessible_regs s\<close> for Rs s \<Rightarrow> \<open>use assms in \<open>auto simp: simp\<close>\<close>)*)
+
+named_theorems accessible_regsE
+named_theorems accessible_regsI
+
+method accessible_regs_step uses simp assms =
+  ((erule accessible_regsE eqTrueE)
+    | (rule accessible_regsI TrueI)
+    | (erule accessible_regs_no_writes_run_subset,
+       solves \<open>use assms in \<open>no_reg_writes_toI simp: simp\<close>\<close>))
+
+method accessible_regsI_with methods solve uses simp assms =
+  ((erule accessible_regsE eqTrueE; accessible_regsI_with solve simp: simp assms: assms)
+    | (rule accessible_regsI TrueI; accessible_regsI_with solve simp: simp assms: assms)
+    | (erule accessible_regs_no_writes_run_subset,
+       solves \<open>use assms in \<open>no_reg_writes_toI simp: simp\<close>\<close>,
+       accessible_regsI_with solve simp: simp assms: assms)
+    | solve)
+
+method accessible_regsI uses simp assms =
+  (accessible_regsI_with
+     \<open>(use assms in \<open>no_reg_writes_toI simp: simp\<close>)
+       | (use assms in \<open>auto simp: simp\<close>)\<close>
+     simp: simp assms: assms)
+
+definition "derivable_caps s \<equiv> {c. is_tagged_method CC c \<longrightarrow> c \<in> derivable (accessed_caps s)}"
+
+named_theorems derivable_capsI
+named_theorems derivable_capsE
+
+lemma accessed_caps_run_mono:
+  "accessed_caps s \<subseteq> accessed_caps (run s t)"
+  by (rule subsetI) (induction t arbitrary: s; auto)
+
+lemma derivable_caps_run_mono:
+  "derivable_caps s \<subseteq> derivable_caps (run s t)"
+  using derivable_mono[OF accessed_caps_run_mono]
+  by (auto simp: derivable_caps_def)
+
+lemma derivable_caps_run_imp:
+  "c \<in> derivable_caps s \<Longrightarrow> c \<in> derivable_caps (run s t)"
+  using derivable_caps_run_mono
+  by auto
+
+method derivable_caps_step =
+  (rule derivable_capsI TrueI
+      | erule derivable_capsE eqTrueE
+      | rule derivable_caps_run_imp)
+
+method derivable_capsI_with methods solve uses intro elim simp assms =
+  ((rule intro derivable_capsI TrueI
+      | erule elim derivable_capsE eqTrueE
+      | rule derivable_caps_run_imp
+      | solve (*
+      | solves \<open>use assms in \<open>auto simp: simp\<close>\<close>*));
+   derivable_capsI_with solve intro: intro elim: elim simp: simp assms: assms)
+
+method derivable_capsI uses intro elim simp assms =
+  (derivable_capsI_with
+     \<open>(solves \<open>accessible_regsI simp: simp assms: assms\<close>)\<close>
+     intro: intro elim: elim simp: simp assms: assms)
+
+method try_simp_traces_enabled =
+  ((match conclusion in \<open>traces_enabled m2 (run s t)\<close> for m2 s t \<Rightarrow>
+     \<open>match premises in m1: \<open>Run m1 t a\<close> for m1 a \<Rightarrow>
+        \<open>(rule non_cap_exp_Run_inv_traces_enabled_runE[OF m1], solves \<open>non_cap_expI\<close>)?\<close>\<close>
+   \<bar> \<open>early_returns_enabled m2 (run s t)\<close> for m2 s t \<Rightarrow>
+     \<open>match premises in m1: \<open>Run m1 t a\<close> for m1 a \<Rightarrow>
+        \<open>(rule non_cap_exp_Run_inv_early_returns_enabled_runE[OF m1], solves \<open>non_cap_expI\<close>)?\<close>\<close>)?)
+
+named_theorems traces_enabled_combinatorI
+
+lemmas traces_enabled_builtin_combinatorsI =
+  traces_enabled_bind traces_enabled_and_boolM traces_enabled_or_boolM
+  early_returns_enabled_bind early_returns_enabled_and_boolM early_returns_enabled_or_boolM
+
+named_theorems traces_enabled_split
+declare option.split[where P = "\<lambda>m. traces_enabled m s" for s, traces_enabled_split]
+declare prod.split[where P = "\<lambda>m. traces_enabled m s" for s, traces_enabled_split]
+declare sum.split[where P = "\<lambda>m. traces_enabled m s" for s, traces_enabled_split]
+declare bool.split[where P = "\<lambda>m. traces_enabled m s" for s, traces_enabled_split]
+
+method traces_enabled_step uses intro elim =
+  ((rule intro TrueI)
+    | (erule elim eqTrueE)
+    | ((rule traces_enabled_combinatorI traces_enabled_builtin_combinatorsI[rotated], try_simp_traces_enabled))
+    | (rule traces_enabled_split[THEN iffD2]; intro allI conjI impI))
+
+method traces_enabledI_with methods solve uses intro elim =
+  ((rule intro TrueI; traces_enabledI_with solve intro: intro elim: elim)
+    | (erule elim eqTrueE; traces_enabledI_with solve intro: intro elim: elim)
+    | ((rule traces_enabled_combinatorI traces_enabled_builtin_combinatorsI[rotated], try_simp_traces_enabled); traces_enabledI_with solve intro: intro elim: elim)
+    | (rule traces_enabledI; traces_enabledI_with solve intro: intro elim: elim)
+    | (rule traces_enabled_split[THEN iffD2]; intro conjI impI; traces_enabledI_with solve intro: intro elim: elim)
+    | solve)
+
+(*method traces_enabledI uses simp intro elim assms =
+  (traces_enabledI_with
+     \<open>(solves \<open>accessible_regsI simp: simp assms: assms\<close>)
+      | (solves \<open>derivable_capsI simp: simp assms: assms\<close>)
+      | (use assms in \<open>auto intro!: intro elim!: elim simp: simp\<close>)?\<close>
+     intro: intro)*)
+
+method traces_enabledI uses simp intro elim assms =
+  ((traces_enabled_step intro: intro elim: elim; traces_enabledI simp: simp intro: intro elim: elim assms: assms)
+    | (accessible_regs_step simp: simp assms: assms; solves \<open>traces_enabledI simp: simp intro: intro elim: elim assms: assms\<close>)
+    | (derivable_caps_step; solves \<open>traces_enabledI simp: simp intro: intro elim: elim assms: assms\<close>)
+    | (solves \<open>no_reg_writes_toI simp: simp\<close>)
+    | (use assms in \<open>auto intro!: intro elim!: elim simp: simp\<close>)?)
+
+(* method traces_enabledI = (intro traces_enabledI preserves_invariantI) *)
+
+lemma if_derivable_capsI[derivable_capsI]:
+  assumes "cond \<Longrightarrow> c1 \<in> derivable_caps s" and "\<not>cond \<Longrightarrow> c2 \<in> derivable_caps s"
+  shows "(if cond then c1 else c2) \<in> derivable_caps s"
+  using assms
+  by auto
+
+
+end
+
 locale Cap_Axiom_Inv_Automaton = Cap_Axiom_Automaton CC ISA enabled +
   State_Invariant get_regval set_regval invariant inv_regs
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
@@ -1378,6 +1821,68 @@ lemma if_derivable_capsI[derivable_capsI]:
 
 end
 
+locale Write_Cap_Assm_Automaton =
+  Write_Cap_Automaton CC ISA ex_traces invoked_caps
+  for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
+  and ex_traces :: bool and invoked_caps :: "'cap set" +
+  fixes ev_assms :: "'regval event \<Rightarrow> bool"
+begin
+
+sublocale Cap_Axiom_Assm_Automaton where enabled = enabled
+proof
+  fix s e
+  assume "non_cap_event e"
+  then show "enabled s e"
+    by (cases e) auto
+next
+  fix s r v
+  assume "r \<notin> special_reg_names"
+  then show "enabled s (E_read_reg r v)"
+    by auto
+qed
+
+lemma read_reg_trace_enabled:
+  assumes t: "(read_reg r, t, m') \<in> Traces"
+    and r: "name r \<in> privileged_regs ISA \<longrightarrow> system_reg_access s \<or> ex_traces"
+  shows "trace_enabled s t"
+  by (use t in \<open>auto simp: read_reg_def elim!: Read_reg_TracesE split: option.splits\<close>)
+     (use r in \<open>auto\<close>)
+
+lemma traces_enabled_read_reg:
+  assumes "name r \<in> privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> ex_traces)"
+  shows "traces_enabled (read_reg r) s"
+  using assms
+  unfolding traces_enabled_def
+  by (blast intro: read_reg_trace_enabled)
+
+lemma write_reg_trace_enabled:
+  assumes "(write_reg r v, t, m') \<in> Traces"
+    and "enabled s (E_write_reg (name r) (regval_of r v))"
+  shows "trace_enabled s t"
+  using assms
+  by (auto simp add: write_reg_def simp del: enabled.simps elim!: Write_reg_TracesE)
+
+lemma traces_enabled_write_reg:
+  assumes "enabled s (E_write_reg (name r) (regval_of r v))"
+  shows "traces_enabled (write_reg r v) s"
+  using assms
+  unfolding traces_enabled_def
+  by (blast intro: write_reg_trace_enabled)
+
+lemma traces_enabled_reg_axioms:
+  assumes "traces_enabled m initial" and "hasTrace t m"
+    and "trace_assms t"
+    and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
+  shows "store_cap_reg_axiom CC ISA ex_traces invoked_caps t"
+    and "store_cap_mem_axiom CC ISA t"
+    and "read_reg_axiom CC ISA ex_traces t"
+  using assms
+  by (intro recognises_store_cap_reg_read_reg_axioms;
+      elim traces_enabled_accepts_fromI;
+      auto)+
+
+end
+
 locale Write_Cap_Inv_Automaton =
   Write_Cap_Automaton CC ISA ex_traces invoked_caps +
   State_Invariant get_regval set_regval invariant inv_regs
@@ -1445,8 +1950,8 @@ end
 
 locale Capability_ISA_Fixed_Translation = Capability_ISA CC ISA
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa" +
-  fixes translation_assm :: "'regval trace \<Rightarrow> bool"
-  assumes fixed_translation: "\<And>i t addr load. translation_assm t \<Longrightarrow> translate_address ISA addr load (take i t) = translate_address ISA addr load []"
+  fixes translation_assms :: "'regval trace \<Rightarrow> bool"
+  assumes fixed_translation: "\<And>i t addr load. translation_assms t \<Longrightarrow> translate_address ISA addr load (take i t) = translate_address ISA addr load []"
 
 fun non_store_event :: "'regval event \<Rightarrow> bool" where
   "non_store_event (E_write_mem _ paddr sz v _) = False"
@@ -1539,7 +2044,7 @@ fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Righta
 sublocale Cap_Axiom_Automaton where enabled = enabled ..
 
 lemma accepts_store_mem_axiom:
-  assumes *: "translation_assm t" and  **: "accepts t"
+  assumes *: "translation_assms t" and  **: "accepts t"
   shows "store_mem_axiom CC ISA t"
   using accepts_from_nth_enabledI[OF **]
   unfolding store_mem_axiom_def
@@ -1556,7 +2061,7 @@ lemma accepts_store_tag_axiom:
   by (fastforce simp: access_enabled_defs bind_eq_Some_conv Let_def elim!: writes_mem_val.elims)
 
 lemma accepts_load_mem_axiom:
-  assumes *: "translation_assm t" and  **: "accepts t"
+  assumes *: "translation_assms t" and  **: "accepts t"
   shows "load_mem_axiom CC ISA is_fetch t"
   unfolding load_mem_axiom_def
   unfolding reads_mem_val_at_idx_def cap_derivable_iff_derivable
@@ -1577,11 +2082,57 @@ lemma non_mem_trace_enabledI:
 
 end
 
+locale Mem_Assm_Automaton =
+  Mem_Automaton translation_assms CC ISA is_fetch
+  for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
+    and translation_assms :: "'regval event list \<Rightarrow> bool"
+    and is_fetch :: bool and ex_traces :: bool +
+  fixes ev_assms :: "'regval event \<Rightarrow> bool"
+begin
+
+sublocale Cap_Axiom_Assm_Automaton where enabled = enabled and ex_traces = ex_traces
+proof
+  fix s e
+  assume "non_cap_event e"
+  then show "enabled s e"
+    by (cases e) auto
+next
+  fix s r v
+  assume "r \<notin> special_reg_names"
+  then show "enabled s (E_read_reg r v)"
+    by auto
+qed
+
+lemma non_mem_exp_trace_enabledI:
+  "trace_enabled s t" if "non_mem_exp m" and "(m, t, m') \<in> Traces"
+  using that
+  by (auto simp: non_mem_exp_def intro: non_mem_trace_enabledI)
+
+lemma non_mem_exp_traces_enabledI:
+  "traces_enabled m s" if "non_mem_exp m"
+  using that
+  by (auto simp: traces_enabled_def intro: non_mem_exp_trace_enabledI)
+
+lemma traces_enabled_mem_axioms:
+  assumes "traces_enabled m initial" and "hasTrace t m"
+    and "trace_assms t"
+    and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
+    and "translation_assms t"
+  shows "store_mem_axiom CC ISA t"
+    and "store_tag_axiom CC ISA t"
+    and "load_mem_axiom CC ISA is_fetch t"
+  using assms
+  by (intro accepts_store_mem_axiom accepts_store_tag_axiom accepts_load_mem_axiom
+            traces_enabled_accepts_fromI;
+      auto)+
+
+end
+
 locale Mem_Inv_Automaton =
-  Mem_Automaton translation_assm CC ISA is_fetch +
+  Mem_Automaton translation_assms CC ISA is_fetch +
   State_Invariant get_regval set_regval invariant inv_regs
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
-    and translation_assm :: "'regval event list \<Rightarrow> bool"
+    and translation_assms :: "'regval event list \<Rightarrow> bool"
     and is_fetch :: bool and ex_traces :: bool
     and get_regval :: "string \<Rightarrow> 'regstate \<Rightarrow> 'regval option"
     and set_regval :: "string \<Rightarrow> 'regval \<Rightarrow> 'regstate \<Rightarrow> 'regstate option"
@@ -1615,7 +2166,7 @@ lemma traces_enabled_mem_axioms:
   assumes "traces_enabled m initial regs" and "hasTrace t m"
     and "reads_regs_from inv_regs t regs" and "invariant regs"
     and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
-    and "translation_assm t"
+    and "translation_assms t"
   shows "store_mem_axiom CC ISA t"
     and "store_tag_axiom CC ISA t"
     and "load_mem_axiom CC ISA is_fetch t"
@@ -1686,7 +2237,7 @@ lemma non_cap_exp_trace_enabledI:
      (auto intro: non_cap_trace_enabledI simp: trace_enabled_append_iff)
 
 lemma accepts_iff_store_mem_tag_axioms:
-  assumes "translation_assm t"
+  assumes "translation_assms t"
   shows "accepts t \<longleftrightarrow> store_mem_axiom CC ISA t \<and> store_tag_axiom CC ISA t"
 proof
   assume *: "accepts t"
@@ -1714,7 +2265,7 @@ next
 qed
 
 lemma recognises_store_mem_tag_axioms:
-  assumes "translation_assm t" and "accepts t"
+  assumes "translation_assms t" and "accepts t"
   shows "store_mem_axiom CC ISA t" and "store_tag_axiom CC ISA t"
   using assms(2)
   unfolding accepts_iff_store_mem_tag_axioms[OF assms(1)]
@@ -1801,7 +2352,7 @@ lemma non_cap_exp_trace_enabledI:
      (auto intro: non_cap_trace_enabledI simp: trace_enabled_append_iff)
 
 lemma recognises_load_mem_axiom:
-  assumes "translation_assm t"
+  assumes "translation_assms t"
   shows "accepts t \<longleftrightarrow> load_mem_axiom CC ISA is_fetch t"
 proof
   assume *: "accepts t"

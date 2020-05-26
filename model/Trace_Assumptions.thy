@@ -145,74 +145,6 @@ section \<open>Assumptions about register reads and writes\<close>
 definition "no_reg_writes_to Rs m \<equiv> (\<forall>t m' r v. (m, t, m') \<in> Traces \<and> r \<in> Rs \<longrightarrow> E_write_reg r v \<notin> set t)"
 definition "runs_no_reg_writes_to Rs m \<equiv> (\<forall>t a r v. Run m t a \<and> r \<in> Rs \<longrightarrow> E_write_reg r v \<notin> set t)"
 
-locale Register_State =
-  fixes get_regval :: "string \<Rightarrow> 'regstate \<Rightarrow> 'regval option"
-    and set_regval :: "string \<Rightarrow> 'regval \<Rightarrow> 'regstate \<Rightarrow> 'regstate option"
-begin
-
-fun updates_regs :: "string set \<Rightarrow> 'regval trace \<Rightarrow> 'regstate \<Rightarrow> 'regstate option" where
-  "updates_regs R [] s = Some s"
-| "updates_regs R (E_write_reg r v # t) s =
-     (if r \<in> R
-      then Option.bind (set_regval r v s) (updates_regs R t)
-      else updates_regs R t s)"
-| "updates_regs R (_ # t) s = updates_regs R t s"
-
-fun reads_regs_from :: "string set \<Rightarrow> 'regval trace \<Rightarrow> 'regstate \<Rightarrow> bool" where
-  "reads_regs_from R [] s = True"
-| "reads_regs_from R (E_read_reg r v # t) s =
-     (if r \<in> R
-      then get_regval r s = Some v \<and> reads_regs_from R t s
-      else reads_regs_from R t s)"
-| "reads_regs_from R (E_write_reg r v # t) s =
-     (if r \<in> R
-      then (case set_regval r v s of Some s' \<Rightarrow> reads_regs_from R t s' | None \<Rightarrow> False)
-      else reads_regs_from R t s)"
-| "reads_regs_from R (_ # t) s = reads_regs_from R t s"
-
-lemma reads_regs_from_updates_regs_Some:
-  assumes "reads_regs_from R t s"
-  obtains s' where "updates_regs R t s = Some s'"
-  using assms
-  by (induction R t s rule: reads_regs_from.induct) (auto split: if_splits option.splits)
-
-named_theorems regstate_simp
-
-lemma updates_regs_append_iff[regstate_simp]:
-  "updates_regs R (t @ t') s = Option.bind (updates_regs R t s) (updates_regs R t')"
-  by (induction R t s rule: updates_regs.induct) (auto split: bind_splits)
-
-lemma reads_regs_from_append_iff[regstate_simp]:
-  "reads_regs_from R (t @ t') s \<longleftrightarrow> (reads_regs_from R t s \<and> reads_regs_from R t' (the (updates_regs R t s)))"
-  by (induction R t s rule: reads_regs_from.induct) (auto split: option.splits)
-
-lemma reads_regs_from_appendE_simp:
-  assumes "reads_regs_from Rs t regs" and "t = t1 @ t2"
-    and "the (updates_regs Rs t1 regs) = regs'"
-  obtains "reads_regs_from Rs t1 regs" and "reads_regs_from Rs t2 regs'"
-  using assms
-  by (auto simp: reads_regs_from_append_iff)
-
-lemma no_reg_writes_to_updates_regs_inv[simp]:
-  assumes "(m, t, m') \<in> Traces"
-    and "no_reg_writes_to Rs m"
-  shows "updates_regs Rs t s = Some s"
-  using assms
-proof -
-  have "\<forall>r \<in> Rs. \<forall>v. E_write_reg r v \<notin> set t"
-    using assms
-    by (auto simp: no_reg_writes_to_def)
-  then show "updates_regs Rs t s = Some s"
-    by (induction Rs t s rule: updates_regs.induct) auto
-qed
-
-lemma no_reg_writes_to_updates_regsE:
-  assumes "(m, t, m') \<in> Traces"
-    and "no_reg_writes_to Rs m"
-  obtains "updates_regs Rs t s = Some s"
-  using assms
-  by auto
-
 named_theorems no_reg_writes_toI
 named_theorems runs_no_reg_writes_toI
 
@@ -403,6 +335,74 @@ lemmas no_reg_write_builtins =
 method no_reg_writes_toI uses simp intro =
   (intro intro runs_no_reg_writes_toI no_reg_writes_runs_no_reg_writes no_reg_writes_toI conjI impI allI;
    auto simp: simp split del: if_split split: option.splits)
+
+locale Register_State =
+  fixes get_regval :: "string \<Rightarrow> 'regstate \<Rightarrow> 'regval option"
+    and set_regval :: "string \<Rightarrow> 'regval \<Rightarrow> 'regstate \<Rightarrow> 'regstate option"
+begin
+
+fun updates_regs :: "string set \<Rightarrow> 'regval trace \<Rightarrow> 'regstate \<Rightarrow> 'regstate option" where
+  "updates_regs R [] s = Some s"
+| "updates_regs R (E_write_reg r v # t) s =
+     (if r \<in> R
+      then Option.bind (set_regval r v s) (updates_regs R t)
+      else updates_regs R t s)"
+| "updates_regs R (_ # t) s = updates_regs R t s"
+
+fun reads_regs_from :: "string set \<Rightarrow> 'regval trace \<Rightarrow> 'regstate \<Rightarrow> bool" where
+  "reads_regs_from R [] s = True"
+| "reads_regs_from R (E_read_reg r v # t) s =
+     (if r \<in> R
+      then get_regval r s = Some v \<and> reads_regs_from R t s
+      else reads_regs_from R t s)"
+| "reads_regs_from R (E_write_reg r v # t) s =
+     (if r \<in> R
+      then (case set_regval r v s of Some s' \<Rightarrow> reads_regs_from R t s' | None \<Rightarrow> False)
+      else reads_regs_from R t s)"
+| "reads_regs_from R (_ # t) s = reads_regs_from R t s"
+
+lemma reads_regs_from_updates_regs_Some:
+  assumes "reads_regs_from R t s"
+  obtains s' where "updates_regs R t s = Some s'"
+  using assms
+  by (induction R t s rule: reads_regs_from.induct) (auto split: if_splits option.splits)
+
+named_theorems regstate_simp
+
+lemma updates_regs_append_iff[regstate_simp]:
+  "updates_regs R (t @ t') s = Option.bind (updates_regs R t s) (updates_regs R t')"
+  by (induction R t s rule: updates_regs.induct) (auto split: bind_splits)
+
+lemma reads_regs_from_append_iff[regstate_simp]:
+  "reads_regs_from R (t @ t') s \<longleftrightarrow> (reads_regs_from R t s \<and> reads_regs_from R t' (the (updates_regs R t s)))"
+  by (induction R t s rule: reads_regs_from.induct) (auto split: option.splits)
+
+lemma reads_regs_from_appendE_simp:
+  assumes "reads_regs_from Rs t regs" and "t = t1 @ t2"
+    and "the (updates_regs Rs t1 regs) = regs'"
+  obtains "reads_regs_from Rs t1 regs" and "reads_regs_from Rs t2 regs'"
+  using assms
+  by (auto simp: reads_regs_from_append_iff)
+
+lemma no_reg_writes_to_updates_regs_inv[simp]:
+  assumes "(m, t, m') \<in> Traces"
+    and "no_reg_writes_to Rs m"
+  shows "updates_regs Rs t s = Some s"
+  using assms
+proof -
+  have "\<forall>r \<in> Rs. \<forall>v. E_write_reg r v \<notin> set t"
+    using assms
+    by (auto simp: no_reg_writes_to_def)
+  then show "updates_regs Rs t s = Some s"
+    by (induction Rs t s rule: updates_regs.induct) auto
+qed
+
+lemma no_reg_writes_to_updates_regsE:
+  assumes "(m, t, m') \<in> Traces"
+    and "no_reg_writes_to Rs m"
+  obtains "updates_regs Rs t s = Some s"
+  using assms
+  by auto
 
 lemma Run_choose_bool_updates_regs[regstate_simp]:
   assumes "Run (choose_bool desc) t b"

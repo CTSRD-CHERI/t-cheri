@@ -28,6 +28,7 @@ locale CHERI_ISA_State = CHERI_ISA CC ISA + Register_Accessors read_regval write
   and write_regval :: "register_name \<Rightarrow> 'regval \<Rightarrow> 'regs \<Rightarrow> 'regs option" +
   (* State versions of ISA model parameters *)
   fixes s_translate_address :: "nat \<Rightarrow> acctype \<Rightarrow> 'regs sequential_state \<Rightarrow> nat option"
+  (* TODO: Add optional register_value state generation to Sail where the next two hold by construction *)
   assumes read_absorb_write: "\<And>r v s s'. write_regval r v s = Some s' \<Longrightarrow> read_regval r s' = Some v"
     and read_ignore_write: "\<And>r r' v s s'. write_regval r v s = Some s' \<Longrightarrow> r' \<noteq> r \<Longrightarrow> read_regval r' s' = read_regval r' s"
     and translate_address_sound: "\<And>t s vaddr paddr load.
