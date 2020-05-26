@@ -771,6 +771,75 @@ lemmas reachable_caps_fetch_trace_intradomain_monotonicity =
 
 end
 
+text \<open>TODO: Add to the Sail library\<close>
+
+fun consumesTrace :: "('regval, 'a, 'e) monad \<Rightarrow> 'regval trace \<Rightarrow> nat option" where
+  "consumesTrace m [] = (if final m then Some 0 else None)"
+| "consumesTrace m (e # t) =
+     (if final m then Some 0 else
+      case emitEvent m e of
+        Some m' \<Rightarrow> (case consumesTrace m' t of Some n \<Rightarrow> Some (Suc n) | None \<Rightarrow> None)
+      | None \<Rightarrow> None)"
+
+lemma hasTrace_iff_runTrace_final:
+  "hasTrace t m \<longleftrightarrow> (\<exists>m'. runTrace t m = Some m' \<and> final m')"
+  by (auto simp: hasTrace_def split: option.splits)
+
+lemma hasTrace_Cons_emitEvent:
+  "hasTrace (e # t) m \<longleftrightarrow> (\<exists>m'. emitEvent m e = Some m' \<and> hasTrace t m')"
+  by (cases "emitEvent m e") (auto simp: hasTrace_def)
+
+lemma final_emitEvent_None:
+  assumes "final m"
+  shows "emitEvent m e = None"
+  using assms
+  by (cases rule: final_cases) (auto simp: emitEvent_def split: event.splits)
+
+lemma final_runTrace_Nil:
+  assumes "final m"
+  shows "runTrace t m = Some m' \<longleftrightarrow> t = [] \<and> m' = m"
+  using assms
+  by (cases t) (auto simp: final_emitEvent_None)
+
+lemma final_hasTrace_Nil:
+  "final m \<Longrightarrow> hasTrace t m \<longleftrightarrow> t = []"
+  by (auto simp: hasTrace_def final_runTrace_Nil split: option.splits)
+
+lemma final_consumesTrace_Nil:
+  "final m \<Longrightarrow> consumesTrace m t = Some 0"
+  by (cases t) auto
+
+lemma hasTrace_consumesTrace:
+  assumes "hasTrace t m"
+  shows "consumesTrace m (t @ t') = Some (length t)"
+  using assms
+  by (induction t m rule: runTrace.induct)
+     (auto simp: hasTrace_iff_runTrace_final final_emitEvent_None final_consumesTrace_Nil
+           simp: bind_eq_Some_conv split: option.splits)
+
+lemma hasTrace_take_consumesTrace:
+  assumes "hasTrace (take n t) m" and "n \<le> length t"
+  shows "consumesTrace m t = Some n"
+  using assms hasTrace_consumesTrace[where t = "take n t" and t' = "drop n t"]
+  by (auto simp: min_absorb2)
+
+lemma consumesTrace_hasTrace:
+  assumes "consumesTrace m t = Some n"
+  shows "hasTrace (take n t) m"
+  using assms
+  by (induction m t arbitrary: n rule: consumesTrace.induct)
+     (auto simp: final_hasTrace_Nil hasTrace_Cons_emitEvent split: if_splits option.splits)
+
+lemma consumesTrace_length:
+  assumes "consumesTrace m t = Some n"
+  shows "n \<le> length t"
+  using assms
+  by (induction m t arbitrary: n rule: consumesTrace.induct) (auto split: if_splits option.splits)
+
+lemma consumesTrace_iff_hasTrace:
+  "consumesTrace m t = Some n \<longleftrightarrow> hasTrace (take n t) m \<and> n \<le> length t"
+  by (auto intro: hasTrace_take_consumesTrace consumesTrace_hasTrace consumesTrace_length)
+
 text \<open>Multi-instruction sequences\<close>
 
 fun fetch_execute_loop :: "('cap, 'regval, 'instr, 'e) isa \<Rightarrow> nat \<Rightarrow> ('regval, unit, 'e) monad" where
@@ -779,56 +848,70 @@ fun fetch_execute_loop :: "('cap, 'regval, 'instr, 'e) isa \<Rightarrow> nat \<R
 
 fun instrs_raise_ex :: "('cap, 'regval, 'instr, 'e) isa \<Rightarrow> nat \<Rightarrow> 'regval trace \<Rightarrow> bool" where
   "instrs_raise_ex ISA (Suc bound) t =
-    (\<exists>tf t'. t = tf @ t' \<and> hasTrace tf (instr_fetch ISA) \<and>
-             (fetch_raises_ex ISA tf \<or>
-              (\<exists>instr ti t''. t' = ti @ t'' \<and>
-                 runTrace tf (instr_fetch ISA) = Some (Done instr) \<and>
-                 hasTrace ti (instr_sem ISA instr) \<and>
-                 (instr_raises_ex ISA instr ti \<or>
-                  instrs_raise_ex ISA bound t''))))"
+     (\<exists>nf. consumesTrace (instr_fetch ISA) t = Some nf \<and>
+          (fetch_raises_ex ISA (take nf t) \<or>
+           (\<exists>instr ni.
+               runTrace (take nf t) (instr_fetch ISA) = Some (Done instr) \<and>
+               consumesTrace (instr_sem ISA instr) (drop nf t) = Some ni \<and>
+               (instr_raises_ex ISA instr (take ni (drop nf t)) \<or>
+                instrs_raise_ex ISA bound (drop ni (drop nf t))))))"
 | "instrs_raise_ex ISA 0 t = False"
 
 fun instrs_invoke_caps :: "('cap, 'regval, 'instr, 'e) isa \<Rightarrow> nat \<Rightarrow> 'regval trace \<Rightarrow> 'cap set" where
   "instrs_invoke_caps ISA (Suc bound) t =
-    {c. (\<exists>tf t'. t = tf @ t' \<and> hasTrace tf (instr_fetch ISA) \<and>
-          (\<exists>instr ti t''. t' = ti @ t'' \<and>
-             runTrace tf (instr_fetch ISA) = Some (Done instr) \<and>
-             hasTrace ti (instr_sem ISA instr) \<and>
-             (c \<in> invokes_caps ISA instr ti \<or>
-              c \<in> instrs_invoke_caps ISA bound t'')))}"
+    {c. (\<exists>nf. consumesTrace (instr_fetch ISA) t = Some nf \<and>
+          (\<exists>instr ni.
+             runTrace (take nf t) (instr_fetch ISA) = Some (Done instr) \<and>
+             consumesTrace (instr_sem ISA instr) (drop nf t) = Some ni \<and>
+             (c \<in> invokes_caps ISA instr (take ni (drop nf t)) \<or>
+              c \<in> instrs_invoke_caps ISA bound (drop ni (drop nf t)))))}"
 | "instrs_invoke_caps ISA 0 t = {}"
 
 lemma Run_hasTrace: "Run m t a \<Longrightarrow> hasTrace t m"
   by (auto simp: hasTrace_iff_Traces_final final_def)
 
-lemma instrs_invoke_caps_Suc_union:
+lemma instrs_invoke_caps_Suc:
   assumes tf: "Run (instr_fetch ISA) tf instr" and ti: "hasTrace ti (instr_sem ISA instr)"
-  shows "instrs_invoke_caps ISA (Suc n) (tf @ ti @ t') \<supseteq> invokes_caps ISA instr ti \<union> instrs_invoke_caps ISA n t'"
+  shows "instrs_invoke_caps ISA (Suc n) (tf @ ti @ t') =
+         invokes_caps ISA instr ti \<union> instrs_invoke_caps ISA n t'"
 proof -
   from tf
-  have "hasTrace tf (instr_fetch ISA)" and "runTrace tf (instr_fetch ISA) = Some (Done instr)"
-    by (auto simp: runTrace_iff_Traces intro: Run_hasTrace)
-  with ti
+  have "consumesTrace (instr_fetch ISA) (tf @ ti @ t') = Some (length tf)"
+    and "runTrace tf (instr_fetch ISA) = Some (Done instr)"
+    by (auto simp: runTrace_iff_Traces intro: Run_hasTrace hasTrace_consumesTrace)
+  moreover from ti
+  have "consumesTrace (instr_sem ISA instr) (ti @ t') = Some (length ti)"
+    by (auto intro: hasTrace_consumesTrace)
+  ultimately
   show ?thesis
-    apply auto
-     apply fastforce
-    apply fastforce
-    done
+    by auto
 qed
 
-lemma invokes_caps_subseteq_instrs_invoke_caps:
+lemma fetch_raises_ex_instrs_raise_ex:
+  assumes "hasTrace tf (instr_fetch ISA)" and "fetch_raises_ex ISA tf"
+  shows "instrs_raise_ex ISA (Suc n) (tf @ t')"
+  using assms
+  by (auto simp: hasTrace_consumesTrace)
+
+lemma instrs_raise_ex_Suc:
   assumes tf: "Run (instr_fetch ISA) tf instr" and ti: "hasTrace ti (instr_sem ISA instr)"
-  shows "invokes_caps ISA instr ti \<subseteq> instrs_invoke_caps ISA (Suc n) (tf @ ti @ t')"
+  shows "instrs_raise_ex ISA (Suc n) (tf @ ti @ t') \<longleftrightarrow>
+         fetch_raises_ex ISA tf \<or> instr_raises_ex ISA instr ti \<or> instrs_raise_ex ISA n t'"
 proof -
-  from assms
-  have "hasTrace tf (instr_fetch ISA)" and "runTrace tf (instr_fetch ISA) = Some (Done instr)"
-    by (auto simp: runTrace_iff_Traces intro: Run_hasTrace)
-  with ti
+  from tf
+  have "consumesTrace (instr_fetch ISA) (tf @ ti @ t') = Some (length tf)"
+    and "runTrace tf (instr_fetch ISA) = Some (Done instr)"
+    by (auto simp: runTrace_iff_Traces intro: Run_hasTrace hasTrace_consumesTrace)
+  moreover from ti
+  have "consumesTrace (instr_sem ISA instr) (ti @ t') = Some (length ti)"
+    by (auto intro: hasTrace_consumesTrace)
+  ultimately
   show ?thesis
-    by fastforce
+    by auto
 qed
 
 declare instrs_invoke_caps.simps(1)[simp del]
+declare instrs_raise_ex.simps[simp del]
 
 context CHERI_ISA_State
 begin
@@ -856,8 +939,8 @@ next
       using m'
       by (auto elim!: final_bind_cases) (auto simp: hasTrace_iff_Traces_final final_def)
     then have "reachable_caps s' \<subseteq> reachable_caps s"
-      using Suc.prems
-      by (intro reachable_caps_fetch_trace_intradomain_monotonicity) auto
+      using Suc.prems fetch_raises_ex_instrs_raise_ex[where t' = "[]"]
+      by (intro reachable_caps_fetch_trace_intradomain_monotonicity) (auto)
     then show ?thesis
       using reachable_caps_subset_plus[of s]
       by blast
@@ -885,10 +968,11 @@ next
         by (auto elim!: final_bind_cases) (auto simp: hasTrace_iff_Traces_final final_def)
       then have "reachable_caps_plus {} s' \<subseteq> reachable_caps_plus ({} \<union> invokes_caps ISA instr t') s''"
         using tf t' s'' Bind Suc.prems invs' ta'
+        using instrs_raise_ex_Suc[OF \<open>Run (instr_fetch ISA) tf instr\<close> *, where t' = "[]"]
         by (intro reachable_caps_plus_instr_trace_intradomain_monotonicity)
            (auto simp add: runTrace_iff_Traces)
       also have "\<dots> \<subseteq> reachable_caps_plus (instrs_invoke_caps ISA (Suc n) t) s''"
-        using instrs_invoke_caps_Suc_union[of ISA tf instr t' n "[]"] Bind *
+        using instrs_invoke_caps_Suc[of ISA tf instr t' n "[]"] Bind *
         by (intro reachable_caps_plus_mono) auto
       finally show ?thesis
         by simp
@@ -911,7 +995,7 @@ next
         and no_exception'': "\<not>instrs_raise_ex ISA n t''"
         using ti tf Suc.prems Bind \<open>t = tf @ t'\<close>
         using \<open>Run (instr_fetch ISA) tf instr\<close>
-        by (auto simp: runTrace_iff_Traces)
+        by (auto simp: runTrace_iff_Traces instrs_raise_ex_Suc)
       then have "reachable_caps s' \<subseteq> reachable_caps_plus (instrs_invoke_caps ISA n t'') s'''"
         using Bind m' t'' invs'' ta''
         by (intro Suc.IH) (auto simp: hasTrace_iff_Traces_final final_def)
@@ -920,7 +1004,7 @@ next
         by (intro reachable_caps_plus_instr_trace_intradomain_monotonicity)
            (auto simp: s_invariant_append)
       also have "\<dots> \<subseteq> reachable_caps_plus (instrs_invoke_caps ISA (Suc n) t) s''"
-        using instrs_invoke_caps_Suc_union[OF \<open>Run (instr_fetch ISA) tf instr\<close> ti]
+        using instrs_invoke_caps_Suc[OF \<open>Run (instr_fetch ISA) tf instr\<close> ti]
         unfolding \<open>t = tf @ t'\<close> \<open>t' = ti @ t''\<close>
         by (intro reachable_caps_plus_mono) auto
       finally show ?thesis .
@@ -928,7 +1012,7 @@ next
     also have "\<dots> \<subseteq> reachable_caps_plus (instrs_invoke_caps ISA (Suc n) t) s"
       using tf s'' Bind Suc.prems ta'
       by (intro reachable_caps_plus_fetch_trace_intradomain_monotonicity)
-         (auto simp: s_invariant_append)
+         (auto simp: s_invariant_append fetch_raises_ex_instrs_raise_ex)
     finally show ?thesis .
   qed
 qed
