@@ -1,110 +1,63 @@
+open Ast
+open Ast_util
 open Yojson.Basic.Util
 
 module StringSet = Set.Make(String)
 module StringMap = Map.Make(String)
 
-type fun_info =
-  { name : string;
-    arg_typs : string list;
-    ret_typ : string;
-    effects : StringSet.t;
-    calls : StringSet.t;
-    regs_read : StringSet.t;
-    regs_written : StringSet.t;
-    trans_regs_read : StringSet.t;
-    trans_regs_written : StringSet.t
-  }
-
-let fun_info_of_json j =
-  { name = member "name" j |> to_string;
-    arg_typs = member "arg_typs" j |> convert_each to_string;
-    ret_typ = member "ret_typ" j |> to_string;
-    effects = member "effects" j |> convert_each to_string |> StringSet.of_list;
-    calls = member "calls" j |> convert_each to_string |> StringSet.of_list;
-    regs_read = member "regs_read" j |> convert_each to_string |> StringSet.of_list;
-    regs_written = member "regs_written" j |> convert_each to_string |> StringSet.of_list;
-    trans_regs_read = member "trans_regs_read" j |> convert_each to_string |> StringSet.of_list;
-    trans_regs_written = member "trans_regs_written" j |> convert_each to_string |> StringSet.of_list;
-  }
-
-let effectful f = not (StringSet.is_empty f.effects)
-
-let load_fun_infos skip file =
-  Yojson.Basic.from_file file
-  |> member "fun_infos"
-  |> to_list
-  |> List.map fun_info_of_json
-  |> List.filter (fun f -> effectful f && not (StringSet.mem f.name skip));
-
 type isa =
   { name : string;
-    cap_regs : StringSet.t;
-    privileged_regs : StringSet.t;
-    cap_inv_regs : StringSet.t;
-    mem_inv_regs : StringSet.t;
-    conf_regs : StringSet.t;
-    cap_types : StringSet.t;
-    fun_infos : fun_info list;
-    fun_renames : string StringMap.t;
-    reg_ref_renames : string StringMap.t;
+    ast : Type_check.tannot def list;
+    type_env : Type_check.Env.t;
+    cap_regs : IdSet.t;
+    privileged_regs : IdSet.t;
+    conf_regs : IdSet.t;
+    cap_types : typ list;
+    fun_infos : Analyse_sail.fun_info Bindings.t;
+    fun_renames : id Bindings.t;
+    reg_ref_renames : id Bindings.t;
   }
 
 let load_isa file =
-  { name = "CHERI_RISCV";
-    cap_regs = StringSet.of_list ["MEPCC";
-                                  "MScratchC";
-                                  "MTDC";
-                                  "MTCC";
-                                  "SEPCC";
-                                  "SScratchC";
-                                  "STDC";
-                                  "STCC";
-                                  "UEPCC";
-                                  "UScratchC";
-                                  "UTDC";
-                                  "UTCC";
-                                  "DDC";
-                                  "nextPCC";
-                                  "PCC";
-                                  "x31";
-                                  "x30";
-                                  "x29";
-                                  "x28";
-                                  "x27";
-                                  "x26";
-                                  "x25";
-                                  "x24";
-                                  "x23";
-                                  "x22";
-                                  "x21";
-                                  "x20";
-                                  "x19";
-                                  "x18";
-                                  "x17";
-                                  "x16";
-                                  "x15";
-                                  "x14";
-                                  "x13";
-                                  "x12";
-                                  "x11";
-                                  "x10";
-                                  "x9";
-                                  "x8";
-                                  "x7";
-                                  "x6";
-                                  "x5";
-                                  "x4";
-                                  "x3";
-                                  "x2";
-                                  "x1";
-                                  "Xs";];
-    privileged_regs = StringSet.of_list [
-      "UTCC"; "UTDC"; "UScratchC"; "UEPCC"; "STCC"; "STDC"; "SScratchC"; "SEPCC"; "MTCC"; "MTDC"; "MScratchC"; "MEPCC"; "uccsr"; "sccsr"; "mccsr"];
-    cap_inv_regs = StringSet.of_list ["PCC"];
-    mem_inv_regs = StringSet.of_list [];
-    conf_regs = StringSet.of_list [];
-    cap_types = StringSet.of_list ["Capability"];
-    fun_infos = load_fun_infos (StringSet.of_list []) file;
-    fun_renames = StringMap.empty;
-    reg_ref_renames = StringMap.empty;
+  let to_id json = mk_id (to_string json) in
+  let to_idset json = IdSet.of_list (convert_each to_id json) in
+  let optional_idset json = Util.option_default IdSet.empty (to_option to_idset json) in
+  let add_assoc b (key, value) = Bindings.add (mk_id key) value b in
+  let to_bindings json = List.fold_left add_assoc Bindings.empty (to_assoc json) in
+  let optional_bindings json = Util.option_default Bindings.empty (to_option to_bindings json) in
+  let to_typ json = Initial_check.typ_of_string (to_string json) in
+
+  let arch = Yojson.Basic.from_file file in
+  let files = convert_each to_string (member "files" arch) in
+  let mutrecs = optional_idset (member "mutrecs" arch) in
+  let (Defs ast, type_env) = Analyse_sail.load_files ~mutrecs files in
+  let fun_infos = Analyse_sail.fun_infos_of_defs type_env ast in
+  let cap_types =
+    convert_each to_typ (member "cap_typs" arch)
+    |> List.map (Type_check.Env.expand_synonyms type_env)
+  in
+  let add_conf_reg rs = function
+    | DEF_reg_dec (DEC_aux (DEC_config (id, _, _), _)) -> IdSet.add id rs
+    | _ -> rs
+  in
+  let conf_regs = List.fold_left add_conf_reg IdSet.empty ast in
+  let cap_regs = match to_option to_idset (member "cap_regs" arch) with
+    | Some cap_regs -> cap_regs
+    | None ->
+       let is_cap_reg (typ, id) =
+         let typ = Type_check.Env.expand_synonyms type_env typ in
+         List.exists (Type_check.alpha_equivalent type_env typ) cap_types
+       in
+       State.find_registers ast |> List.filter is_cap_reg |> List.map snd |> IdSet.of_list
+  in
+  { name = to_string (member "name" arch);
+    ast;
+    type_env;
+    cap_regs;
+    privileged_regs = optional_idset (member "privileged_regs" arch);
+    conf_regs;
+    cap_types;
+    fun_infos;
+    fun_renames = Bindings.map to_id (optional_bindings (member "fun_renames" arch));
+    reg_ref_renames = Bindings.map to_id (optional_bindings (member "reg_ref_names" arch));
   }

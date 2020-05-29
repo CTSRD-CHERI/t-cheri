@@ -1,2 +1,1 @@
-<gen_lemmas.*>: package(yojson), package(str)
-<arch.ml>: package(yojson), package(str)
+true: package(sail), package(yojson), package(str)
