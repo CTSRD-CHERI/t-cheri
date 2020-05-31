@@ -15,26 +15,9 @@ let mk_lemma ~name ~attrs ~stmts ~assms ~proof ~using ~unfolding =
   let using = Util.option_default (if assms = [] then [] else ["assms"]) using in
   { name; attrs; assms; stmts; using; unfolding; proof }
 
-let lstrip f s =
-  let rec idx_from i =
-    if i >= String.length s || not (f (String.get s i)) then i else idx_from (i + 1)
-  in
-  let idx = idx_from 0 in
-  if idx >= String.length s then "" else String.sub s idx (String.length s - idx)
-
-let rstrip f s =
-  let rec idx_from i =
-    if i < 0 || not (f (String.get s i)) then i else idx_from (i - 1)
-  in
-  let idx = idx_from (String.length s - 1) in
-  if idx < 0 then "" else String.sub s 0 (idx + 1)
-
 let mangle_name renames n =
-  (try Bindings.find n renames with Not_found -> n)
-  |> string_of_id
-  |> String.map (fun c -> if c = '#' then '_' else c)
-  |> lstrip (fun c -> c = '_')
-  |> rstrip (fun c -> c = '_')
+  (try Bindings.find n renames with Not_found -> isa_name n)
+
 let mangle_fun_name arch = mangle_name arch.fun_renames
 let mangle_reg_ref arch n = mangle_name arch.reg_ref_renames (append_id n "_ref")
 

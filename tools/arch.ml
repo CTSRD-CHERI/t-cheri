@@ -14,9 +14,29 @@ type isa =
     conf_regs : IdSet.t;
     cap_types : typ list;
     fun_infos : Analyse_sail.fun_info Bindings.t;
-    fun_renames : id Bindings.t;
-    reg_ref_renames : id Bindings.t;
+    fun_renames : string Bindings.t;
+    reg_ref_renames : string Bindings.t;
   }
+
+let lstrip f s =
+  let rec idx_from i =
+    if i >= String.length s || not (f (String.get s i)) then i else idx_from (i + 1)
+  in
+  let idx = idx_from 0 in
+  if idx >= String.length s then "" else String.sub s idx (String.length s - idx)
+
+let rstrip f s =
+  let rec idx_from i =
+    if i < 0 || not (f (String.get s i)) then i else idx_from (i - 1)
+  in
+  let idx = idx_from (String.length s - 1) in
+  if idx < 0 then "" else String.sub s 0 (idx + 1)
+
+let isa_name id =
+  string_of_id id
+  |> String.map (fun c -> if c = '#' then '_' else c)
+  |> lstrip (fun c -> c = '_')
+  |> rstrip (fun c -> c = '_')
 
 let load_isa file =
   let to_id json = mk_id (to_string json) in
@@ -50,6 +70,19 @@ let load_isa file =
        in
        State.find_registers ast |> List.filter is_cap_reg |> List.map snd |> IdSet.of_list
   in
+  (* Approximate renaming of functions by Lem, with option to manually override *)
+  let fun_renames = Bindings.map to_string (optional_bindings (member "fun_renames" arch)) in
+  let add_fun_rename (orig_names, fun_renames) id =
+    let name = isa_name id in
+    let fun_renames = match List.filter (fun n -> name = n) orig_names with
+      | names when List.length names > 0 && not (Bindings.mem id fun_renames) ->
+         let name' = name ^ string_of_int (List.length names - 1) in
+         Bindings.add id name' fun_renames
+      | _ -> fun_renames
+    in
+    (name :: orig_names, fun_renames)
+  in
+  let fun_renames = snd (List.fold_left add_fun_rename ([], fun_renames) (Analyse_sail.fun_ids ast)) in
   { name = to_string (member "name" arch);
     ast;
     type_env;
@@ -58,6 +91,6 @@ let load_isa file =
     conf_regs;
     cap_types;
     fun_infos;
-    fun_renames = Bindings.map to_id (optional_bindings (member "fun_renames" arch));
-    reg_ref_renames = Bindings.map to_id (optional_bindings (member "reg_ref_names" arch));
+    fun_renames;
+    reg_ref_renames = Bindings.map to_string (optional_bindings (member "reg_ref_renames" arch));
   }
