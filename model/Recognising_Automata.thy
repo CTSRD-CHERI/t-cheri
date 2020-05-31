@@ -573,10 +573,30 @@ lemma non_cap_exp_Fail[non_cap_expI]:
   "non_cap_exp (Fail msg)"
   by (auto simp: non_cap_exp_def)
 
+lemma non_cap_exp_maybe_fail[non_cap_expI]:
+  "non_cap_exp (maybe_fail msg v)"
+  by (cases v) (auto simp: maybe_fail_def intro: non_cap_expI)
+
 lemma non_cap_exp_bool_of_bitU_fail[non_cap_expI]:
   "non_cap_exp (bool_of_bitU_fail b)"
   unfolding bool_of_bitU_fail_def
   by (cases b) (auto intro: non_cap_expI)
+
+lemma non_cap_exp_bools_of_bits_nondet[non_cap_expI]:
+  "non_cap_exp (bools_of_bits_nondet bits)"
+  by (auto simp: bools_of_bits_nondet_def intro: non_cap_expI)
+
+lemma non_cap_exp_of_bits_nondet[non_cap_expI]:
+  "non_cap_exp (of_bits_nondet BC bits)"
+  by (auto simp: of_bits_nondet_def intro: non_cap_expI)
+
+lemma non_cap_exp_of_bits_fail[non_cap_expI]:
+  "non_cap_exp (of_bits_fail BC bits)"
+  by (auto simp: of_bits_fail_def intro: non_cap_expI)
+
+lemma non_cap_exp_mword_nondet[non_cap_expI]:
+  "non_cap_exp (mword_nondet ())"
+  by (auto simp add: mword_nondet_def intro: non_cap_expI simp del: repeat.simps)
 
 lemma non_cap_exp_genlistM:
   assumes "\<And>n. non_cap_exp (f n)"
@@ -664,8 +684,10 @@ lemma non_cap_exp_write_non_cap_reg:
   by (auto simp: non_cap_exp_def non_cap_reg_def elim!: Write_reg_TracesE)
 
 method non_cap_expI uses simp intro =
-  (auto simp: simp intro!: non_cap_expI non_cap_exp_if non_cap_exp_read_non_cap_reg non_cap_exp_write_non_cap_reg
+  (auto simp: simp intro!: intro non_cap_expI non_cap_exp_if non_cap_exp_read_non_cap_reg non_cap_exp_write_non_cap_reg
         split del: if_split split: option.split sum.split prod.split)
+
+declare non_mem_exp_bindI[rule del]
 
 lemmas non_mem_exp_combinators =
   non_mem_exp_bindI non_mem_exp_if non_mem_exp_let non_mem_exp_and_boolM non_mem_exp_or_boolM
