@@ -3,3 +3,4 @@ _build
 *.thy~
 model/Capabilities.thy
 model/Cheri_axioms.thy
+tools/gen_lemmas
