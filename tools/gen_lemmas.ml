@@ -4,8 +4,17 @@ open Arch
 open Analyse_sail
 open Lemma
 
+let opt_src_dir = ref Filename.current_dir_name
+let opt_out_dir = ref Filename.current_dir_name
+
 let options =
   Arg.align [
+      ("-src_dir",
+       Arg.String (fun dir -> opt_src_dir := dir),
+       "<dir> Source directory with Sail files");
+      ("-out_dir",
+       Arg.String (fun dir -> opt_out_dir := dir),
+       "<dir> Output directory")
     ]
 
 let usage_msg = "usage: gen_lemmas <arch.json>\n"
@@ -164,113 +173,122 @@ let read_cap_regs_derivable_lemma isa =
     assms = []; unfolding = []; using = []; stmts;
     proof = "(auto simp: derivable_caps_def elim!: Run_read_regE intro!: derivable.Copy)" }
 
-let print_lemmas (isa : isa) =
-  let thy_name = isa.name ^ "_Gen_Lemmas" in
-  let thy_imports = isa.name ^ "_Instantiation" in
+let output_line chan l =
+  output_string chan l;
+  output_string chan "\n"
 
-  let funs = fun_ids isa.ast in
-  let filter_funs p = List.filter (fun id -> p id (Bindings.find id isa.fun_infos)) funs in
+let funs isa = fun_ids isa.ast
+let filter_funs isa p = List.filter (fun id -> p id (Bindings.find id isa.fun_infos)) (funs isa)
 
-  print_endline ("theory " ^ thy_name);
-  print_endline ("imports " ^ thy_imports);
-  print_endline  "begin";
-  print_endline  "";
-  print_endline ("context " ^ isa.name ^ "_Axiom_Automaton");
-  print_endline  "begin";
-  print_endline  "";
+let output_cap_lemmas chan (isa : isa) =
+  output_line chan  "theory CHERI_Cap_Lemmas";
+  output_line chan  "imports CHERI_Instantiation";
+  output_line chan  "begin";
+  output_line chan  "";
+  output_line chan ("context " ^ isa.name ^ "_Axiom_Automaton");
+  output_line chan  "begin";
+  output_line chan  "";
 
-  print_endline (format_lemma (non_cap_regs_lemma isa));
-  print_endline  "lemmas non_cap_exp_rw_non_cap_reg[non_cap_expI] =";
-  print_endline  "  non_cap_regsI[THEN non_cap_exp_read_non_cap_reg]";
-  print_endline  "  non_cap_regsI[THEN non_cap_exp_write_non_cap_reg]";
-  print_endline  "";
+  output_line chan (format_lemma (non_cap_regs_lemma isa));
+  output_line chan  "lemmas non_cap_exp_rw_non_cap_reg[non_cap_expI] =";
+  output_line chan  "  non_cap_regsI[THEN non_cap_exp_read_non_cap_reg]";
+  output_line chan  "  non_cap_regsI[THEN non_cap_exp_write_non_cap_reg]";
+  output_line chan  "";
 
-  filter_funs (fun id f -> not (is_cap_fun isa f) && effectful f)
+  filter_funs isa (fun id f -> not (is_cap_fun isa f) && effectful f)
     |> List.map (non_cap_exp_lemma isa)
-    |> List.map format_lemma |> List.iter print_endline;
+    |> List.map format_lemma |> List.iter (output_line chan);
 
-  filter_funs (fun id f -> (is_cap_fun isa f || has_ref_args f) && not (has_mem_eff f))
+  output_line chan  "";
+  output_line chan  "end";
+  output_line chan  "";
+  output_line chan  "end"
+
+let output_cap_props chan (isa : isa) =
+  output_line chan  "theory CHERI_Cap_Properties";
+  output_line chan  "imports CHERI_Cap_Lemmas";
+  output_line chan  "begin";
+  output_line chan  "";
+
+  output_line chan ("context " ^ isa.name ^ "_Write_Cap_Automaton");
+  output_line chan  "begin";
+  output_line chan  "";
+
+  output_line chan (format_lemma (write_cap_regs_lemma isa));
+  output_line chan (format_lemma (read_cap_regs_lemma isa));
+
+  output_line chan  "";
+
+  output_line chan  "lemmas non_cap_exp_traces_enabled[traces_enabledI] = non_cap_expI[THEN non_cap_exp_traces_enabledI]\n";
+  output_line chan  "";
+
+  filter_funs isa (fun id f -> is_cap_fun isa f)
+    |> List.map (traces_enabled_lemma isa)
+    |> List.map format_lemma |> List.iter (output_line chan);
+
+  output_line chan  "end";
+  output_line chan  "";
+  output_line chan  "end"
+
+let output_mem_props chan (isa : isa) =
+  output_line chan  "theory CHERI_Mem_Properties";
+  output_line chan  "imports CHERI_Cap_Lemmas";
+  output_line chan  "begin";
+  output_line chan  "";
+
+  output_line chan ("context " ^ isa.name ^ "_Axiom_Automaton");
+  output_line chan  "begin";
+  output_line chan  "";
+
+  filter_funs isa (fun id f -> (is_cap_fun isa f || has_ref_args f) && not (has_mem_eff f))
     |> List.map (non_mem_exp_lemma isa)
-    |> List.map format_lemma |> List.iter print_endline;
+    |> List.map format_lemma |> List.iter (output_line chan);
 
-  (*print_endline  "end";
-  print_endline  "";
-  print_endline ("context " ^ isa_name ^ "_State_Invariant");
-  print_endline  "begin";
-  print_endline  "";*)
+  output_line chan  "end";
+  output_line chan  "";
+  output_line chan ("context " ^ isa.name ^ "_Mem_Automaton");
+  output_line chan  "begin";
+  output_line chan  "";
 
-  (*List.filter (fun f -> effectful f && not (writes_inv_reg f) && not (StringSet.mem f.name skip_funs) && StringSet.mem f.name (funs_called_by fun_infos)) fun_infos*)
+  output_line chan  "lemmas non_cap_exp_traces_enabled[traces_enabledI] = non_cap_expI[THEN non_cap_exp_traces_enabledI]\n";
+  output_line chan  "lemmas non_mem_exp_traces_enabled[traces_enabledI] = non_mem_expI[THEN non_mem_exp_traces_enabledI]\n";
+  output_line chan  "";
 
-  filter_funs (fun id f -> effectful f)
-   |> List.map (no_reg_writes_to_lemma isa)
-   |> List.map format_lemma |> List.iter print_endline;
-
-  print_endline  "";
-
-  if not (IdSet.is_empty isa.cap_regs) then print_endline (format_lemma (read_cap_regs_derivable_lemma isa));
-
-  print_endline  "end";
-  print_endline  "";
-  print_endline ("context " ^ isa.name ^ "_Write_Cap_Automaton");
-  print_endline  "begin";
-  print_endline  "";
-
-  (* if not (StringSet.is_empty cap_inv_regs) then print_endline (non_inv_regs_lemma cap_inv_regs);
-  if not (StringSet.is_empty cap_inv_regs) then print_endline (format_lemma (preserve_inv_no_writes_lemma (List.filter (fun f -> not (writes cap_inv_regs f) && StringSet.mem f.name (funs_called_by fun_infos)) fun_infos))); *)
-  print_endline (format_lemma (write_cap_regs_lemma isa));
-  print_endline (format_lemma (read_cap_regs_lemma isa));
-  (* if not (StringSet.is_empty cap_inv_regs) then
-    (List.filter (fun f -> writes cap_inv_regs f || not (StringSet.mem f.name (funs_called_by fun_infos))) fun_infos
-      |> List.map format_preserves_invariant_lemma
-      |> List.iter print_endline); *)
-
-  print_endline  "";
-
-  print_endline  "lemmas non_cap_exp_traces_enabled[traces_enabledI] = non_cap_expI[THEN non_cap_exp_traces_enabledI]\n";
-  print_endline  "";
-
-  filter_funs (fun id f -> is_cap_fun isa f)
+  filter_funs isa (fun id f -> has_mem_eff f)
     |> List.map (traces_enabled_lemma isa)
-    |> List.map format_lemma |> List.iter print_endline;
+    |> List.map format_lemma |> List.iter (output_line chan);
 
-  print_endline  "end";
-  print_endline  "";
+  output_line chan  "end";
+  output_line chan  "";
+  output_line chan  "end"
 
-  print_endline ("context " ^ isa.name ^ "_Mem_Automaton");
-  print_endline  "begin";
-  print_endline  "";
+let process_isa file =
+  let isa = load_isa file !opt_src_dir in
+  let out_file name = Filename.concat !opt_out_dir name in
 
-  (* if not (StringSet.is_empty mem_inv_regs) then begin
-    print_endline (non_inv_regs_lemma mem_inv_regs);
-    print_endline (format_lemma (preserve_inv_no_writes_lemma (List.filter (fun f -> not (writes mem_inv_regs f) && StringSet.mem f.name (funs_called_by fun_infos)) fun_infos)));
-    (List.filter (fun f -> writes mem_inv_regs f || not (StringSet.mem f.name (funs_called_by fun_infos))) fun_infos
-      |> List.map format_preserves_invariant_lemma
-      |> List.iter print_endline)
-  end; *)
+  let chan = open_out (out_file "CHERI_Cap_Lemmas.thy") in
+  output_cap_lemmas chan isa;
+  flush chan;
+  close_out chan;
 
-  print_endline  "lemmas non_cap_exp_traces_enabled[traces_enabledI] = non_cap_expI[THEN non_cap_exp_traces_enabledI]\n";
-  print_endline  "lemmas non_mem_exp_traces_enabled[traces_enabledI] = non_mem_expI[THEN non_mem_exp_traces_enabledI]\n";
-  print_endline  "";
+  let chan = open_out (out_file "CHERI_Cap_Properties.thy") in
+  output_cap_props chan isa;
+  flush chan;
+  close_out chan;
 
-  filter_funs (fun id f -> has_mem_eff f)
-    |> List.map (traces_enabled_lemma isa)
-    |> List.map format_lemma |> List.iter print_endline;
-
-  print_endline  "end";
-  print_endline  "";
-  print_endline  "end"
-
-let process_isa file = print_lemmas (load_isa file)
+  let chan = open_out (out_file "CHERI_Mem_Properties.thy") in
+  output_mem_props chan isa;
+  flush chan;
+  close_out chan
 
 let main () =
   let opt_file_arguments = ref [] in
   Arg.parse options (fun s ->
       opt_file_arguments := (!opt_file_arguments) @ [s])
     usage_msg;
-  if !opt_file_arguments = [] then
-    prerr_string usage_msg
-  else
-    List.iter process_isa !opt_file_arguments
+  match !opt_file_arguments with
+  | [file] -> process_isa file
+  | _ -> Arg.usage options usage_msg
 
 let () =
   try main () with

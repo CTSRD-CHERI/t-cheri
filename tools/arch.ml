@@ -38,7 +38,7 @@ let isa_name id =
   |> lstrip (fun c -> c = '_')
   |> rstrip (fun c -> c = '_')
 
-let load_isa file =
+let load_isa file src_dir =
   let to_id json = mk_id (to_string json) in
   let to_idset json = IdSet.of_list (convert_each to_id json) in
   let optional_idset json = Util.option_default IdSet.empty (to_option to_idset json) in
@@ -48,7 +48,10 @@ let load_isa file =
   let to_typ json = Initial_check.typ_of_string (to_string json) in
 
   let arch = Yojson.Basic.from_file file in
-  let files = convert_each to_string (member "files" arch) in
+  let files =
+    convert_each to_string (member "files" arch)
+    |> List.map (Filename.concat src_dir)
+  in
   let mutrecs = optional_idset (member "mutrecs" arch) in
   let (Defs ast, type_env) = Analyse_sail.load_files ~mutrecs files in
   let fun_infos = Analyse_sail.fun_infos_of_defs type_env ast in
