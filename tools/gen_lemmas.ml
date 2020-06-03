@@ -80,7 +80,7 @@ let non_cap_exp_lemma isa id : lemma =
   let using = (if assms = [] then [] else ["assms"]) in
   { name = "non_cap_exp_" ^ name; attrs = "[non_cap_expI]"; assms;
     stmts = ["non_cap_exp (" ^ call ^ ")"];
-    proof = "(non_cap_expI simp: " ^ name ^ "_def)";
+    proof = "(unfold " ^ name ^ "_def, non_cap_expI)";
     using; unfolding = [] }
   |> apply_lemma_override isa id "non_cap_exp"
 
@@ -88,7 +88,7 @@ let non_mem_exp_lemma isa id =
   let (f, name, call) = get_fun_info isa id in
   { name = "non_mem_exp_" ^ name; attrs = "[non_mem_expI]"; assms = [];
     stmts = ["non_mem_exp (" ^ call ^ ")"];
-    proof = "(non_mem_expI simp: " ^ name ^ "_def)";
+    proof = "(unfold " ^ name ^ "_def, non_mem_expI)";
     using = []; unfolding = [] }
   |> apply_lemma_override isa id "non_mem_exp"
 

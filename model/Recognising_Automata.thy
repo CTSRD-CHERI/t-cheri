@@ -683,18 +683,40 @@ lemma non_cap_exp_write_non_cap_reg:
   unfolding write_reg_def
   by (auto simp: non_cap_exp_def non_cap_reg_def elim!: Write_reg_TracesE)
 
+named_theorems non_cap_exp_split
+
+declare option.split[where P = "non_cap_exp", non_cap_exp_split]
+declare sum.split[where P = "non_cap_exp", non_cap_exp_split]
+declare prod.split[where P = "non_cap_exp", non_cap_exp_split]
+declare bool.split[where P = "non_cap_exp", non_cap_exp_split]
+
+lemmas non_cap_exp_combinators =
+  non_cap_exp_bindI non_cap_exp_if non_cap_exp_let non_cap_exp_and_boolM non_cap_exp_or_boolM
+  non_cap_exp_foreachM non_cap_exp_try_catch non_cap_exp_catch_early_return non_cap_exp_liftR
+
 method non_cap_expI uses simp intro =
-  (auto simp: simp intro!: intro non_cap_expI non_cap_exp_if non_cap_exp_read_non_cap_reg non_cap_exp_write_non_cap_reg
+  (intro intro non_cap_expI non_cap_exp_split[THEN iffD2] non_cap_exp_combinators
+         non_cap_exp_read_non_cap_reg non_cap_exp_write_non_cap_reg allI impI conjI;
+   auto simp: simp intro!: intro non_cap_expI non_cap_exp_if non_cap_exp_read_non_cap_reg non_cap_exp_write_non_cap_reg
         split del: if_split split: option.split sum.split prod.split)
 
 declare non_mem_exp_bindI[rule del]
+
+named_theorems non_mem_exp_split
+
+declare option.split[where P = "non_mem_exp", non_mem_exp_split]
+declare sum.split[where P = "non_mem_exp", non_mem_exp_split]
+declare prod.split[where P = "non_mem_exp", non_mem_exp_split]
+declare bool.split[where P = "non_mem_exp", non_mem_exp_split]
 
 lemmas non_mem_exp_combinators =
   non_mem_exp_bindI non_mem_exp_if non_mem_exp_let non_mem_exp_and_boolM non_mem_exp_or_boolM
   non_mem_exp_foreachM non_mem_exp_try_catch non_mem_exp_catch_early_return non_mem_exp_liftR
 
 method non_mem_expI uses simp intro =
-  (auto simp: simp intro!: intro non_mem_expI non_mem_exp_combinators non_cap_expI[THEN non_cap_exp_non_mem_exp]
+  (intro intro non_mem_expI non_mem_exp_split[THEN iffD2] non_mem_exp_combinators
+         non_cap_expI[THEN non_cap_exp_non_mem_exp] allI impI conjI;
+   auto simp: simp intro!: intro non_mem_expI non_mem_exp_combinators non_cap_expI[THEN non_cap_exp_non_mem_exp]
         split del: if_split split: option.split sum.split prod.split)
 
 lemma Run_write_reg_no_cap[trace_simp]:
