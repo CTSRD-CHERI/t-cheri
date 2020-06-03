@@ -1,5 +1,3 @@
-open Arch
-open Analyse_sail
 open Ast_util
 
 type lemma =
@@ -11,19 +9,18 @@ type lemma =
     unfolding : string list;
     proof : string }
 
+type lemma_override =
+  { name_override : string option;
+    attrs_override : string option;
+    assms_override : string list option;
+    stmts_override : string list option;
+    using_override : string list option;
+    unfolding_override : string list option;
+    proof_override : string option }
+
 let mk_lemma ~name ~attrs ~stmts ~assms ~proof ~using ~unfolding =
   let using = Util.option_default (if assms = [] then [] else ["assms"]) using in
   { name; attrs; assms; stmts; using; unfolding; proof }
-
-let mangle_name renames n =
-  (try Bindings.find n renames with Not_found -> isa_name n)
-
-let mangle_fun_name arch = mangle_name arch.fun_renames
-let mangle_reg_ref arch n = mangle_name arch.reg_ref_renames (append_id n "_ref")
-
-let format_fun_name arch id = mangle_fun_name arch id
-let format_fun_args f = String.concat " " (List.mapi (fun i _ -> "arg" ^ string_of_int i) f.arg_typs)
-let format_fun_call arch id f = format_fun_name arch id ^ " " ^ format_fun_args f
 
 let dquot s = "\"" ^ s ^ "\""
 
@@ -36,3 +33,18 @@ let format_lemma l =
   (if l.using = [] then "" else "  using " ^ String.concat " " l.using ^ "\n") ^
   (if l.unfolding = [] then "" else "  unfolding " ^ String.concat " " l.unfolding ^ "\n") ^
   "  by " ^ l.proof ^ "\n"
+
+let apply_override o l =
+  let using = match (o.using_override, l.using, o.assms_override, l.assms) with
+    | (Some using, _, _, _) -> using
+    | (None, using, Some (_ :: _), []) when not (List.mem "assms" using) -> "assms" :: using
+    | (_, using, _, _) -> using
+  in
+  { name = Util.option_default l.name o.name_override;
+    attrs = Util.option_default l.attrs o.attrs_override;
+    assms = Util.option_default l.assms o.assms_override;
+    stmts = Util.option_default l.stmts o.stmts_override;
+    using = using;
+    unfolding = Util.option_default l.unfolding o.unfolding_override;
+    proof = Util.option_default l.proof o.proof_override;
+  }

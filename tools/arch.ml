@@ -1,5 +1,6 @@
 open Ast
 open Ast_util
+open Lemma
 open Yojson.Basic.Util
 
 module StringSet = Set.Make(String)
@@ -15,6 +16,7 @@ type isa =
     cap_types : typ list;
     fun_infos : Analyse_sail.fun_info Bindings.t;
     fun_renames : string Bindings.t;
+    lemma_overrides : lemma_override StringMap.t Bindings.t;
     reg_ref_renames : string Bindings.t;
   }
 
@@ -45,7 +47,19 @@ let load_isa file src_dir =
   let add_assoc b (key, value) = Bindings.add (mk_id key) value b in
   let to_bindings json = List.fold_left add_assoc Bindings.empty (to_assoc json) in
   let optional_bindings json = Util.option_default Bindings.empty (to_option to_bindings json) in
+  let add_sassoc b (key, value) = StringMap.add key value b in
   let to_typ json = Initial_check.typ_of_string (to_string json) in
+  let to_string_list json = convert_each to_string json in
+  let to_override json =
+    { name_override = to_option to_string (member "name" json);
+      attrs_override = to_option to_string (member "attrs" json);
+      assms_override = to_option to_string_list (member "assms" json);
+      stmts_override = to_option to_string_list (member "stmts" json);
+      using_override = to_option to_string_list (member "using" json);
+      unfolding_override = to_option to_string_list (member "unfolding" json);
+      proof_override = to_option to_string (member "proof" json);
+    }
+  in
 
   let arch = Yojson.Basic.from_file file in
   let files =
@@ -73,8 +87,26 @@ let load_isa file src_dir =
        in
        State.find_registers ast |> List.filter is_cap_reg |> List.map snd |> IdSet.of_list
   in
-  (* Approximate renaming of functions by Lem, with option to manually override *)
-  let fun_renames = Bindings.map to_string (optional_bindings (member "fun_renames" arch)) in
+  let add_overrides (fun_renames, lemma_overrides) (f, overrides) =
+    let (renames, overrides) = List.partition (fun (name, _) -> name = "name") (to_assoc overrides) in
+    let fun_renames = match List.rev renames with
+      | [] -> fun_renames
+      | (_, name') :: _ -> Bindings.add (mk_id f) (to_string name') fun_renames
+    in
+    let lemma_overrides = match overrides with
+      | [] -> lemma_overrides
+      | overrides ->
+         let overrides_map = List.fold_left add_sassoc StringMap.empty overrides in
+         Bindings.add (mk_id f) (StringMap.map to_override overrides_map) lemma_overrides
+    in
+    (fun_renames, lemma_overrides)
+  in
+  let (fun_renames, lemma_overrides) = match to_option to_assoc (member "overrides" arch) with
+    | Some assoc ->
+       List.fold_left add_overrides (Bindings.empty, Bindings.empty) assoc
+    | None -> (Bindings.empty, Bindings.empty)
+  in
+  (* Approximate renaming of functions by Lem (unless manually overridden) *)
   let add_fun_rename (orig_names, fun_renames) id =
     let name = isa_name id in
     let fun_renames = match List.filter (fun n -> name = n) orig_names with
@@ -95,5 +127,6 @@ let load_isa file src_dir =
     cap_types;
     fun_infos;
     fun_renames;
+    lemma_overrides;
     reg_ref_renames = Bindings.map to_string (optional_bindings (member "reg_ref_renames" arch));
   }

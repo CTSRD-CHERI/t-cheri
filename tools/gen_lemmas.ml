@@ -46,6 +46,25 @@ let is_cap_fun isa f = has_mem_eff f || uses isa.cap_regs f
 
 let has_ref_args f = List.exists is_ref_typ f.arg_typs
 
+let mangle_name renames n =
+  (try Bindings.find n renames with Not_found -> isa_name n)
+
+let mangle_fun_name arch = mangle_name arch.fun_renames
+let mangle_reg_ref arch n = mangle_name arch.reg_ref_renames (append_id n "_ref")
+
+let format_fun_name arch id = mangle_fun_name arch id
+let format_fun_args f = String.concat " " (List.mapi (fun i _ -> "arg" ^ string_of_int i) f.arg_typs)
+let format_fun_call arch id f = format_fun_name arch id ^ " " ^ format_fun_args f
+
+let apply_lemma_override arch id lemma_type lemma =
+  match Bindings.find_opt id arch.lemma_overrides with
+  | Some overrides ->
+     begin match StringMap.find_opt lemma_type overrides with
+       | Some override -> apply_override override lemma
+       | None -> lemma
+     end
+  | None -> lemma
+
 let get_fun_info isa id =
   let f = Bindings.find id isa.fun_infos in
   (f, format_fun_name isa id, format_fun_call isa id f)
@@ -63,6 +82,7 @@ let non_cap_exp_lemma isa id : lemma =
     stmts = ["non_cap_exp (" ^ call ^ ")"];
     proof = "(non_cap_expI simp: " ^ name ^ "_def)";
     using; unfolding = [] }
+  |> apply_lemma_override isa id "non_cap_exp"
 
 let non_mem_exp_lemma isa id =
   let (f, name, call) = get_fun_info isa id in
@@ -70,6 +90,7 @@ let non_mem_exp_lemma isa id =
     stmts = ["non_mem_exp (" ^ call ^ ")"];
     proof = "(non_mem_expI simp: " ^ name ^ "_def)";
     using = []; unfolding = [] }
+  |> apply_lemma_override isa id "non_mem_exp"
 
 let no_reg_writes_to_lemma isa id =
   let (f, name, call) = get_fun_info isa id in
@@ -89,6 +110,7 @@ let no_reg_writes_to_lemma isa id =
     stmts = ["no_reg_writes_to Rs (" ^ call ^ ")"];
     unfolding = [(name ^ "_def"); "bind_assoc"]; using;
     proof = "(no_reg_writes_toI" ^ simps ^ ")" }
+  |> apply_lemma_override isa id "no_reg_writes_to"
 
 let return_caps_derivable_lemma isa id =
   let (f, name, call) = get_fun_info isa id in
@@ -97,6 +119,7 @@ let return_caps_derivable_lemma isa id =
     stmts = ["c \\<in> derivable_caps (run s t)"];
     unfolding = [(name ^ "_def")]; using = ["assms"];
     proof = "derivable_capsI" }
+  |> apply_lemma_override isa id "derivable_caps"
 
 let traces_enabled_lemma isa id =
   let (f, name, call) = get_fun_info isa id in
@@ -118,6 +141,7 @@ let traces_enabled_lemma isa id =
     assms; unfolding = [(name ^ "_def"); "bind_assoc"]; using = [];
     stmts = ["traces_enabled (" ^ call ^ ") s"];
     proof = "(traces_enabledI" ^ using ^ ")" }
+  |> apply_lemma_override isa id "traces_enabled"
 
 (* let find_strings x m = try StringMap.find x m with Not_found -> StringSet.empty
 
