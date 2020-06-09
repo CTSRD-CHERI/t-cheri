@@ -694,11 +694,11 @@ lemmas non_cap_exp_combinators =
   non_cap_exp_bindI non_cap_exp_if non_cap_exp_let non_cap_exp_and_boolM non_cap_exp_or_boolM
   non_cap_exp_foreachM non_cap_exp_try_catch non_cap_exp_catch_early_return non_cap_exp_liftR
 
-method non_cap_expI uses simp intro =
+method non_cap_expI_base uses intro =
   (intro intro non_cap_expI non_cap_exp_split[THEN iffD2] non_cap_exp_combinators
-         non_cap_exp_read_non_cap_reg non_cap_exp_write_non_cap_reg allI impI conjI;
-   auto simp: simp intro!: intro non_cap_expI non_cap_exp_if non_cap_exp_read_non_cap_reg non_cap_exp_write_non_cap_reg
-        split del: if_split split: option.split sum.split prod.split)
+         non_cap_exp_read_non_cap_reg non_cap_exp_write_non_cap_reg allI impI conjI)
+
+method non_cap_expI uses simp intro = (non_cap_expI_base intro: intro; simp add: simp)
 
 declare non_mem_exp_bindI[rule del]
 
@@ -716,8 +716,7 @@ lemmas non_mem_exp_combinators =
 method non_mem_expI uses simp intro =
   (intro intro non_mem_expI non_mem_exp_split[THEN iffD2] non_mem_exp_combinators
          non_cap_expI[THEN non_cap_exp_non_mem_exp] allI impI conjI;
-   auto simp: simp intro!: intro non_mem_expI non_mem_exp_combinators non_cap_expI[THEN non_cap_exp_non_mem_exp]
-        split del: if_split split: option.split sum.split prod.split)
+   simp add: simp)
 
 lemma Run_write_reg_no_cap[trace_simp]:
   assumes "Run (write_reg r v) t a"
@@ -950,6 +949,12 @@ definition "trace_assms t \<equiv> \<forall>e \<in> set t. ev_assms e"
 lemma trace_assms_append[iff]: "trace_assms (t1 @ t2) \<longleftrightarrow> trace_assms t1 \<and> trace_assms t2"
   by (auto simp: trace_assms_def)
 
+lemma trace_assms_Nil[simp, intro]: "trace_assms []"
+  by (auto simp: trace_assms_def)
+
+lemma trace_assms_Cons[iff]: "trace_assms (e # t) \<longleftrightarrow> ev_assms e \<and> trace_assms t"
+  by (auto simp: trace_assms_def)
+
 definition "isException m \<equiv> ((\<exists>e. m = Exception e) \<or> (\<exists>msg. m = Fail msg)) \<and> ex_traces"
 
 definition finished :: "('regval,'a,'ex) monad \<Rightarrow> bool" where
@@ -1077,11 +1082,38 @@ lemma traces_enabled_or_boolM[traces_enabledI]:
 
 lemma traces_enabled_foreachM_inv:
   assumes "\<And>x vars s. P vars s \<Longrightarrow> x \<in> set xs \<Longrightarrow> traces_enabled (body x vars) s"
-    and "\<And>x vars s t vars'. P vars s \<Longrightarrow> x \<in> set xs \<Longrightarrow> Run (body x vars) t vars' \<Longrightarrow> P vars' (run s t)"
+    and "\<And>x vars s t vars'. P vars s \<Longrightarrow> x \<in> set xs \<Longrightarrow> Run (body x vars) t vars' \<Longrightarrow> trace_assms t \<Longrightarrow> P vars' (run s t)"
     and "P vars s"
   shows "traces_enabled (foreachM xs vars body) s"
   by (use assms in \<open>induction xs arbitrary: vars s\<close>;
       fastforce intro!: traces_enabledI intro: non_cap_exp_traces_enabledI non_cap_expI)
+
+lemma traces_enabled_foreachM[traces_enabledI]:
+  assumes "\<And>x vars t. x \<in> set xs \<Longrightarrow> trace_assms t \<Longrightarrow> traces_enabled (body x vars) (run s t)"
+  shows "traces_enabled (foreachM xs vars body) s"
+proof (intro traces_enabled_foreachM_inv[where P = "\<lambda>vars s'. \<exists>t. s' = run s t \<and> trace_assms t"])
+  fix x vars s'
+  assume "\<exists>t. s' = run s t \<and> trace_assms t" and "x \<in> set xs"
+  then show "traces_enabled (body x vars) s'"
+    using assms
+    by auto
+next
+  fix x vars s' t vars'
+  assume P: "\<exists>t. s' = run s t \<and> trace_assms t" and x: "x \<in> set xs"
+    and t: "Run (body x vars) t vars'" "trace_assms t"
+  from P obtain t' where "s' = run s t'" and "trace_assms t'"
+    by auto
+  then have "run s' t = run s (t' @ t)" and "trace_assms (t' @ t)"
+    using t
+    by auto
+  then show "\<exists>t'. run s' t = run s t' \<and> trace_assms t'"
+    by blast
+next
+  have "s = run s []" and "trace_assms []"
+    by auto
+  then show "\<exists>t. s = run s t \<and> trace_assms t"
+    by blast
+qed
 
 lemma traces_enabled_try_catch:
   assumes "traces_enabled m s"
@@ -1323,10 +1355,10 @@ method derivable_capsI uses intro elim simp assms =
 method try_simp_traces_enabled =
   ((match conclusion in \<open>traces_enabled m2 (run s t)\<close> for m2 s t \<Rightarrow>
      \<open>match premises in m1: \<open>Run m1 t a\<close> for m1 a \<Rightarrow>
-        \<open>(rule non_cap_exp_Run_inv_traces_enabled_runE[OF m1], solves \<open>non_cap_expI\<close>)?\<close>\<close>
+        \<open>(rule non_cap_exp_Run_inv_traces_enabled_runE[OF m1], solves \<open>non_cap_expI_base\<close>)?\<close>\<close>
    \<bar> \<open>early_returns_enabled m2 (run s t)\<close> for m2 s t \<Rightarrow>
      \<open>match premises in m1: \<open>Run m1 t a\<close> for m1 a \<Rightarrow>
-        \<open>(rule non_cap_exp_Run_inv_early_returns_enabled_runE[OF m1], solves \<open>non_cap_expI\<close>)?\<close>\<close>)?)
+        \<open>(rule non_cap_exp_Run_inv_early_returns_enabled_runE[OF m1], solves \<open>non_cap_expI_base\<close>)?\<close>\<close>)?)
 
 named_theorems traces_enabled_combinatorI
 
@@ -1341,9 +1373,10 @@ declare sum.split[where P = "\<lambda>m. traces_enabled m s" for s, traces_enabl
 declare bool.split[where P = "\<lambda>m. traces_enabled m s" for s, traces_enabled_split]
 
 method traces_enabled_step uses intro elim =
-  ((rule intro TrueI)
+  ((rule intro allI impI conjI)
     | (erule elim eqTrueE)
     | ((rule traces_enabled_combinatorI traces_enabled_builtin_combinatorsI[rotated], try_simp_traces_enabled))
+    | (rule traces_enabledI TrueI)
     | (rule traces_enabled_split[THEN iffD2]; intro allI conjI impI))
 
 method traces_enabledI_with methods solve uses intro elim =
