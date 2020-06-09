@@ -68,6 +68,21 @@ let load_isa file src_dir =
   in
   let mutrecs = optional_idset (member "mutrecs" arch) in
   let (Defs ast, type_env) = Analyse_sail.load_files ~mutrecs files in
+  let (Defs ast) = match to_option to_assoc (member "slice" arch) with
+    | Some assoc ->
+       let module NodeSet = Set.Make(Slice.Node) in
+       let module G = Graph.Make(Slice.Node) in
+       let to_node json = Slice.Function (mk_id (to_string json)) in
+       let to_nodeset = function
+         | Some json -> NodeSet.of_list (convert_each to_node json)
+         | None -> NodeSet.empty
+       in
+       let roots = to_nodeset (List.assoc_opt "roots" assoc) in
+       let cuts = to_nodeset (List.assoc_opt "cuts" assoc) in
+       let g = G.prune roots cuts (Slice.graph_of_ast (Defs ast)) in
+       Slice.filter_ast cuts g (Defs ast)
+    | None -> Defs ast
+  in
   let fun_infos = Analyse_sail.fun_infos_of_defs type_env ast in
   let cap_types =
     convert_each to_typ (member "cap_typs" arch)

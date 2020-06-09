@@ -2,6 +2,8 @@ open Ast
 open Ast_util
 open Rewriter
 
+let opt_splice = ref ([]:string list)
+
 type fun_info =
   { arg_typs : typ list;
     ret_typ : typ;
@@ -95,4 +97,8 @@ let load_files ?mutrecs:(mutrecs=IdSet.empty) files =
 
   let _, ast, env = load_files [] Type_check.initial_env files in
   let ast, env = descatter env ast in
+  let ast, env =
+    List.fold_right (fun file (ast,_) -> Splice.splice ast file)
+      (!opt_splice) (ast, env)
+  in
   rewrite_ast_target "lem" env ast

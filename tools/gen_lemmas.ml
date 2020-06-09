@@ -12,6 +12,9 @@ let options =
       ("-src_dir",
        Arg.String (fun dir -> opt_src_dir := dir),
        "<dir> Source directory with Sail files");
+      ( "-splice",
+        Arg.String (fun s -> Analyse_sail.opt_splice := s :: !Analyse_sail.opt_splice),
+        "<filename> add functions from file, replacing existing definitions where necessary");
       ("-out_dir",
        Arg.String (fun dir -> opt_out_dir := dir),
        "<dir> Output directory")
