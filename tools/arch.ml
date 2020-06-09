@@ -12,6 +12,8 @@ type isa =
     type_env : Type_check.Env.t;
     cap_regs : IdSet.t;
     privileged_regs : IdSet.t;
+    pcc_regs : IdSet.t;
+    idc_regs : IdSet.t;
     conf_regs : IdSet.t;
     cap_types : typ list;
     fun_infos : Analyse_sail.fun_info Bindings.t;
@@ -19,6 +21,8 @@ type isa =
     lemma_overrides : lemma_override StringMap.t Bindings.t;
     reg_ref_renames : string Bindings.t;
   }
+
+let special_regs isa = IdSet.union isa.privileged_regs (IdSet.union isa.pcc_regs isa.idc_regs)
 
 let lstrip f s =
   let rec idx_from i =
@@ -138,6 +142,8 @@ let load_isa file src_dir =
     type_env;
     cap_regs;
     privileged_regs = optional_idset (member "privileged_regs" arch);
+    pcc_regs = optional_idset (member "pcc" arch);
+    idc_regs = optional_idset (member "idc" arch);
     conf_regs;
     cap_types;
     fun_infos;

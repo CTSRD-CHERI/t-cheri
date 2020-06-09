@@ -97,8 +97,8 @@ let non_mem_exp_lemma isa id =
 
 let no_reg_writes_to_lemma isa id =
   let (f, name, call) = get_fun_info isa id in
-  (* Restricting attention to capability registers for now *)
-  let regs = IdSet.elements (IdSet.inter f.trans_regs_written isa.cap_regs) in
+  (* Restricting attention to special capability registers for now *)
+  let regs = IdSet.elements (IdSet.inter f.trans_regs_written (special_regs isa)) in
   let reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") regs in
   let reg_refs = List.map (mangle_reg_ref isa) regs in
   let reg_defs = List.map (fun n -> n ^ "_def") reg_refs in
@@ -126,7 +126,7 @@ let return_caps_derivable_lemma isa id =
 
 let traces_enabled_lemma isa id =
   let (f, name, call) = get_fun_info isa id in
-  let cap_regs_read = IdSet.inter isa.cap_regs (IdSet.union f.regs_read (IdSet.diff f.trans_regs_read isa.privileged_regs)) in
+  let cap_regs_read = IdSet.inter (special_regs isa) (IdSet.union f.regs_read (IdSet.diff f.trans_regs_read isa.privileged_regs)) in
   let cap_reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") (IdSet.elements cap_regs_read) in
   let cap_assm =
     if ids_overlap cap_regs_read isa.privileged_regs || (writes isa.cap_regs f && not (IdSet.is_empty cap_regs_read)) then
@@ -192,7 +192,7 @@ let read_cap_regs_derivable_lemma isa =
   let stmt r =
     "\\<And>t c s. Run (read_reg " ^ mangle_reg_ref isa r ^ ") t c" ^
     " \\<Longrightarrow> trace_assm t" ^
-    " \\<Longrightarrow> {''" ^ string_of_id r ^ "''} \\<subseteq> accessible_regs s" ^
+    (if IdSet.mem r (special_regs isa) then " \\<Longrightarrow> {''" ^ string_of_id r ^ "''} \\<subseteq> accessible_regs s" else "") ^
     " \\<Longrightarrow> c \\<in> derivable_caps (run s t)"
   in
   let stmts = List.map stmt (IdSet.elements isa.cap_regs) in
