@@ -2027,8 +2027,13 @@ end
 
 locale Capability_ISA_Fixed_Translation = Capability_ISA CC ISA
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa" +
-  fixes translation_assms :: "'regval trace \<Rightarrow> bool"
-  assumes fixed_translation: "\<And>i t addr load. translation_assms t \<Longrightarrow> translate_address ISA addr load (take i t) = translate_address ISA addr load []"
+  fixes translation_assms :: "'regval event \<Rightarrow> bool"
+  assumes fixed_translation: "\<And>i t addr load. \<forall>e \<in> set t. translation_assms e \<Longrightarrow> translate_address ISA addr load (take i t) = translate_address ISA addr load []"
+begin
+
+abbreviation "translation_assms_trace t \<equiv> \<forall>e \<in> set t. translation_assms e"
+
+end
 
 fun non_store_event :: "'regval event \<Rightarrow> bool" where
   "non_store_event (E_write_mem _ paddr sz v _) = False"
@@ -2121,7 +2126,7 @@ fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Righta
 sublocale Cap_Axiom_Automaton where enabled = enabled ..
 
 lemma accepts_store_mem_axiom:
-  assumes *: "translation_assms t" and  **: "accepts t"
+  assumes *: "translation_assms_trace t" and  **: "accepts t"
   shows "store_mem_axiom CC ISA t"
   using accepts_from_nth_enabledI[OF **]
   unfolding store_mem_axiom_def
@@ -2138,7 +2143,7 @@ lemma accepts_store_tag_axiom:
   by (fastforce simp: access_enabled_defs bind_eq_Some_conv Let_def elim!: writes_mem_val.elims)
 
 lemma accepts_load_mem_axiom:
-  assumes *: "translation_assms t" and  **: "accepts t"
+  assumes *: "translation_assms_trace t" and  **: "accepts t"
   shows "load_mem_axiom CC ISA is_fetch t"
   unfolding load_mem_axiom_def
   unfolding reads_mem_val_at_idx_def cap_derivable_iff_derivable
@@ -2162,12 +2167,15 @@ end
 locale Mem_Assm_Automaton =
   Mem_Automaton translation_assms CC ISA is_fetch
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
-    and translation_assms :: "'regval event list \<Rightarrow> bool"
+    and translation_assms :: "'regval event \<Rightarrow> bool"
     and is_fetch :: bool and ex_traces :: bool +
-  fixes ev_assms :: "'regval event \<Rightarrow> bool"
+  fixes extra_assms :: "'regval event \<Rightarrow> bool"
 begin
 
-sublocale Cap_Axiom_Assm_Automaton where enabled = enabled and ex_traces = ex_traces
+definition "ev_assms e \<equiv> translation_assms e \<and> extra_assms e"
+
+sublocale Cap_Axiom_Assm_Automaton
+  where enabled = enabled and ex_traces = ex_traces and ev_assms = ev_assms
 proof
   fix s e
   assume "non_cap_event e"
@@ -2194,14 +2202,43 @@ lemma traces_enabled_mem_axioms:
   assumes "traces_enabled m initial" and "hasTrace t m"
     and "trace_assms t"
     and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
-    and "translation_assms t"
   shows "store_mem_axiom CC ISA t"
     and "store_tag_axiom CC ISA t"
     and "load_mem_axiom CC ISA is_fetch t"
   using assms
   by (intro accepts_store_mem_axiom accepts_store_tag_axiom accepts_load_mem_axiom
             traces_enabled_accepts_fromI;
-      auto)+
+      auto simp: trace_assms_def ev_assms_def)+
+
+lemma traces_enabled_Read_mem:
+  assumes "\<And>v. traces_enabled (m v) (axiom_step s (E_read_mem rk paddr sz v))"
+    and "\<And>v. enabled s (E_read_mem rk paddr sz v)"
+  shows "traces_enabled (Read_mem rk paddr sz m) s"
+  using assms
+  by (fastforce simp: traces_enabled_def elim!: Traces_cases[where m = "Read_mem rk paddr sz m"])
+
+lemma traces_enabled_read_mem:
+  assumes "\<And>paddr v. nat_of_bv BC_addr addr = Some paddr \<Longrightarrow> enabled s (E_read_mem rk paddr (nat sz) v)"
+  shows "traces_enabled (read_mem BC_addr BC_val rk addr_sz addr sz) s"
+  using assms
+  by (auto intro!: traces_enabled_Read_mem traces_enabled_bind
+                   non_cap_expI[THEN non_cap_exp_traces_enabledI]
+      simp: read_mem_def read_mem_bytes_def maybe_fail_def split: option.splits)
+
+lemma traces_enabled_Read_memt:
+  assumes "\<And>v tag. traces_enabled (m (v, tag)) (axiom_step s (E_read_memt rk paddr sz (v, tag)))"
+    and "\<And>v tag. enabled s (E_read_memt rk paddr sz (v, tag))"
+  shows "traces_enabled (Read_memt rk paddr sz m) s"
+  using assms
+  by (fastforce simp: traces_enabled_def elim!: Traces_cases[where m = "Read_memt rk paddr sz m"])
+
+lemma traces_enabled_read_memt:
+  assumes "\<And>paddr v tag. nat_of_bv BC_addr addr = Some paddr \<Longrightarrow> enabled s (E_read_memt rk paddr (nat sz) (v, tag))"
+  shows "traces_enabled (read_memt BC_addr BC_val rk addr sz) s"
+  using assms
+  by (auto intro!: traces_enabled_Read_memt traces_enabled_bind
+                   non_cap_expI[THEN non_cap_exp_traces_enabledI]
+      simp: read_memt_def read_memt_bytes_def maybe_fail_def split: option.splits)
 
 end
 
@@ -2209,7 +2246,7 @@ locale Mem_Inv_Automaton =
   Mem_Automaton translation_assms CC ISA is_fetch +
   State_Invariant get_regval set_regval invariant inv_regs
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
-    and translation_assms :: "'regval event list \<Rightarrow> bool"
+    and translation_assms :: "'regval event \<Rightarrow> bool"
     and is_fetch :: bool and ex_traces :: bool
     and get_regval :: "string \<Rightarrow> 'regstate \<Rightarrow> 'regval option"
     and set_regval :: "string \<Rightarrow> 'regval \<Rightarrow> 'regstate \<Rightarrow> 'regstate option"
@@ -2243,7 +2280,7 @@ lemma traces_enabled_mem_axioms:
   assumes "traces_enabled m initial regs" and "hasTrace t m"
     and "reads_regs_from inv_regs t regs" and "invariant regs"
     and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
-    and "translation_assms t"
+    and "translation_assms_trace t"
   shows "store_mem_axiom CC ISA t"
     and "store_tag_axiom CC ISA t"
     and "load_mem_axiom CC ISA is_fetch t"
