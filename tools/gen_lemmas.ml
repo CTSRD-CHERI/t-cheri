@@ -124,7 +124,7 @@ let return_caps_derivable_lemma isa id =
     proof = "derivable_capsI" }
   |> apply_lemma_override isa id "derivable_caps"
 
-let traces_enabled_lemma isa id =
+let traces_enabled_lemma mem isa id =
   let (f, name, call) = get_fun_info isa id in
   let cap_regs_read = IdSet.inter (special_regs isa) (IdSet.union f.regs_read (IdSet.diff f.trans_regs_read isa.privileged_regs)) in
   let cap_reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") (IdSet.elements cap_regs_read) in
@@ -144,7 +144,7 @@ let traces_enabled_lemma isa id =
     assms; unfolding = [(name ^ "_def"); "bind_assoc"]; using = [];
     stmts = ["traces_enabled (" ^ call ^ ") s"];
     proof = "(traces_enabledI" ^ using ^ ")" }
-  |> apply_lemma_override isa id "traces_enabled"
+  |> apply_lemma_override isa id (if mem then "traces_enabled_mem" else "traces_enabled")
 
 (* let find_strings x m = try StringMap.find x m with Not_found -> StringSet.empty
 
@@ -204,7 +204,7 @@ let output_line chan l =
   output_string chan l;
   output_string chan "\n"
 
-let funs isa = fun_ids isa.ast
+let funs isa = List.filter (fun id -> not (IdSet.mem id isa.skip_funs)) (fun_ids isa.ast)
 let filter_funs isa p = List.filter (fun id -> p id (Bindings.find id isa.fun_infos)) (funs isa)
 
 let output_cap_lemmas chan (isa : isa) =
@@ -250,7 +250,7 @@ let output_cap_props chan (isa : isa) =
   output_line chan  "";
 
   filter_funs isa (fun id f -> is_cap_fun isa f)
-    |> List.map (traces_enabled_lemma isa)
+    |> List.map (traces_enabled_lemma false isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
   output_line chan  "end";
@@ -282,7 +282,7 @@ let output_mem_props chan (isa : isa) =
   output_line chan  "";
 
   filter_funs isa (fun id f -> has_mem_eff f)
-    |> List.map (traces_enabled_lemma isa)
+    |> List.map (traces_enabled_lemma true isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
   output_line chan  "end";
