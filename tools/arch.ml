@@ -24,6 +24,7 @@ type isa =
   }
 
 let special_regs isa = IdSet.union isa.privileged_regs (IdSet.union isa.pcc_regs isa.idc_regs)
+let write_checked_regs isa = IdSet.union isa.pcc_regs isa.idc_regs
 
 let lstrip f s =
   let rec idx_from i =

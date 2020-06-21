@@ -148,6 +148,11 @@ definition "runs_no_reg_writes_to Rs m \<equiv> (\<forall>t a r v. Run m t a \<a
 named_theorems no_reg_writes_toI
 named_theorems runs_no_reg_writes_toI
 
+lemma no_reg_writes_to_empty[intro, simp]:
+  "no_reg_writes_to {} m"
+  "runs_no_reg_writes_to {} m"
+  by (auto simp: no_reg_writes_to_def runs_no_reg_writes_to_def)
+
 lemma no_reg_writes_runs_no_reg_writes:
   "no_reg_writes_to Rs m \<Longrightarrow> runs_no_reg_writes_to Rs m"
   by (auto simp: no_reg_writes_to_def runs_no_reg_writes_to_def)
@@ -202,6 +207,10 @@ lemma no_reg_writes_to_let[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (f x) \<Longrightarrow> no_reg_writes_to Rs (let a = x in f a)"
   by auto
 
+lemma runs_no_reg_writes_to_let[simp, runs_no_reg_writes_toI]:
+  "runs_no_reg_writes_to Rs (f x) \<Longrightarrow> runs_no_reg_writes_to Rs (let a = x in f a)"
+  by auto
+
 lemma no_reg_writes_to_if[simp, no_reg_writes_toI]:
   assumes "c \<Longrightarrow> no_reg_writes_to Rs m1" and "\<not>c \<Longrightarrow> no_reg_writes_to Rs m2"
   shows "no_reg_writes_to Rs (if c then m1 else m2)"
@@ -234,11 +243,17 @@ lemma no_reg_writes_to_undefined_bool[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (undefined_bool ())"
   by (auto simp: undefined_bool_def)
 
-lemma no_reg_writes_to_foreachM_inv[simp, no_reg_writes_toI]:
+lemma no_reg_writes_to_foreachM[simp, no_reg_writes_toI]:
   assumes "\<And>x vars. no_reg_writes_to Rs (body x vars)"
   shows "no_reg_writes_to Rs (foreachM xs vars body)"
   using assms
   by (induction xs vars body rule: foreachM.induct) auto
+
+lemma runs_no_reg_writes_to_foreachM[simp, runs_no_reg_writes_toI]:
+  assumes "\<And>x vars. runs_no_reg_writes_to Rs (body x vars)"
+  shows "runs_no_reg_writes_to Rs (foreachM xs vars body)"
+  using assms
+  by (induction xs vars body rule: foreachM.induct) (auto intro: no_reg_writes_runs_no_reg_writes)
 
 lemma no_reg_writes_to_bool_of_bitU_nondet[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (bool_of_bitU_nondet b)"
@@ -287,6 +302,15 @@ lemma no_reg_writes_to_read_mem[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (read_mem BC BC' rk addr_length addr bytes)"
   by (auto simp: read_mem_def split: option.splits)
 
+lemma no_reg_writes_to_read_memt_bytes[simp, no_reg_writes_toI]:
+  "no_reg_writes_to Rs (read_memt_bytes BCa BCb rk addr sz)"
+  unfolding read_memt_bytes_def maybe_fail_def
+  by (auto simp: no_reg_writes_to_def split: option.splits elim: Traces_cases)
+
+lemma no_reg_writes_to_read_memt[simp, no_reg_writes_toI]:
+  "no_reg_writes_to Rs (read_memt BCa BCb rk addr sz)"
+  by (auto simp: read_memt_def split: option.splits)
+
 lemma no_reg_writes_to_write_mem_ea[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (write_mem_ea BC wk addr_length addr bytes)"
   by (auto simp: write_mem_ea_def no_reg_writes_to_def maybe_fail_def split: option.splits elim: Traces_cases)
@@ -294,6 +318,10 @@ lemma no_reg_writes_to_write_mem_ea[simp, no_reg_writes_toI]:
 lemma no_reg_writes_to_write_mem[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (write_mem BC BC' wk addr_length addr bytes value)"
   by (auto simp: write_mem_def no_reg_writes_to_def split: option.splits elim: Traces_cases)
+
+lemma no_reg_writes_to_write_memt[simp, no_reg_writes_toI]:
+  "no_reg_writes_to Rs (write_memt BC BC' wk addr bytes value tag)"
+  by (auto simp: write_memt_def no_reg_writes_to_def split: option.splits elim: Traces_cases)
 
 lemma no_reg_writes_to_genlistM[simp, no_reg_writes_toI]:
   assumes "\<And>i. no_reg_writes_to Rs (f i)"
@@ -330,7 +358,8 @@ lemmas no_reg_write_builtins =
   no_reg_writes_to_bool_of_bitU_fail
   no_reg_writes_to_of_bits_nondet no_reg_writes_to_choose_bools no_reg_writes_to_exit
   no_reg_writes_to_read_mem_bytes no_reg_writes_to_read_mem
-  no_reg_writes_to_write_mem_ea no_reg_writes_to_write_mem
+  no_reg_writes_to_read_memt_bytes no_reg_writes_to_read_memt
+  no_reg_writes_to_write_mem_ea no_reg_writes_to_write_mem no_reg_writes_to_write_memt
 
 method no_reg_writes_toI uses simp intro =
   (intro intro runs_no_reg_writes_toI no_reg_writes_runs_no_reg_writes no_reg_writes_toI conjI impI allI;

@@ -756,6 +756,144 @@ qed
 method trace_enabledI uses simp elim =
   (auto simp: simp trace_simp elim!: elim trace_elim)
 
+lemma non_special_reg_accessible:
+  "r \<in> accessible_regs s" if "r \<notin> special_reg_names"
+  using that
+  by (auto simp: accessible_regs_def)
+
+lemma non_special_regs_accessible:
+  "Rs \<subseteq> accessible_regs s" if "Rs \<inter> special_reg_names = {}"
+  using that
+  by (auto simp: accessible_regs_def)
+
+lemma accessible_regs_no_writes_run:
+  assumes t: "Run m t a"
+    and m: "r \<in> PCC ISA \<union> IDC ISA \<longrightarrow> runs_no_reg_writes_to {r} m"
+    and s: "r \<in> accessible_regs s"
+  shows "r \<in> accessible_regs (run s t)"
+proof -
+  have no_write: "r \<in> PCC ISA \<union> IDC ISA \<longrightarrow> (\<forall>v. E_write_reg r v \<notin> set t)"
+    using m t
+    by (auto simp: runs_no_reg_writes_to_def)
+  show ?thesis
+  proof (use s no_write in \<open>induction t arbitrary: s\<close>)
+    case (Cons e t)
+    then have "r \<in> accessible_regs (axiom_step s e)"
+      and "r \<in> PCC ISA \<union> IDC ISA \<longrightarrow> (\<forall>v. E_write_reg r v \<notin> set t)"
+      by (auto simp: accessible_regs_def)
+    from Cons.IH[OF this] show ?case by auto
+  qed auto
+qed
+
+lemma no_reg_writes_to_mono:
+  assumes "runs_no_reg_writes_to Rs m"
+    and "Rs' \<subseteq> Rs"
+  shows "runs_no_reg_writes_to Rs' m"
+  using assms
+  by (auto simp: runs_no_reg_writes_to_def)
+
+lemma accessible_regs_no_writes_run_subset:
+  assumes t: "Run m t a" and m: "runs_no_reg_writes_to (Rs \<inter> (PCC ISA \<union> IDC ISA)) m"
+    and Rs: "Rs \<subseteq> accessible_regs s"
+  shows "Rs \<subseteq> accessible_regs (run s t)"
+  using t Rs no_reg_writes_to_mono[OF m]
+  by (auto intro: accessible_regs_no_writes_run)
+
+(*method accessible_regsI uses simp assms =
+  (match conclusion in \<open>Rs \<subseteq> accessible_regs (run s t)\<close> for Rs s t \<Rightarrow>
+     \<open>match premises in t: \<open>Run_inv m t a regs\<close> for m a regs \<Rightarrow>
+        \<open>rule accessible_regs_no_writes_run_subset[OF t],
+         solves \<open>use assms in \<open>no_reg_writes_toI simp: simp\<close>,
+         accessible_regsI simp: simp assms: assms\<close>\<close>\<close>
+   \<bar> \<open>Rs \<subseteq> accessible_regs s\<close> for Rs s \<Rightarrow> \<open>use assms in \<open>auto simp: simp\<close>\<close>)*)
+
+named_theorems accessible_regsE
+named_theorems accessible_regsI
+
+method accessible_regs_step uses simp assms =
+  ((erule accessible_regsE eqTrueE)
+    | (rule accessible_regsI TrueI)
+    | (erule accessible_regs_no_writes_run_subset,
+       solves \<open>use assms in \<open>no_reg_writes_toI simp: simp\<close>\<close>))
+
+method accessible_regsI_with methods solve uses simp assms =
+  ((erule accessible_regsE eqTrueE; accessible_regsI_with solve simp: simp assms: assms)
+    | (rule accessible_regsI TrueI; accessible_regsI_with solve simp: simp assms: assms)
+    | (erule accessible_regs_no_writes_run_subset,
+       solves \<open>use assms in \<open>no_reg_writes_toI simp: simp\<close>\<close>,
+       accessible_regsI_with solve simp: simp assms: assms)
+    | (rule non_special_regs_accessible non_special_reg_accessible,
+       solves \<open>solve\<close>)
+    | solve)
+
+method accessible_regsI uses simp assms =
+  (accessible_regsI_with
+     \<open>(use assms in \<open>no_reg_writes_toI simp: simp\<close>)
+       | (use assms in \<open>auto simp: simp\<close>)\<close>
+     simp: simp assms: assms)
+
+definition "derivable_caps s \<equiv> {c. is_tagged_method CC c \<longrightarrow> c \<in> derivable (accessed_caps s)}"
+
+named_theorems derivable_capsE
+named_theorems derivable_capsI
+
+lemma accessed_caps_run_mono:
+  "accessed_caps s \<subseteq> accessed_caps (run s t)"
+  by (rule subsetI) (induction t arbitrary: s; auto)
+
+lemma derivable_caps_run_mono:
+  "derivable_caps s \<subseteq> derivable_caps (run s t)"
+  using derivable_mono[OF accessed_caps_run_mono]
+  by (auto simp: derivable_caps_def)
+
+lemma derivable_caps_run_imp:
+  "c \<in> derivable_caps s \<Longrightarrow> c \<in> derivable_caps (run s t)"
+  using derivable_caps_run_mono
+  by auto
+
+named_theorems derivable_caps_runI
+
+declare derivable_caps_run_imp[derivable_caps_runI]
+
+named_theorems derivable_caps_combinators
+
+lemma bind_derivable_caps[derivable_caps_combinators]:
+  assumes "Run (m \<bind> f) t a"
+    and "\<And>tm am tf. Run m tm am \<Longrightarrow> Run (f am) tf a \<Longrightarrow> t = tm @ tf \<Longrightarrow> c \<in> derivable_caps (run (run s tm) tf)"
+  shows "c \<in> derivable_caps (run s t)"
+  using assms
+  by (auto elim: Run_bindE)
+
+lemma read_reg_derivable:
+  assumes "Run (read_reg r) t a" and "{name r} \<subseteq> accessible_regs s"
+    and "\<forall>rv. of_regval r rv = Some a \<longrightarrow> c \<in> caps_of_regval ISA rv"
+  shows "c \<in> derivable_caps (run s t)"
+  using assms
+  by (auto elim!: Run_read_regE intro!: derivable.Copy simp: derivable_caps_def)
+
+declare Run_ifE[where thesis = "c \<in> derivable_caps (run s t)" and t = t for c s t, derivable_caps_combinators]
+declare Run_letE[where thesis = "c \<in> derivable_caps (run s t)" and t = t for c s t, derivable_caps_combinators]
+
+method derivable_caps_step =
+  (rule derivable_capsI allI impI conjI
+      | erule derivable_capsE eqTrueE
+      | erule derivable_caps_combinators eqTrueE
+      | rule derivable_caps_runI)
+
+method derivable_capsI_with methods solve uses intro elim simp assms =
+  ((rule intro derivable_capsI allI impI conjI
+      | erule elim derivable_capsE eqTrueE
+      | erule derivable_caps_combinators eqTrueE
+      | rule derivable_caps_runI
+      | solve (*
+      | solves \<open>use assms in \<open>auto simp: simp\<close>\<close>*));
+   derivable_capsI_with solve intro: intro elim: elim simp: simp assms: assms)
+
+method derivable_capsI uses intro elim simp assms =
+  (derivable_capsI_with
+     \<open>(solves \<open>accessible_regsI simp: simp assms: assms\<close>)\<close>
+     intro: intro elim: elim simp: simp assms: assms)
+
 end
 
 (*locale Store_Cap_Mem_Automaton = Capability_ISA CC ISA
@@ -1252,106 +1390,6 @@ lemma non_cap_exp_Run_inv_early_returns_enabled_runE:
   using assms
   by (auto simp: non_cap_exp_Run_run_invI)
 
-lemma accessible_regs_no_writes_run:
-  assumes t: "Run m t a"
-    and m: "runs_no_reg_writes_to {r} m"
-    and s: "r \<in> accessible_regs s"
-  shows "r \<in> accessible_regs (run s t)"
-proof -
-  have no_write: "\<forall>v. E_write_reg r v \<notin> set t"
-    using m t
-    by (auto simp: runs_no_reg_writes_to_def)
-  show ?thesis
-  proof (use s no_write in \<open>induction t arbitrary: s\<close>)
-    case (Cons e t)
-    then have "r \<in> accessible_regs (axiom_step s e)" and "\<forall>v. E_write_reg r v \<notin> set t"
-      by (auto simp: accessible_regs_def)
-    from Cons.IH[OF this] show ?case by auto
-  qed auto
-qed
-
-lemma no_reg_writes_to_mono:
-  assumes "runs_no_reg_writes_to Rs m"
-    and "Rs' \<subseteq> Rs"
-  shows "runs_no_reg_writes_to Rs' m"
-  using assms
-  by (auto simp: runs_no_reg_writes_to_def)
-
-lemma accessible_regs_no_writes_run_subset:
-  assumes t: "Run m t a" and m: "runs_no_reg_writes_to Rs m"
-    and Rs: "Rs \<subseteq> accessible_regs s"
-  shows "Rs \<subseteq> accessible_regs (run s t)"
-  using t Rs no_reg_writes_to_mono[OF m]
-  by (auto intro: accessible_regs_no_writes_run)
-
-(*method accessible_regsI uses simp assms =
-  (match conclusion in \<open>Rs \<subseteq> accessible_regs (run s t)\<close> for Rs s t \<Rightarrow>
-     \<open>match premises in t: \<open>Run_inv m t a regs\<close> for m a regs \<Rightarrow>
-        \<open>rule accessible_regs_no_writes_run_subset[OF t],
-         solves \<open>use assms in \<open>no_reg_writes_toI simp: simp\<close>,
-         accessible_regsI simp: simp assms: assms\<close>\<close>\<close>
-   \<bar> \<open>Rs \<subseteq> accessible_regs s\<close> for Rs s \<Rightarrow> \<open>use assms in \<open>auto simp: simp\<close>\<close>)*)
-
-named_theorems accessible_regsE
-named_theorems accessible_regsI
-
-method accessible_regs_step uses simp assms =
-  ((erule accessible_regsE eqTrueE)
-    | (rule accessible_regsI TrueI)
-    | (erule accessible_regs_no_writes_run_subset,
-       solves \<open>use assms in \<open>no_reg_writes_toI simp: simp\<close>\<close>))
-
-method accessible_regsI_with methods solve uses simp assms =
-  ((erule accessible_regsE eqTrueE; accessible_regsI_with solve simp: simp assms: assms)
-    | (rule accessible_regsI TrueI; accessible_regsI_with solve simp: simp assms: assms)
-    | (erule accessible_regs_no_writes_run_subset,
-       solves \<open>use assms in \<open>no_reg_writes_toI simp: simp\<close>\<close>,
-       accessible_regsI_with solve simp: simp assms: assms)
-    | solve)
-
-method accessible_regsI uses simp assms =
-  (accessible_regsI_with
-     \<open>(use assms in \<open>no_reg_writes_toI simp: simp\<close>)
-       | (use assms in \<open>auto simp: simp\<close>)\<close>
-     simp: simp assms: assms)
-
-definition "derivable_caps s \<equiv> {c. is_tagged_method CC c \<longrightarrow> c \<in> derivable (accessed_caps s)}"
-
-named_theorems derivable_capsI
-named_theorems derivable_capsE
-
-lemma accessed_caps_run_mono:
-  "accessed_caps s \<subseteq> accessed_caps (run s t)"
-  by (rule subsetI) (induction t arbitrary: s; auto)
-
-lemma derivable_caps_run_mono:
-  "derivable_caps s \<subseteq> derivable_caps (run s t)"
-  using derivable_mono[OF accessed_caps_run_mono]
-  by (auto simp: derivable_caps_def)
-
-lemma derivable_caps_run_imp:
-  "c \<in> derivable_caps s \<Longrightarrow> c \<in> derivable_caps (run s t)"
-  using derivable_caps_run_mono
-  by auto
-
-method derivable_caps_step =
-  (rule derivable_capsI TrueI
-      | erule derivable_capsE eqTrueE
-      | rule derivable_caps_run_imp)
-
-method derivable_capsI_with methods solve uses intro elim simp assms =
-  ((rule intro derivable_capsI TrueI
-      | erule elim derivable_capsE eqTrueE
-      | rule derivable_caps_run_imp
-      | solve (*
-      | solves \<open>use assms in \<open>auto simp: simp\<close>\<close>*));
-   derivable_capsI_with solve intro: intro elim: elim simp: simp assms: assms)
-
-method derivable_capsI uses intro elim simp assms =
-  (derivable_capsI_with
-     \<open>(solves \<open>accessible_regsI simp: simp assms: assms\<close>)\<close>
-     intro: intro elim: elim simp: simp assms: assms)
-
 method try_simp_traces_enabled =
   ((match conclusion in \<open>traces_enabled m2 (run s t)\<close> for m2 s t \<Rightarrow>
      \<open>match premises in m1: \<open>Run m1 t a\<close> for m1 a \<Rightarrow>
@@ -1725,115 +1763,6 @@ lemma no_reg_writes_Run_inv_early_returns_enabled_updates_regsE:
   shows "early_returns_enabled m2 s (the (updates_regs inv_regs t regs))"
   using assms
   by (auto simp: Run_inv_def)
-
-lemma accessible_regs_no_writes_run:
-  assumes t: "Run m t a"
-    and m: "runs_no_reg_writes_to {r} m"
-    and s: "r \<in> accessible_regs s"
-  shows "r \<in> accessible_regs (run s t)"
-proof -
-  have no_write: "\<forall>v. E_write_reg r v \<notin> set t"
-    using m t
-    by (auto simp: runs_no_reg_writes_to_def Run_inv_def)
-  show ?thesis
-  proof (use s no_write in \<open>induction t arbitrary: s\<close>)
-    case (Cons e t)
-    then have "r \<in> accessible_regs (axiom_step s e)" and "\<forall>v. E_write_reg r v \<notin> set t"
-      by (auto simp: accessible_regs_def)
-    from Cons.IH[OF this] show ?case by auto
-  qed auto
-qed
-
-lemma no_reg_writes_to_mono:
-  assumes "runs_no_reg_writes_to Rs m"
-    and "Rs' \<subseteq> Rs"
-  shows "runs_no_reg_writes_to Rs' m"
-  using assms
-  by (auto simp: runs_no_reg_writes_to_def)
-
-lemma accessible_regs_no_writes_run_subset:
-  assumes t: "Run m t a" and m: "runs_no_reg_writes_to Rs m"
-    and Rs: "Rs \<subseteq> accessible_regs s"
-  shows "Rs \<subseteq> accessible_regs (run s t)"
-  using t Rs no_reg_writes_to_mono[OF m]
-  by (auto intro: accessible_regs_no_writes_run)
-
-lemma accessible_regs_no_writes_run_inv_subset:
-  assumes t: "Run_inv m t a regs" and m: "runs_no_reg_writes_to Rs m"
-    and Rs: "Rs \<subseteq> accessible_regs s"
-  shows "Rs \<subseteq> accessible_regs (run s t)"
-  using assms
-  by (intro accessible_regs_no_writes_run_subset) (auto simp: Run_inv_def)
-
-(*method accessible_regsI uses simp assms =
-  (match conclusion in \<open>Rs \<subseteq> accessible_regs (run s t)\<close> for Rs s t \<Rightarrow>
-     \<open>match premises in t: \<open>Run_inv m t a regs\<close> for m a regs \<Rightarrow>
-        \<open>rule accessible_regs_no_writes_run_subset[OF t],
-         solves \<open>use assms in \<open>no_reg_writes_toI simp: simp\<close>,
-         accessible_regsI simp: simp assms: assms\<close>\<close>\<close>
-   \<bar> \<open>Rs \<subseteq> accessible_regs s\<close> for Rs s \<Rightarrow> \<open>use assms in \<open>auto simp: simp\<close>\<close>)*)
-
-named_theorems accessible_regsE
-named_theorems accessible_regsI
-
-method accessible_regs_step uses simp assms =
-  ((erule accessible_regsE eqTrueE)
-    | (rule accessible_regsI preserves_invariantI TrueI)
-    | (erule accessible_regs_no_writes_run_inv_subset accessible_regs_no_writes_run_subset,
-       solves \<open>use assms in \<open>no_reg_writes_toI simp: simp\<close>\<close>))
-
-method accessible_regsI_with methods solve uses simp assms =
-  ((erule accessible_regsE eqTrueE; accessible_regsI_with solve simp: simp assms: assms)
-    | (rule accessible_regsI preserves_invariantI TrueI; accessible_regsI_with solve simp: simp assms: assms)
-    | (erule accessible_regs_no_writes_run_inv_subset accessible_regs_no_writes_run_subset,
-       solves \<open>use assms in \<open>no_reg_writes_toI simp: simp\<close>\<close>,
-       accessible_regsI_with solve simp: simp assms: assms)
-    | solve)
-
-method accessible_regsI uses simp assms =
-  (accessible_regsI_with
-     \<open>(use assms in \<open>no_reg_writes_toI simp: simp\<close>)
-       | (use assms in \<open>preserves_invariantI simp: simp\<close>)
-       | (use assms in \<open>auto simp: simp\<close>)\<close>
-     simp: simp assms: assms)
-
-definition "derivable_caps s \<equiv> {c. is_tagged_method CC c \<longrightarrow> c \<in> derivable (accessed_caps s)}"
-
-named_theorems derivable_capsI
-named_theorems derivable_capsE
-
-lemma accessed_caps_run_mono:
-  "accessed_caps s \<subseteq> accessed_caps (run s t)"
-  by (rule subsetI) (induction t arbitrary: s; auto)
-
-lemma derivable_caps_run_mono:
-  "derivable_caps s \<subseteq> derivable_caps (run s t)"
-  using derivable_mono[OF accessed_caps_run_mono]
-  by (auto simp: derivable_caps_def)
-
-lemma derivable_caps_run_imp:
-  "c \<in> derivable_caps s \<Longrightarrow> c \<in> derivable_caps (run s t)"
-  using derivable_caps_run_mono
-  by auto
-
-method derivable_caps_step =
-  (rule derivable_capsI preserves_invariantI TrueI
-      | erule derivable_capsE eqTrueE
-      | rule derivable_caps_run_imp)
-
-method derivable_capsI_with methods solve uses intro elim simp assms =
-  ((rule intro derivable_capsI preserves_invariantI TrueI
-      | erule elim derivable_capsE eqTrueE
-      | rule derivable_caps_run_imp
-      | solve (*
-      | solves \<open>use assms in \<open>auto simp: simp\<close>\<close>*));
-   derivable_capsI_with solve intro: intro elim: elim simp: simp assms: assms)
-
-method derivable_capsI uses intro elim simp assms =
-  (derivable_capsI_with
-     \<open>(solves \<open>accessible_regsI simp: simp assms: assms\<close>)
-       | (solves \<open>preserves_invariantI intro: intro simp: simp elim: elim\<close>)\<close>
-     intro: intro elim: elim simp: simp assms: assms)
 
 method try_simp_traces_enabled =
   ((match conclusion in \<open>traces_enabled m2 (run s t) (the (updates_regs inv_regs t regs))\<close> for m2 s t regs \<Rightarrow>

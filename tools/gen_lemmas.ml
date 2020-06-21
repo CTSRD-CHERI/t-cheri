@@ -98,30 +98,37 @@ let non_mem_exp_lemma isa id =
 let no_reg_writes_to_lemma isa id =
   let (f, name, call) = get_fun_info isa id in
   (* Restricting attention to special capability registers for now *)
-  let regs = IdSet.elements (IdSet.inter f.trans_regs_written (special_regs isa)) in
+  let regs = IdSet.elements (IdSet.diff (write_checked_regs isa) f.trans_regs_written) in
   let reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") regs in
-  let reg_refs = List.map (mangle_reg_ref isa) regs in
-  let reg_defs = List.map (fun n -> n ^ "_def") reg_refs in
-  let get_arg_assm i r = if (is_ref_typ r && not (is_cap_typ isa (base_typ_of isa r))) then ["name arg" ^ string_of_int i ^ " \\<notin> Rs"] else [] in
-  let assms =
-    (if regs = [] then [] else ["Rs \\<subseteq> cap_regs - {" ^ String.concat ", " reg_names ^ "}"]) @
-    List.concat (List.mapi get_arg_assm f.arg_typs)
+  (* let get_arg_assm i r = if (is_ref_typ r && not (is_cap_typ isa (base_typ_of isa r))) then ["name arg" ^ string_of_int i ^ " \\<notin> Rs"] else [] in *)
+  let assm =
+    "Rs \\<subseteq> {" ^ String.concat ", " reg_names ^ "}"
+    (* @ List.concat (List.mapi get_arg_assm f.arg_typs) *)
   in
-  let using = (if assms = [] then [] else ["assms"]) in
-  let simps = if regs = [] then "" else " simp: " ^ String.concat " " reg_defs in
-  { name = "no_reg_writes_to_" ^ name; attrs = "[no_reg_writes_toI, simp]"; assms;
-    stmts = ["no_reg_writes_to Rs (" ^ call ^ ")"];
-    unfolding = [(name ^ "_def"); "bind_assoc"]; using;
+  (* let using = (if assms = [] then [] else ["assms"]) in *)
+  let simps = if regs = [] then "" else " simp: register_defs" in
+  { name = "no_reg_writes_to_" ^ name; attrs = "[no_reg_writes_toI, simp]"; assms = [];
+    stmts = [assm ^ " \\<Longrightarrow> no_reg_writes_to Rs (" ^ call ^ ")"];
+    unfolding = [(name ^ "_def"); "bind_assoc"]; using = [];
     proof = "(no_reg_writes_toI" ^ simps ^ ")" }
   |> apply_lemma_override isa id "no_reg_writes_to"
 
 let return_caps_derivable_lemma isa id =
   let (f, name, call) = get_fun_info isa id in
+  let cap_regs_read = IdSet.inter (special_regs isa) (IdSet.union f.regs_read (IdSet.diff f.trans_regs_read isa.privileged_regs)) in
+  let cap_reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") (IdSet.elements cap_regs_read) in
+  let get_arg_assm i r = if (is_cap_typ isa (base_typ_of isa r)) then ["arg" ^ string_of_int i ^ " \\<in> derivable_caps s \\<Longrightarrow> "] else [] in
+  let arg_assm = String.concat "" (List.concat (List.mapi get_arg_assm f.arg_typs)) in
+  let access_assm =
+    if IdSet.is_empty cap_regs_read then "" else
+    ("{" ^ String.concat ", " cap_reg_names ^ "} \\<subseteq> accessible_regs s \\<Longrightarrow> ")
+  in
+  let next_state = if is_cap_fun isa f then "(run s t)" else "s" in
   { name = name ^ "_derivable"; attrs = "[derivable_capsE]";
-    assms = ["Run (" ^ call ^ ") t c"; "trace_assm t"];
-    stmts = ["c \\<in> derivable_caps (run s t)"];
-    unfolding = [(name ^ "_def")]; using = ["assms"];
-    proof = "derivable_capsI" }
+    assms = [];
+    stmts = ["Run (" ^ call ^ ") t c \\<Longrightarrow> " ^ arg_assm ^ access_assm ^ "c \\<in> derivable_caps " ^ next_state];
+    unfolding = []; using = [];
+    proof = "(unfold " ^ name ^ "_def, derivable_capsI)" }
   |> apply_lemma_override isa id "derivable_caps"
 
 let traces_enabled_lemma mem isa id =
@@ -191,14 +198,13 @@ let read_cap_regs_lemma isa =
 let read_cap_regs_derivable_lemma isa =
   let stmt r =
     "\\<And>t c s. Run (read_reg " ^ mangle_reg_ref isa r ^ ") t c" ^
-    " \\<Longrightarrow> trace_assm t" ^
     (if IdSet.mem r (special_regs isa) then " \\<Longrightarrow> {''" ^ string_of_id r ^ "''} \\<subseteq> accessible_regs s" else "") ^
     " \\<Longrightarrow> c \\<in> derivable_caps (run s t)"
   in
   let stmts = List.map stmt (IdSet.elements isa.cap_regs) in
   { name = "read_cap_regs_derivable"; attrs = "[derivable_capsE]";
     assms = []; unfolding = []; using = []; stmts;
-    proof = "(auto simp: derivable_caps_def elim!: Run_read_regE intro!: derivable.Copy)" }
+    proof = "(derivable_capsI elim: read_reg_derivable simp: register_defs)+" }
 
 let output_line chan l =
   output_string chan l;
@@ -208,7 +214,7 @@ let funs isa = List.filter (fun id -> not (IdSet.mem id isa.skip_funs)) (fun_ids
 let filter_funs isa p = List.filter (fun id -> p id (Bindings.find id isa.fun_infos)) (funs isa)
 
 let output_cap_lemmas chan (isa : isa) =
-  output_line chan  "theory CHERI_Cap_Lemmas";
+  output_line chan  "theory CHERI_Gen_Lemmas";
   output_line chan  "imports CHERI_Instantiation";
   output_line chan  "begin";
   output_line chan  "";
@@ -227,13 +233,27 @@ let output_cap_lemmas chan (isa : isa) =
     |> List.map format_lemma |> List.iter (output_line chan);
 
   output_line chan  "";
+  output_line chan  (format_lemma (read_cap_regs_derivable_lemma isa));
+  output_line chan  "";
+
+  filter_funs isa (fun id f -> returns_cap isa f && effectful f)
+    |> List.map (return_caps_derivable_lemma isa)
+    |> List.map format_lemma |> List.iter (output_line chan);
+
+  output_line chan  "";
+
+  filter_funs isa (fun id f -> not (IdSet.subset (write_checked_regs isa) f.trans_regs_written) && effectful f)
+    |> List.map (no_reg_writes_to_lemma isa)
+    |> List.map format_lemma |> List.iter (output_line chan);
+
+  output_line chan  "";
   output_line chan  "end";
   output_line chan  "";
   output_line chan  "end"
 
 let output_cap_props chan (isa : isa) =
   output_line chan  "theory CHERI_Cap_Properties";
-  output_line chan  "imports CHERI_Cap_Lemmas";
+  output_line chan  "imports CHERI_Lemmas";
   output_line chan  "begin";
   output_line chan  "";
 
@@ -259,7 +279,7 @@ let output_cap_props chan (isa : isa) =
 
 let output_mem_props chan (isa : isa) =
   output_line chan  "theory CHERI_Mem_Properties";
-  output_line chan  "imports CHERI_Cap_Lemmas";
+  output_line chan  "imports CHERI_Lemmas";
   output_line chan  "begin";
   output_line chan  "";
 
@@ -293,7 +313,7 @@ let process_isa file =
   let isa = load_isa file !opt_src_dir in
   let out_file name = Filename.concat !opt_out_dir name in
 
-  let chan = open_out (out_file "CHERI_Cap_Lemmas.thy") in
+  let chan = open_out (out_file "CHERI_Gen_Lemmas.thy") in
   output_cap_lemmas chan isa;
   flush chan;
   close_out chan;
