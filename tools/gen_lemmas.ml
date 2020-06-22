@@ -95,27 +95,29 @@ let non_mem_exp_lemma isa id =
     using = []; unfolding = [] }
   |> apply_lemma_override isa id "non_mem_exp"
 
-let no_reg_writes_to_lemma isa id =
+let no_reg_writes_to_lemma no_exc isa id =
   let (f, name, call) = get_fun_info isa id in
   (* Restricting attention to special capability registers for now *)
-  let regs = IdSet.elements (IdSet.diff (write_checked_regs isa) f.trans_regs_written) in
+  let regs_written = if no_exc then f.trans_regs_written_no_exc else f.trans_regs_written in
+  let regs = IdSet.elements (IdSet.diff (write_checked_regs isa) regs_written) in
   let reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") regs in
   (* let get_arg_assm i r = if (is_ref_typ r && not (is_cap_typ isa (base_typ_of isa r))) then ["name arg" ^ string_of_int i ^ " \\<notin> Rs"] else [] in *)
   let assm =
     "Rs \\<subseteq> {" ^ String.concat ", " reg_names ^ "}"
     (* @ List.concat (List.mapi get_arg_assm f.arg_typs) *)
   in
-  (* let using = (if assms = [] then [] else ["assms"]) in *)
   let simps = if regs = [] then "" else " simp: register_defs" in
-  { name = "no_reg_writes_to_" ^ name; attrs = "[no_reg_writes_toI, simp]"; assms = [];
-    stmts = [assm ^ " \\<Longrightarrow> no_reg_writes_to Rs (" ^ call ^ ")"];
+  let exc_prefix = if no_exc then "runs_" else "" in
+  { name = exc_prefix ^ "no_reg_writes_to_" ^ name;
+    attrs = "[" ^ exc_prefix ^ "no_reg_writes_toI, simp]"; assms = [];
+    stmts = [assm ^ " \\<Longrightarrow> " ^ exc_prefix ^ "no_reg_writes_to Rs (" ^ call ^ ")"];
     unfolding = [(name ^ "_def"); "bind_assoc"]; using = [];
     proof = "(no_reg_writes_toI" ^ simps ^ ")" }
-  |> apply_lemma_override isa id "no_reg_writes_to"
+  |> apply_lemma_override isa id (exc_prefix ^ "no_reg_writes_to")
 
 let return_caps_derivable_lemma isa id =
   let (f, name, call) = get_fun_info isa id in
-  let cap_regs_read = IdSet.inter (special_regs isa) (IdSet.union f.regs_read (IdSet.diff f.trans_regs_read isa.privileged_regs)) in
+  let cap_regs_read = IdSet.inter (special_regs isa) f.trans_regs_read_no_exc in
   let cap_reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") (IdSet.elements cap_regs_read) in
   let get_arg_assm i r = if (is_cap_typ isa (base_typ_of isa r)) then ["arg" ^ string_of_int i ^ " \\<in> derivable_caps s \\<Longrightarrow> "] else [] in
   let arg_assm = String.concat "" (List.concat (List.mapi get_arg_assm f.arg_typs)) in
@@ -133,7 +135,7 @@ let return_caps_derivable_lemma isa id =
 
 let traces_enabled_lemma mem isa id =
   let (f, name, call) = get_fun_info isa id in
-  let cap_regs_read = IdSet.inter (special_regs isa) (IdSet.union f.regs_read (IdSet.diff f.trans_regs_read isa.privileged_regs)) in
+  let cap_regs_read = IdSet.inter (special_regs isa) f.trans_regs_read_no_exc in
   let cap_reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") (IdSet.elements cap_regs_read) in
   let cap_assm =
     if ids_overlap cap_regs_read isa.privileged_regs || (writes isa.cap_regs f && not (IdSet.is_empty cap_regs_read)) then
@@ -206,6 +208,14 @@ let read_cap_regs_derivable_lemma isa =
     assms = []; unfolding = []; using = []; stmts;
     proof = "(derivable_capsI elim: read_reg_derivable simp: register_defs)+" }
 
+let exp_fails_lemma isa id =
+  let (f, name, call) = get_fun_info isa id in
+  { name = "exp_fails_" ^ name; attrs = "[simp]";
+    assms = []; unfolding = [(name ^ "_def"); "bind_assoc"]; using = [];
+    stmts = ["exp_fails (" ^ call ^ ")"];
+    proof = "(auto elim!: Run_bindE Run_ifE Run_letE)" }
+  |> apply_lemma_override isa id ("exp_fails")
+
 let output_line chan l =
   output_string chan l;
   output_string chan "\n"
@@ -214,6 +224,7 @@ let funs isa = List.filter (fun id -> not (IdSet.mem id isa.skip_funs)) (fun_ids
 let filter_funs isa p = List.filter (fun id -> p id (Bindings.find id isa.fun_infos)) (funs isa)
 
 let output_cap_lemmas chan (isa : isa) =
+  let exc_funs = exception_funs (isa.ast) in
   output_line chan  "theory CHERI_Gen_Lemmas";
   output_line chan  "imports CHERI_Instantiation";
   output_line chan  "begin";
@@ -236,6 +247,12 @@ let output_cap_lemmas chan (isa : isa) =
   output_line chan  (format_lemma (read_cap_regs_derivable_lemma isa));
   output_line chan  "";
 
+  filter_funs isa (fun id f -> IdSet.mem id exc_funs && effectful f)
+    |> List.map (exp_fails_lemma isa)
+    |> List.map format_lemma |> List.iter (output_line chan);
+
+  output_line chan  "";
+
   filter_funs isa (fun id f -> returns_cap isa f && effectful f)
     |> List.map (return_caps_derivable_lemma isa)
     |> List.map format_lemma |> List.iter (output_line chan);
@@ -243,7 +260,20 @@ let output_cap_lemmas chan (isa : isa) =
   output_line chan  "";
 
   filter_funs isa (fun id f -> not (IdSet.subset (write_checked_regs isa) f.trans_regs_written) && effectful f)
-    |> List.map (no_reg_writes_to_lemma isa)
+    |> List.map (no_reg_writes_to_lemma false isa)
+    |> List.map format_lemma |> List.iter (output_line chan);
+
+  output_line chan  "";
+
+  let output_runs_no_reg_writes_to id f =
+    let non_written_regs = IdSet.diff (write_checked_regs isa) f.trans_regs_written in
+    let non_written_regs_no_exc = IdSet.diff (write_checked_regs isa) f.trans_regs_written_no_exc in
+    let result = not (IdSet.is_empty non_written_regs_no_exc || IdSet.equal non_written_regs non_written_regs_no_exc) && effectful f in
+    prerr_endline (string_of_id id ^ " (" ^ string_of_bool result ^ "): " ^ String.concat ", " (List.map string_of_id (IdSet.elements non_written_regs_no_exc)));
+    result
+  in
+  filter_funs isa output_runs_no_reg_writes_to
+    |> List.map (no_reg_writes_to_lemma true isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
   output_line chan  "";

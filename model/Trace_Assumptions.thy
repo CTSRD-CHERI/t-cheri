@@ -365,6 +365,14 @@ method no_reg_writes_toI uses simp intro =
   (intro intro runs_no_reg_writes_toI no_reg_writes_runs_no_reg_writes no_reg_writes_toI conjI impI allI;
    auto simp: simp split del: if_split split: option.splits)
 
+abbreviation "exp_fails m \<equiv> (\<forall>t a. \<not>Run m t a)"
+
+lemma exp_fails_if_then_else:
+  assumes "exp_fails m1"
+  shows "Run (if c then m1 else m2) t a \<longleftrightarrow> \<not>c \<and> Run m2 t a"
+  using assms
+  by auto
+
 locale Register_State =
   fixes get_regval :: "string \<Rightarrow> 'regstate \<Rightarrow> 'regval option"
     and set_regval :: "string \<Rightarrow> 'regval \<Rightarrow> 'regstate \<Rightarrow> 'regstate option"
