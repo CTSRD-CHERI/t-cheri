@@ -31,6 +31,9 @@ let has_mem_eff f =
   List.exists (has_effect f.effect) mem_effs
 
 let effectful f = Pretty_print_lem.effectful f.effect
+let effectful_funs isa =
+  Bindings.filter (fun _ f -> effectful f) isa.fun_infos
+  |> Bindings.bindings |> List.map fst |> IdSet.of_list
 
 let ids_overlap x y = not (IdSet.disjoint x y)
 let reads rs f = ids_overlap rs f.trans_regs_read
@@ -46,6 +49,9 @@ let base_typ_of isa typ = Type_check.Env.base_typ_of isa.type_env typ
 
 let returns_cap isa f = is_cap_typ isa f.ret_typ
 let is_cap_fun isa f = has_mem_eff f || uses isa.cap_regs f
+let cap_funs isa =
+  Bindings.filter (fun _ f -> is_cap_fun isa f) isa.fun_infos
+  |> Bindings.bindings |> List.map fst |> IdSet.of_list
 
 let has_ref_args f = List.exists is_ref_typ f.arg_typs
 
@@ -111,9 +117,85 @@ let no_reg_writes_to_lemma no_exc isa id =
   { name = exc_prefix ^ "no_reg_writes_to_" ^ name;
     attrs = "[" ^ exc_prefix ^ "no_reg_writes_toI, simp]"; assms = [];
     stmts = [assm ^ " \\<Longrightarrow> " ^ exc_prefix ^ "no_reg_writes_to Rs (" ^ call ^ ")"];
-    unfolding = [(name ^ "_def"); "bind_assoc"]; using = [];
-    proof = "(no_reg_writes_toI" ^ simps ^ ")" }
+    unfolding = []; using = [];
+    proof = "(unfold " ^ name ^ "_def bind_assoc, no_reg_writes_toI" ^ simps ^ ")" }
   |> apply_lemma_override isa id (exc_prefix ^ "no_reg_writes_to")
+
+(* We (currently) only need register write footprints of functions that have
+   some capability effects and are called in a block before reads of specific
+   registers *)
+
+type footprint_requirements = {
+  needed_footprints : IdSet.t;
+  called_cap_funs : IdSet.t;
+  checked_reads : IdSet.t;
+}
+
+let no_requirements = {
+  needed_footprints = IdSet.empty; called_cap_funs = IdSet.empty; checked_reads = IdSet.empty
+}
+
+let join_requirements r1 r2 = {
+  needed_footprints = IdSet.union r1.needed_footprints r2.needed_footprints;
+  called_cap_funs = IdSet.union r1.called_cap_funs r2.called_cap_funs;
+  checked_reads = IdSet.union r1.checked_reads r2.checked_reads
+}
+
+let fun_requirements isa id =
+  if Bindings.mem id isa.fun_infos then
+    let (f, _, _) = get_fun_info isa id in
+    { needed_footprints = IdSet.empty;
+      called_cap_funs = if is_cap_fun isa f then IdSet.singleton id else IdSet.empty;
+      checked_reads = IdSet.inter (write_checked_regs isa) f.trans_regs_read }
+  else no_requirements
+
+let reg_requirements isa id =
+  { no_requirements with checked_reads = IdSet.inter (write_checked_regs isa) (IdSet.singleton id) }
+
+let check_requirements left right =
+  let needed_footprints =
+    if IdSet.is_empty right.checked_reads then
+      IdSet.empty
+    else
+      left.called_cap_funs
+  in
+  let r = join_requirements left right in
+  { r with needed_footprints = IdSet.union r.needed_footprints needed_footprints }
+
+let requirements_alg isa =
+  { (Rewriter.pure_exp_alg no_requirements join_requirements) with
+    e_id = reg_requirements isa;
+    e_app = (fun (id, rs) -> List.fold_left join_requirements (fun_requirements isa id) rs);
+    e_app_infix = (fun (r1, id, r2) -> List.fold_left join_requirements (fun_requirements isa id) [r1; r2]);
+    lEXP_memory = (fun (id, rs) -> List.fold_left join_requirements (fun_requirements isa id) rs);
+    e_block = (fun rs -> List.fold_right check_requirements rs no_requirements);
+    e_let = (fun (r1, r2) -> check_requirements r1 r2);
+    e_internal_plet = (fun (r1, r2, r3) -> List.fold_right check_requirements [r1; r2; r3] no_requirements);
+    pat_when = (fun (r1, r2, r3) -> List.fold_right check_requirements [r1; r2; r3] no_requirements); }
+
+let exp_requirements isa = Rewriter.fold_exp (requirements_alg isa)
+let pexp_requirements isa = Rewriter.fold_pexp (requirements_alg isa)
+let funcl_requirements isa = function
+  | Ast.FCL_aux (Ast.FCL_Funcl (_, funcl), _) -> pexp_requirements isa funcl
+
+let add_needed_footprints isa needed_funs = function
+  | Ast.DEF_fundef (Ast.FD_aux (Ast.FD_function (_, _, _, funcls), _)) ->
+     let rs = List.map (funcl_requirements isa) funcls in
+     let r = List.fold_left join_requirements no_requirements rs in
+     IdSet.union needed_funs r.needed_footprints
+  | _ -> needed_funs
+
+let needed_footprints isa =
+  let ids = List.fold_left (add_needed_footprints isa) IdSet.empty isa.ast in
+  (* Add dependencies *)
+  let nodes = List.map (fun id -> Slice.Function id) (IdSet.elements ids) in
+  let module NodeSet = Set.Make(Slice.Node) in
+  let module G = Graph.Make(Slice.Node) in
+  let g = Slice.graph_of_ast (Ast.Defs isa.ast) in
+  let nodes' = G.reachable (NodeSet.of_list nodes) NodeSet.empty g in
+  let ids_of_node = function | Slice.Function id -> [id] | _ -> [] in
+  let ids' = List.concat (List.map ids_of_node (NodeSet.elements nodes')) in
+  IdSet.union ids (IdSet.inter (IdSet.of_list ids') (effectful_funs isa))
 
 let return_caps_derivable_lemma isa id =
   let (f, name, call) = get_fun_info isa id in
@@ -225,6 +307,7 @@ let filter_funs isa p = List.filter (fun id -> p id (Bindings.find id isa.fun_in
 
 let output_cap_lemmas chan (isa : isa) =
   let exc_funs = exception_funs (isa.ast) in
+  let needed_fps = needed_footprints isa in
   output_line chan  "theory CHERI_Gen_Lemmas";
   output_line chan  "imports CHERI_Instantiation";
   output_line chan  "begin";
@@ -253,13 +336,7 @@ let output_cap_lemmas chan (isa : isa) =
 
   output_line chan  "";
 
-  filter_funs isa (fun id f -> returns_cap isa f && effectful f)
-    |> List.map (return_caps_derivable_lemma isa)
-    |> List.map format_lemma |> List.iter (output_line chan);
-
-  output_line chan  "";
-
-  filter_funs isa (fun id f -> not (IdSet.subset (write_checked_regs isa) f.trans_regs_written) && effectful f)
+  filter_funs isa (fun id f -> not (IdSet.subset (write_checked_regs isa) f.trans_regs_written) && IdSet.mem id needed_fps)
     |> List.map (no_reg_writes_to_lemma false isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
@@ -268,12 +345,16 @@ let output_cap_lemmas chan (isa : isa) =
   let output_runs_no_reg_writes_to id f =
     let non_written_regs = IdSet.diff (write_checked_regs isa) f.trans_regs_written in
     let non_written_regs_no_exc = IdSet.diff (write_checked_regs isa) f.trans_regs_written_no_exc in
-    let result = not (IdSet.is_empty non_written_regs_no_exc || IdSet.equal non_written_regs non_written_regs_no_exc) && effectful f in
-    prerr_endline (string_of_id id ^ " (" ^ string_of_bool result ^ "): " ^ String.concat ", " (List.map string_of_id (IdSet.elements non_written_regs_no_exc)));
-    result
+    not (IdSet.is_empty non_written_regs_no_exc || IdSet.equal non_written_regs non_written_regs_no_exc) && IdSet.mem id needed_fps
   in
   filter_funs isa output_runs_no_reg_writes_to
     |> List.map (no_reg_writes_to_lemma true isa)
+    |> List.map format_lemma |> List.iter (output_line chan);
+
+  output_line chan  "";
+
+  filter_funs isa (fun id f -> returns_cap isa f && effectful f)
+    |> List.map (return_caps_derivable_lemma isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
   output_line chan  "";
