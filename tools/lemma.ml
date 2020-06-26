@@ -35,11 +35,12 @@ let format_lemma l =
   "  by " ^ l.proof ^ "\n"
 
 let apply_override o l =
-  let using = match (o.using_override, l.using, o.assms_override, l.assms) with
+  (* let using = match (o.using_override, l.using, o.assms_override, l.assms) with
     | (Some using, _, _, _) -> using
     | (None, using, Some (_ :: _), []) when not (List.mem "assms" using) -> "assms" :: using
     | (_, using, _, _) -> using
-  in
+  in *)
+  let using = Util.option_default l.using o.using_override in
   { name = Util.option_default l.name o.name_override;
     attrs = Util.option_default l.attrs o.attrs_override;
     assms = Util.option_default l.assms o.assms_override;
