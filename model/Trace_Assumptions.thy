@@ -163,11 +163,23 @@ lemma no_reg_writes_to_bindI[intro, simp, no_reg_writes_toI]:
   using assms
   by (auto simp: no_reg_writes_to_def elim: bind_Traces_cases)
 
+lemma no_reg_writes_to_bindI_ignore_left:
+  assumes "no_reg_writes_to Rs m" and "\<And>a. no_reg_writes_to Rs (f a)"
+  shows "no_reg_writes_to Rs (m \<bind> f)"
+  using assms
+  by (intro no_reg_writes_to_bindI)
+
 lemma runs_no_reg_writes_to_bindI[intro, simp, runs_no_reg_writes_toI]:
   assumes "runs_no_reg_writes_to Rs m" and "\<And>t a. Run m t a \<Longrightarrow> runs_no_reg_writes_to Rs (f a)"
   shows "runs_no_reg_writes_to Rs (m \<bind> f)"
   using assms
   by (auto simp: runs_no_reg_writes_to_def elim: Run_bindE)
+
+lemma runs_no_reg_writes_to_bindI_ignore_left:
+  assumes "runs_no_reg_writes_to Rs m" and "\<And>a. runs_no_reg_writes_to Rs (f a)"
+  shows "runs_no_reg_writes_to Rs (m \<bind> f)"
+  using assms
+  by (intro runs_no_reg_writes_to_bindI)
 
 lemma no_reg_writes_to_return[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (return a)"
