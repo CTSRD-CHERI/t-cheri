@@ -215,6 +215,44 @@ let return_caps_derivable_lemma isa id =
     proof = "(unfold " ^ name ^ "_def, derivable_capsI)" }
   |> apply_lemma_override isa id "derivable_caps"
 
+let rec arg_assms_of_nc arg_kids nc =
+  let opt_binop l op r = match l, r with
+    | Some l, Some r -> Some (l ^ " " ^ op ^ " " ^ r)
+    | _, _ -> None
+  in
+  let rec arg_nexp nexp = match unaux_nexp nexp with
+    | Nexp_var kid when KBindings.mem kid arg_kids -> Some (KBindings.find kid arg_kids)
+    | Nexp_constant i -> Some (Nat_big_num.to_string i)
+    | Nexp_times (n1, n2) -> opt_binop (arg_nexp n1) "*" (arg_nexp n2)
+    | Nexp_sum (n1, n2) -> opt_binop (arg_nexp n1) "+" (arg_nexp n2)
+    | Nexp_minus (n1, n2) -> opt_binop (arg_nexp n1) "-" (arg_nexp n2)
+    | _ -> None
+  in
+  match unaux_constraint nc with
+  | NC_equal (n1, n2) -> opt_binop (arg_nexp n1) "=" (arg_nexp n2)
+  | NC_bounded_ge (n1, n2) -> opt_binop (arg_nexp n1) "\\<ge>" (arg_nexp n2)
+  | NC_bounded_gt (n1, n2) -> opt_binop (arg_nexp n1) ">" (arg_nexp n2)
+  | NC_bounded_le (n1, n2) -> opt_binop (arg_nexp n1) "\\<le>" (arg_nexp n2)
+  | NC_bounded_lt (n1, n2) -> opt_binop (arg_nexp n1) "<" (arg_nexp n2)
+  | NC_not_equal (n1, n2) -> opt_binop (arg_nexp n1) "\\<noteq>" (arg_nexp n2)
+  | NC_set (kid, nums) when KBindings.mem kid arg_kids ->
+     let set = "{" ^ String.concat ", " (List.map Nat_big_num.to_string nums) ^ "}" in
+     Some (KBindings.find kid arg_kids ^ " \\<in> " ^ set)
+  | NC_or (nc1, nc2) -> opt_binop (arg_assms_of_nc arg_kids nc1) "\\<or>" (arg_assms_of_nc arg_kids nc2)
+  | NC_and (nc1, nc2) -> opt_binop (arg_assms_of_nc arg_kids nc1) "\\<and>" (arg_assms_of_nc arg_kids nc2)
+  | _ -> None
+
+let arg_assms_of_quant_item arg_kids (qi : Ast.quant_item) = match qi with
+  | QI_aux (QI_constraint nc, _) ->
+     begin match arg_assms_of_nc arg_kids nc with
+       | Some assms -> [assms]
+       | None -> []
+     end
+  | _ -> []
+
+let arg_assms_of_typquant arg_kids tq =
+  List.concat (List.map (arg_assms_of_quant_item arg_kids) (quant_items tq))
+
 let traces_enabled_lemma mem isa id =
   let (f, name, call) = get_fun_info isa id in
   let cap_regs_read = IdSet.inter (special_regs isa) f.trans_regs_read_no_exc in
@@ -224,11 +262,18 @@ let traces_enabled_lemma mem isa id =
       ["{" ^ String.concat ", " cap_reg_names ^ "} \\<subseteq> accessible_regs s"]
     else []
   in
-  let arg_assms =
+  let cap_arg_assms =
     if has_mem_eff f || writes isa.cap_regs f then
       List.concat (List.mapi (fun i t -> if is_cap_typ isa t then ["arg" ^ string_of_int i ^ " \\<in> derivable_caps s"] else []) f.arg_typs)
     else []
   in
+  let add_arg_kid (i, arg_kids) arg_typ = match Type_check.destruct_numeric arg_typ with
+    | Some ([], _, Nexp_aux (Nexp_var kid, _)) ->
+       (i + 1, KBindings.add kid ("arg" ^ string_of_int i) arg_kids)
+    | _ -> (i + 1, arg_kids)
+  in
+  let (_, arg_kids) = List.fold_left add_arg_kid (0, KBindings.empty) f.arg_typs in
+  let arg_assms = cap_arg_assms @ (arg_assms_of_typquant arg_kids f.typquant) in
   let assms = cap_assm @ arg_assms in
   let using = if assms = [] then "" else " assms: assms" in
   { name = "traces_enabled_" ^ name; attrs = "[traces_enabledI]";

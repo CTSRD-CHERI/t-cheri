@@ -5,7 +5,8 @@ open Rewriter
 let opt_splice = ref ([]:string list)
 
 type fun_info =
-  { arg_typs : typ list;
+  { typquant : typquant;
+    arg_typs : typ list;
     ret_typ : typ;
     effect : effect;
     calls : IdSet.t;
@@ -128,13 +129,13 @@ let add_fun_infos_of_def env exception_funs fun_infos = function
          List.map (fun (_, info) -> info.trans_regs_written_no_exc) (Bindings.bindings calls_infos)
          |> List.fold_left IdSet.union regs_written
      in
-     let arg_typs, ret_typ, effect = match Type_check.Env.get_val_spec id env with
-       | _, Typ_aux (Typ_fn (arg_typs, ret_typ, effect), _) -> arg_typs, ret_typ, effect
+     let typquant, arg_typs, ret_typ, effect = match Type_check.Env.get_val_spec_orig id env with
+       | typquant, Typ_aux (Typ_fn (arg_typs, ret_typ, effect), _) -> typquant, arg_typs, ret_typ, effect
        | _ -> raise (Reporting.err_unreachable Parse_ast.Unknown __POS__ ("Function " ^ string_of_id id ^ " does not have function type"))
      in
      Bindings.add id
        {
-         arg_typs; ret_typ; effect; calls; regs_read; regs_read_no_exc; regs_written; regs_written_no_exc;
+         typquant; arg_typs; ret_typ; effect; calls; regs_read; regs_read_no_exc; regs_written; regs_written_no_exc;
          trans_regs_read; trans_regs_read_no_exc; trans_regs_written; trans_regs_written_no_exc
        }
        fun_infos
