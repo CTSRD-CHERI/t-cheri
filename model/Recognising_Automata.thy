@@ -1995,10 +1995,10 @@ locale Mem_Automaton = Capability_ISA_Fixed_Translation where CC = CC and ISA = 
   fixes is_fetch :: bool
 begin
 
-definition paddr_in_mem_region :: "'cap \<Rightarrow> acctype \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> bool" where
-  "paddr_in_mem_region c acctype paddr sz =
-     (\<exists>vaddr. set (address_range vaddr sz) \<subseteq> get_mem_region CC c \<and>
-              translate_address ISA vaddr acctype [] = Some paddr)"
+definition addrs_in_mem_region :: "'cap \<Rightarrow> acctype \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> bool" where
+  "addrs_in_mem_region c acctype vaddr paddr sz =
+     (set (address_range vaddr sz) \<subseteq> get_mem_region CC c \<and>
+      translate_address ISA vaddr acctype [] = Some paddr)"
 
 definition has_access_permission :: "'cap \<Rightarrow> acctype \<Rightarrow> bool \<Rightarrow> bool \<Rightarrow> bool" where
   "has_access_permission c acctype is_cap is_local_cap =
@@ -2008,48 +2008,49 @@ definition has_access_permission :: "'cap \<Rightarrow> acctype \<Rightarrow> bo
       | Store \<Rightarrow> permits_store_method CC c \<and> (is_cap \<longrightarrow> permits_store_cap_method CC c) \<and>
                  (is_local_cap \<longrightarrow> permits_store_local_cap_method CC c))"
 
-definition authorises_access :: "'cap \<Rightarrow> acctype \<Rightarrow> bool \<Rightarrow> bool \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> bool" where
-  "authorises_access c acctype is_cap is_local_cap paddr sz =
-     (is_tagged_method CC c \<and> \<not>is_sealed_method CC c \<and> paddr_in_mem_region c acctype paddr sz \<and>
+definition authorises_access :: "'cap \<Rightarrow> acctype \<Rightarrow> bool \<Rightarrow> bool \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> bool" where
+  "authorises_access c acctype is_cap is_local_cap vaddr paddr sz =
+     (is_tagged_method CC c \<and> \<not>is_sealed_method CC c \<and>
+      addrs_in_mem_region c acctype vaddr paddr sz \<and>
       has_access_permission c acctype is_cap is_local_cap)"
 
 definition legal_store :: "nat \<Rightarrow> memory_byte list \<Rightarrow> bitU \<Rightarrow> bool" where
   "legal_store sz v tag \<longleftrightarrow> (tag = B0 \<or> tag = B1) \<and> sz = length v"
 
-definition access_enabled :: "('cap, 'regval) axiom_state \<Rightarrow> acctype \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> memory_byte list \<Rightarrow> bitU \<Rightarrow> bool" where
-  "access_enabled s acctype paddr sz v tag =
+definition access_enabled :: "('cap, 'regval) axiom_state \<Rightarrow> acctype \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> memory_byte list \<Rightarrow> bitU \<Rightarrow> bool" where
+  "access_enabled s acctype vaddr paddr sz v tag =
      ((tag \<noteq> B0 \<longrightarrow> address_tag_aligned ISA paddr \<and> sz = tag_granule ISA) \<and>
       (acctype = Fetch \<longrightarrow> tag = B0) \<and>
       (acctype = PTW \<or>
        (\<exists>c' \<in> derivable (accessed_caps s).
           let is_cap = tag \<noteq> B0 in
           let is_local_cap = mem_val_is_local_cap CC ISA v tag \<and> tag = B1 in
-          authorises_access c' acctype is_cap is_local_cap paddr sz)))"
+          authorises_access c' acctype is_cap is_local_cap vaddr paddr sz)))"
 
-lemmas access_enabled_defs = access_enabled_def authorises_access_def paddr_in_mem_region_def
+lemmas access_enabled_defs = access_enabled_def authorises_access_def addrs_in_mem_region_def
   has_access_permission_def legal_store_def
 
 fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool" where
   "enabled s (E_write_mem wk paddr sz v r) =
      (let acctype = if is_translation_event ISA (E_write_mem wk paddr sz v r) then PTW else Store in
-      access_enabled s acctype paddr sz v B0 \<and> legal_store sz v B0)"
+      (\<exists>vaddr. access_enabled s acctype vaddr paddr sz v B0) \<and> legal_store sz v B0)"
 | "enabled s (E_write_memt wk paddr sz v tag r) =
      (let acctype = if is_translation_event ISA (E_write_memt wk paddr sz v tag r) then PTW else Store in
-      access_enabled s acctype paddr sz v tag \<and> legal_store sz v tag)"
+      (\<exists>vaddr. access_enabled s acctype vaddr paddr sz v tag) \<and> legal_store sz v tag)"
 | "enabled s (E_read_mem rk paddr sz v) =
      (let acctype =
         if is_translation_event ISA (E_read_mem rk paddr sz v) then PTW else
         if is_fetch then Fetch else
         Load
       in
-      access_enabled s acctype paddr sz v B0)"
+      (\<exists>vaddr. access_enabled s acctype vaddr paddr sz v B0))"
 | "enabled s (E_read_memt rk paddr sz v_tag) =
      (let acctype =
         if is_translation_event ISA (E_read_memt rk paddr sz v_tag) then PTW else
         if is_fetch then Fetch else
         Load
       in
-      access_enabled s acctype paddr sz (fst v_tag) (snd v_tag))"
+      (\<exists>vaddr. access_enabled s acctype vaddr paddr sz (fst v_tag) (snd v_tag)))"
 | "enabled s _ = True"
 
 sublocale Cap_Axiom_Automaton where enabled = enabled ..
