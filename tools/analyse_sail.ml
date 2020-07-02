@@ -152,12 +152,13 @@ let fun_infos_of_defs env defs =
 let load_files ?mutrecs:(mutrecs=IdSet.empty) files =
   let open Process_file in
   Nl_flow.opt_nl_flow := true;
-  Type_check.opt_no_lexp_bounds_check := true;
   Process_file.opt_memo_z3 := true;
   Reporting.opt_warnings := false;
   Initial_check.opt_undefined_gen := true;
-  Initial_check.opt_magic_hash := true;
   Type_check.opt_no_effects := true;
+  Rewrites.opt_mono_rewrites := true;
+  Rewrites.opt_auto_mono := true;
+  Pretty_print_lem.opt_mwords := true;
   Constant_propagation_mutrec.targets := IdSet.elements mutrecs;
   Util.opt_verbosity := 1;
 

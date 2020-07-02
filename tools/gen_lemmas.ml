@@ -61,9 +61,23 @@ let mangle_name renames n =
 let mangle_fun_name arch = mangle_name arch.fun_renames
 let mangle_reg_ref arch n = mangle_name arch.reg_ref_renames (append_id n "_ref")
 
+let get_kid_itself typ = match unaux_typ typ with
+  | Typ_app (itself, [Ast.A_aux (Ast.A_nexp (Nexp_aux (Nexp_var kid, _)), _)])
+    when string_of_id itself = "itself" ->
+     Some kid
+  | _ -> None
+
 let format_fun_name arch id = mangle_fun_name arch id
-let format_fun_args f = String.concat " " (List.mapi (fun i _ -> "arg" ^ string_of_int i) f.arg_typs)
-let format_fun_call arch id f = format_fun_name arch id ^ " " ^ format_fun_args f
+let format_fun_args ?annot_kids:(annot_kids=false) f =
+  let format_arg i typ =
+    let arg = "arg" ^ string_of_int i in
+    match get_kid_itself typ with
+    | Some kid -> "(" ^ arg ^ " :: " ^ string_of_kid kid ^ "::len itself)"
+    | None -> arg
+  in
+  String.concat " " (List.mapi format_arg f.arg_typs)
+let format_fun_call ?annot_kids:(annot_kids=false) arch id f =
+  format_fun_name arch id ^ " " ^ format_fun_args ~annot_kids f
 
 let apply_lemma_override arch id lemma_type lemma =
   match Bindings.find_opt id arch.lemma_overrides with
@@ -74,9 +88,9 @@ let apply_lemma_override arch id lemma_type lemma =
      end
   | None -> lemma
 
-let get_fun_info isa id =
+let get_fun_info ?annot_kids:(annot_kids=false) isa id =
   let f = Bindings.find id isa.fun_infos in
-  (f, format_fun_name isa id, format_fun_call isa id f)
+  (f, format_fun_name isa id, format_fun_call ~annot_kids isa id f)
 
 let non_cap_exp_lemma isa id : lemma =
   let (f, name, call) = get_fun_info isa id in
@@ -254,7 +268,7 @@ let arg_assms_of_typquant arg_kids tq =
   List.concat (List.map (arg_assms_of_quant_item arg_kids) (quant_items tq))
 
 let traces_enabled_lemma mem isa id =
-  let (f, name, call) = get_fun_info isa id in
+  let (f, name, call) = get_fun_info ~annot_kids:true isa id in
   let cap_regs_read = IdSet.inter (special_regs isa) f.trans_regs_read_no_exc in
   let cap_reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") (IdSet.elements cap_regs_read) in
   let cap_assm =
@@ -270,7 +284,12 @@ let traces_enabled_lemma mem isa id =
   let add_arg_kid (i, arg_kids) arg_typ = match Type_check.destruct_numeric arg_typ with
     | Some ([], _, Nexp_aux (Nexp_var kid, _)) ->
        (i + 1, KBindings.add kid ("arg" ^ string_of_int i) arg_kids)
-    | _ -> (i + 1, arg_kids)
+    | _ ->
+       begin match get_kid_itself arg_typ with
+         | Some kid ->
+            (i + 1, KBindings.add kid ("LENGTH(" ^ string_of_kid kid ^ ")") arg_kids)
+         | _ -> (i + 1, arg_kids)
+       end
   in
   let (_, arg_kids) = List.fold_left add_arg_kid (0, KBindings.empty) f.arg_typs in
   let arg_assms = cap_arg_assms @ (arg_assms_of_typquant arg_kids f.typquant) in
