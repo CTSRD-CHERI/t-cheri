@@ -247,6 +247,18 @@ lemma runs_no_reg_writes_to_case_prod[intro, simp, runs_no_reg_writes_toI]:
   using assms
   by (cases z) auto
 
+lemma no_reg_writes_to_case_bool[intro, simp, no_reg_writes_toI]:
+  assumes "\<And>x. no_reg_writes_to Rs (f x)"
+  shows "no_reg_writes_to Rs (case z of True \<Rightarrow> f True | False \<Rightarrow> f False)"
+  using assms
+  by (cases z) auto
+
+lemma runs_no_reg_writes_to_case_bool[intro, simp, runs_no_reg_writes_toI]:
+  assumes "\<And>x. runs_no_reg_writes_to Rs (f x)"
+  shows "runs_no_reg_writes_to Rs (case z of True \<Rightarrow> f True | False \<Rightarrow> f False)"
+  using assms
+  by (cases z) auto
+
 lemma no_reg_writes_to_choose_bool[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (choose_bool desc)"
   by (auto simp: choose_bool_def no_reg_writes_to_def elim: Traces_cases)
@@ -378,6 +390,10 @@ method no_reg_writes_toI uses simp intro =
    auto simp: simp split del: if_split split: option.splits)
 
 abbreviation "exp_fails m \<equiv> (\<forall>t a. \<not>Run m t a)"
+
+lemma exp_fails_bind_iff[simp]:
+  "exp_fails (m \<bind> f) \<longleftrightarrow> exp_fails m \<or> (\<forall>t a. Run m t a \<longrightarrow> exp_fails (f a))"
+  by (auto elim!: Run_bindE intro: Traces_bindI)
 
 lemma exp_fails_if_then_else:
   assumes "exp_fails m1"

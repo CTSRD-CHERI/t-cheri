@@ -221,12 +221,12 @@ let return_caps_derivable_lemma isa id =
     if IdSet.is_empty cap_regs_read then "" else
     ("{" ^ String.concat ", " cap_reg_names ^ "} \\<subseteq> accessible_regs s \\<Longrightarrow> ")
   in
-  let next_state = if is_cap_fun isa f then "(run s t)" else "s" in
+  let (next_state, next_stateI) = if is_cap_fun isa f then ("(run s t)", "") else ("s", "non_cap_exp_insert_run s, ") in
   { name = name ^ "_derivable"; attrs = "[derivable_capsE]";
     assms = [];
     stmts = ["Run (" ^ call ^ ") t c \\<Longrightarrow> " ^ arg_assm ^ access_assm ^ "c \\<in> derivable_caps " ^ next_state];
     unfolding = []; using = [];
-    proof = "(unfold " ^ name ^ "_def, derivable_capsI)" }
+    proof = "(" ^ next_stateI ^ "unfold " ^ name ^ "_def, derivable_capsI)" }
   |> apply_lemma_override isa id "derivable_caps"
 
 let rec arg_assms_of_nc arg_kids nc =
@@ -258,10 +258,7 @@ let rec arg_assms_of_nc arg_kids nc =
 
 let arg_assms_of_quant_item arg_kids (qi : Ast.quant_item) = match qi with
   | QI_aux (QI_constraint nc, _) ->
-     begin match arg_assms_of_nc arg_kids nc with
-       | Some assms -> [assms]
-       | None -> []
-     end
+     constraint_conj nc |> List.map (arg_assms_of_nc arg_kids) |> Util.option_these
   | _ -> []
 
 let arg_assms_of_typquant arg_kids tq =
@@ -335,7 +332,7 @@ let write_cap_regs_lemma isa =
 
 let read_cap_regs_lemma isa =
   let stmt r =
-    let assms = if IdSet.mem r isa.privileged_regs then "system_reg_access s \\<or> has_ex \\<Longrightarrow> " else "" in
+    let assms = if IdSet.mem r isa.privileged_regs then "system_reg_access s \\<or> ex_traces \\<Longrightarrow> " else "" in
     assms ^ "traces_enabled (read_reg " ^ mangle_reg_ref isa r ^ ") s"
   in
   let stmts = List.map stmt (IdSet.elements isa.cap_regs) in

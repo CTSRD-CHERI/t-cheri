@@ -702,6 +702,15 @@ method non_cap_expI uses simp intro = (non_cap_expI_base intro: intro; simp add:
 
 declare non_mem_exp_bindI[rule del]
 
+lemma non_cap_exp_runE:
+  assumes t: "Run m t a" and m: "non_cap_exp m" and P: "P (run s t)"
+  shows "P s"
+  using P unfolding non_cap_exp_Run_run_invI[OF m t] .
+
+method non_cap_exp_insert_run for s :: "('cap, 'regval) axiom_state" =
+  (match premises in t: \<open>Run m t a\<close> for m t a \<Rightarrow>
+     \<open>rule non_cap_exp_runE[where s = s, OF t], solves \<open>non_cap_expI\<close>\<close>)
+
 named_theorems non_mem_exp_split
 
 declare option.split[where P = "non_mem_exp", non_mem_exp_split]
@@ -832,7 +841,8 @@ method accessible_regsI uses simp assms =
        | (use assms in \<open>auto simp: simp\<close>)\<close>
      simp: simp assms: assms)
 
-definition "derivable_caps s \<equiv> {c. is_tagged_method CC c \<longrightarrow> c \<in> derivable (accessed_caps s)}"
+definition derivable_caps :: "('cap, 'regval) axiom_state \<Rightarrow> 'cap set" where
+  "derivable_caps s \<equiv> {c. is_tagged_method CC c \<longrightarrow> c \<in> derivable (accessed_caps s)}"
 
 named_theorems derivable_capsE
 named_theorems derivable_capsI
@@ -873,6 +883,22 @@ lemma read_reg_derivable:
 
 declare Run_ifE[where thesis = "c \<in> derivable_caps (run s t)" and t = t for c s t, derivable_caps_combinators]
 declare Run_letE[where thesis = "c \<in> derivable_caps (run s t)" and t = t for c s t, derivable_caps_combinators]
+declare Run_ifE[where thesis = "c \<in> derivable_caps s" and a = c for c s, derivable_caps_combinators]
+declare Run_letE[where thesis = "c \<in> derivable_caps s" and a = c for c s, derivable_caps_combinators]
+declare Run_bindE[where thesis = "c \<in> derivable_caps s" and a = c for c s, derivable_caps_combinators]
+
+lemma return_derivable_caps[derivable_capsE]:
+  assumes "Run (return a) t c"
+    and "a \<in> derivable_caps s"
+  shows "c \<in> derivable_caps s"
+  using assms
+  by auto
+
+lemma if_derivable_capsI[derivable_capsI]:
+  assumes "b \<Longrightarrow> c1 \<in> derivable_caps s" and "\<not>b \<Longrightarrow> c2 \<in> derivable_caps s"
+  shows "(if b then c1 else c2) \<in> derivable_caps s"
+  using assms
+  by auto
 
 method derivable_caps_step =
   (rule derivable_capsI allI impI conjI
@@ -1217,6 +1243,49 @@ lemma traces_enabled_or_boolM[traces_enabledI]:
   shows "traces_enabled (or_boolM m1 m2) s"
   using assms
   by (auto simp: or_boolM_def intro!: traces_enabledI intro: non_cap_exp_traces_enabledI non_cap_expI)
+
+lemma traces_enabled_foreachM_index_list_inv:
+  assumes "\<And>idx vars t t'.
+              Inv idx vars (run s t) \<Longrightarrow>
+              min from to \<le> idx \<Longrightarrow> idx \<le> max from to \<Longrightarrow>
+              trace_assms t \<Longrightarrow> trace_assms t' \<Longrightarrow>
+              traces_enabled (body idx vars) (run (run s t) t')"
+    and "\<And>idx vars t t' vars'.
+              Inv idx vars (run s t) \<Longrightarrow>
+              min from to \<le> min idx (idx + step) \<Longrightarrow> max idx (idx + step) \<le> max from to \<Longrightarrow>
+              Run (body idx vars) t' vars' \<Longrightarrow> trace_assms t \<Longrightarrow> trace_assms t' \<Longrightarrow>
+              Inv (idx + step) vars' (run (run s t) t')"
+    and "(step > 0 \<and> from \<le> to) \<or> (step < 0 \<and> from \<ge> to) \<Longrightarrow> Inv from vars s"
+  shows "traces_enabled (foreachM (index_list from to step) vars body) s"
+proof (use assms in \<open>induction "from" to step arbitrary: vars s rule: index_list.induct[case_names Step]\<close>)
+  case (Step "from" to step vars s)
+  note body = Step.prems(1)
+  note Inv_step = Step.prems(2)
+  note Inv_base = Step.prems(3)
+  have "traces_enabled (body from vars \<bind> (\<lambda>vars'. foreachM (index_list (from + step) to step) vars' body)) s"
+    if "0 < step \<and> from \<le> to \<or> step < 0 \<and> to \<le> from"
+  proof (rule traces_enabled_bind)
+    show "traces_enabled (body from vars) s"
+      using body[of "from" vars "[]" "[]"] Inv_base[OF that]
+      by auto
+  next
+    fix t vars'
+    assume t: "Run (body from vars) t vars'" "trace_assms t"
+    note body' = body[of _ _ "t @ t'" t'' for t' t'', simplified]
+    note Inv_step' = Inv_step[of _ _ "t @ t'" t'' for t' t'', simplified]
+    note Inv_base' = Inv_step[of "from" vars "[]" t vars', simplified]
+    have "traces_enabled (foreachM (index_list (from + step) to step) vars' body) (run s t)"
+      if "0 < step \<and> from + step \<le> to \<or> step < 0 \<and> to \<le> from + step"
+      using that Inv_base t
+      by (intro Step.IH) (auto intro: body' Inv_step' Inv_base')
+    then show "traces_enabled (foreachM (index_list (from + step) to step) vars' body) (run s t)"
+      unfolding index_list.simps[of "from + step" to step]
+      by (auto intro: non_cap_exp_return[THEN non_cap_exp_traces_enabledI])
+  qed
+  then show ?case
+    unfolding index_list.simps[of "from" to step]
+    by (auto intro: non_cap_exp_return[THEN non_cap_exp_traces_enabledI])
+qed
 
 lemma traces_enabled_foreachM_inv:
   assumes "\<And>x vars s. P vars s \<Longrightarrow> x \<in> set xs \<Longrightarrow> traces_enabled (body x vars) s"
@@ -1874,6 +1943,33 @@ lemma traces_enabled_write_reg:
   using assms
   unfolding traces_enabled_def
   by (blast intro: write_reg_trace_enabled)
+
+lemma traces_enabled_read_mem[traces_enabledI]:
+  shows "traces_enabled (read_mem BCa BCb rk addr_sz addr sz) s"
+  unfolding read_mem_def read_mem_bytes_def maybe_fail_def
+  by (auto split: option.splits simp: traces_enabled_def elim: Traces_cases)
+
+lemma traces_enabled_read_memt[traces_enabledI]:
+  shows "traces_enabled (read_memt BCa BCb rk addr sz) s"
+  unfolding read_memt_def read_memt_bytes_def maybe_fail_def
+  by (auto split: option.splits simp: traces_enabled_def elim: Traces_cases)
+
+lemma traces_enabled_write_mem[traces_enabledI]:
+  shows "traces_enabled (write_mem BCa BCb wk addr_sz addr sz data) s"
+  unfolding write_mem_def maybe_fail_def
+  by (auto split: option.splits simp: traces_enabled_def elim: Traces_cases)
+
+lemma traces_enabled_write_memt[traces_enabledI]:
+  assumes "\<forall>addr' bytes c r.
+             nat_of_bv BCa addr = Some addr'
+               \<and> mem_bytes_of_bits BCb data = Some bytes
+               \<and> cap_of_mem_bytes_method CC bytes tag = Some c
+               \<and> ev_assms (E_write_memt wk addr' (nat sz) bytes tag r)
+             \<longrightarrow> c \<in> derivable_caps s"
+  shows "traces_enabled (write_memt BCa BCb wk addr sz data tag) s"
+  using assms
+  unfolding write_memt_def maybe_fail_def derivable_caps_def
+  by (fastforce split: option.splits simp: traces_enabled_def elim: Traces_cases)
 
 lemma traces_enabled_reg_axioms:
   assumes "traces_enabled m initial" and "hasTrace t m"
