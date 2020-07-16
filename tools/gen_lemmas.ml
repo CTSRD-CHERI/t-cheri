@@ -77,7 +77,12 @@ let format_fun_args ?annot_kids:(annot_kids=false) f =
   in
   String.concat " " (List.mapi format_arg f.arg_typs)
 let format_fun_call ?annot_kids:(annot_kids=false) arch id f =
-  format_fun_name arch id ^ " " ^ format_fun_args ~annot_kids f
+  let tannot = match Type_check.destruct_bitvector arch.type_env f.ret_typ with
+    | Some (Nexp_aux (Nexp_var kid, _), _) when annot_kids ->
+       " :: " ^ string_of_kid kid ^ "::len word M"
+    | _ -> ""
+  in
+  format_fun_name arch id ^ " " ^ format_fun_args ~annot_kids f ^ tannot
 
 let apply_lemma_override arch id lemma_type lemma =
   match Bindings.find_opt id arch.lemma_overrides with
@@ -159,7 +164,7 @@ let fun_requirements isa id =
   if Bindings.mem id isa.fun_infos then
     let (f, _, _) = get_fun_info isa id in
     { needed_footprints = IdSet.empty;
-      called_cap_funs = if is_cap_fun isa f then IdSet.singleton id else IdSet.empty;
+      called_cap_funs = if effectful f then IdSet.singleton id else IdSet.empty;
       checked_reads = IdSet.inter (write_checked_regs isa) f.trans_regs_read }
   else no_requirements
 
@@ -278,19 +283,44 @@ let traces_enabled_lemma mem isa id =
       List.concat (List.mapi (fun i t -> if is_cap_typ isa t then ["arg" ^ string_of_int i ^ " \\<in> derivable_caps s"] else []) f.arg_typs)
     else []
   in
-  let add_arg_kid (i, arg_kids) arg_typ = match Type_check.destruct_numeric arg_typ with
-    | Some ([], _, Nexp_aux (Nexp_var kid, _)) ->
-       (i + 1, KBindings.add kid ("arg" ^ string_of_int i) arg_kids)
+  let add_arg_kid (i, arg_kids, kid_eqs) arg_typ =
+    let new_kid = match Type_check.destruct_numeric arg_typ with
+      | Some ([], _, Nexp_aux (Nexp_var kid, _)) ->
+         Some (kid, "arg" ^ string_of_int i)
+      | _ ->
+         begin match get_kid_itself arg_typ with
+           | Some kid ->
+              Some (kid, "int LENGTH(" ^ string_of_kid kid ^ ")")
+           | _ ->
+              begin match Type_check.destruct_bitvector isa.type_env arg_typ with
+                | Some (Nexp_aux (Nexp_var kid, _), _) ->
+                   Some (kid, "int (size arg" ^ string_of_int i ^ ")")
+                | _ -> None
+              end
+         end
+    in
+    match new_kid with
+    | Some (kid, exp) when KBindings.mem kid arg_kids ->
+        let assm = exp ^ " = " ^ KBindings.find kid arg_kids in
+        (i + 1, arg_kids, assm :: kid_eqs)
+    | Some (kid, exp) ->
+        (i + 1, KBindings.add kid exp arg_kids, kid_eqs)
     | _ ->
-       begin match get_kid_itself arg_typ with
-         | Some kid ->
-            (i + 1, KBindings.add kid ("LENGTH(" ^ string_of_kid kid ^ ")") arg_kids)
-         | _ -> (i + 1, arg_kids)
-       end
+        (i + 1, arg_kids, kid_eqs)
   in
-  let (_, arg_kids) = List.fold_left add_arg_kid (0, KBindings.empty) f.arg_typs in
+  let (_, arg_kids, eq_assms) = List.fold_left add_arg_kid (0, KBindings.empty, []) f.arg_typs in
   let arg_assms = cap_arg_assms @ (arg_assms_of_typquant arg_kids f.typquant) in
-  let assms = cap_assm @ arg_assms in
+  let is_kid_bitvector kid typ = match Type_check.destruct_bitvector isa.type_env typ with
+    | Some (Nexp_aux (Nexp_var kid', _), _) -> Kid.compare kid kid' = 0
+    | _ -> false
+  in
+  let ret_typ_assm = match Type_check.destruct_bitvector isa.type_env f.ret_typ with
+    | Some (Nexp_aux (Nexp_var kid, _), _)
+      when KBindings.mem kid arg_kids && not (List.exists (is_kid_bitvector kid) f.arg_typs) ->
+       ["int LENGTH(" ^ string_of_kid kid ^ ") = " ^ KBindings.find kid arg_kids]
+    | _ -> []
+  in
+  let assms = cap_assm @ arg_assms @ eq_assms @ ret_typ_assm in
   let using = if assms = [] then "" else " assms: assms" in
   { name = "traces_enabled_" ^ name; attrs = "[traces_enabledI]";
     assms; unfolding = [(name ^ "_def"); "bind_assoc"]; using = [];
