@@ -104,16 +104,18 @@ inductive_set reachable_caps :: "'regs sequential_state \<Rightarrow> 'cap set" 
 | Restrict: "\<lbrakk>c \<in> reachable_caps s; leq_cap CC c' c\<rbrakk> \<Longrightarrow> c' \<in> reachable_caps s"
 | Seal:
     "\<lbrakk>c' \<in> reachable_caps s; c'' \<in> reachable_caps s; is_tagged_method CC c'; is_tagged_method CC c'';
-      \<not>is_sealed_method CC c''; \<not>is_sealed_method CC c'; permits_seal_method CC c''\<rbrakk> \<Longrightarrow>
+      \<not>is_sealed_method CC c''; \<not>is_sealed_method CC c'; permits_seal_method CC c'';
+      get_cursor_method CC c'' \<in> get_mem_region CC c''\<rbrakk> \<Longrightarrow>
      seal_method CC c' (get_cursor_method CC c'') \<in> reachable_caps s"
 | SealEntry:
-    "\<lbrakk>c' \<in> reachable_caps s; \<not>is_sealed_method CC c'; permits_execute_method CC c';
+    "\<lbrakk>c' \<in> reachable_caps s; \<not>is_sealed_method CC c';
       is_sentry_method CC (seal_method CC c' otype)\<rbrakk> \<Longrightarrow>
      seal_method CC c' otype \<in> reachable_caps s"
 | Unseal:
     "\<lbrakk>c' \<in> reachable_caps s; c'' \<in> reachable_caps s; is_tagged_method CC c'; is_tagged_method CC c'';
       \<not>is_sealed_method CC c''; is_sealed_method CC c'; permits_unseal_method CC c'';
-      get_obj_type_method CC c' = get_cursor_method CC c''\<rbrakk> \<Longrightarrow>
+      get_obj_type_method CC c' = get_cursor_method CC c'';
+      get_cursor_method CC c'' \<in> get_mem_region CC c''\<rbrakk> \<Longrightarrow>
      clear_global_unless CC (is_global_method CC c'') (unseal_method CC c') \<in> reachable_caps s"
 
 lemma derivable_subseteq_reachableI:
@@ -157,17 +159,19 @@ where
 | Seal:
     "\<lbrakk>c' \<in> reachable_caps_plus C s; c'' \<in> reachable_caps_plus C s;
       is_tagged_method CC c'; is_tagged_method CC c'';
-      \<not>is_sealed_method CC c''; \<not>is_sealed_method CC c'; permits_seal_method CC c''\<rbrakk> \<Longrightarrow>
+      \<not>is_sealed_method CC c''; \<not>is_sealed_method CC c'; permits_seal_method CC c'';
+      get_cursor_method CC c'' \<in> get_mem_region CC c''\<rbrakk> \<Longrightarrow>
      seal_method CC c' (get_cursor_method CC c'') \<in> reachable_caps_plus C s"
 | SealEntry:
-    "\<lbrakk>c' \<in> reachable_caps_plus C s; \<not>is_sealed_method CC c'; permits_execute_method CC c';
+    "\<lbrakk>c' \<in> reachable_caps_plus C s; \<not>is_sealed_method CC c';
       is_sentry_method CC (seal_method CC c' otype)\<rbrakk> \<Longrightarrow>
      seal_method CC c' otype \<in> reachable_caps_plus C s"
 | Unseal:
     "\<lbrakk>c' \<in> reachable_caps_plus C s; c'' \<in> reachable_caps_plus C s;
       is_tagged_method CC c'; is_tagged_method CC c'';
       \<not>is_sealed_method CC c''; is_sealed_method CC c'; permits_unseal_method CC c'';
-      get_obj_type_method CC c' = get_cursor_method CC c''\<rbrakk> \<Longrightarrow>
+      get_obj_type_method CC c' = get_cursor_method CC c'';
+      get_cursor_method CC c'' \<in> get_mem_region CC c''\<rbrakk> \<Longrightarrow>
      clear_global_unless CC (is_global_method CC c'') (unseal_method CC c') \<in> reachable_caps_plus C s"
 
 lemma plus_subset_reachable_caps_plus:

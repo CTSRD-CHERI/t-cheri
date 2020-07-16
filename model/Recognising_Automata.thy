@@ -348,6 +348,22 @@ proof (induction i)
     by (cases "i < length t") (auto simp: take_Suc_conv_app_nth less_Suc_eq)
 qed auto
 
+lemma privileged_accessible_system_reg_access:
+  assumes "r \<in> accessible_regs s" and "r \<in> privileged_regs ISA"
+  shows "system_reg_access s"
+  using assms
+  by (auto simp: accessible_regs_def)
+
+fun trace_allows_system_reg_access where
+  "trace_allows_system_reg_access [] s = False"
+| "trace_allows_system_reg_access (e # t) s =
+     (allows_system_reg_access (accessible_regs s) e \<or>
+      trace_allows_system_reg_access t (axiom_step s e))"
+
+lemma system_reg_access_run_iff:
+  "system_reg_access (run s t) \<longleftrightarrow> system_reg_access s \<or> trace_allows_system_reg_access t s"
+  by (induction t s rule: trace_allows_system_reg_access.induct) auto
+
 lemmas step_defs = axiom_step_def reads_mem_cap_def
 
 abbreviation "special_reg_names \<equiv> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> privileged_regs ISA"
@@ -865,6 +881,13 @@ named_theorems derivable_caps_runI
 
 declare derivable_caps_run_imp[derivable_caps_runI]
 
+lemma system_reg_access_run_or_exI[derivable_caps_runI]:
+  assumes "system_reg_access s \<or> ex_traces"
+  shows "system_reg_access (run s t) \<or> ex_traces"
+  using assms
+  unfolding system_reg_access_run_iff
+  by auto
+
 named_theorems derivable_caps_combinators
 
 lemma bind_derivable_caps[derivable_caps_combinators]:
@@ -886,6 +909,17 @@ declare Run_letE[where thesis = "c \<in> derivable_caps (run s t)" and t = t for
 declare Run_ifE[where thesis = "c \<in> derivable_caps s" and a = c for c s, derivable_caps_combinators]
 declare Run_letE[where thesis = "c \<in> derivable_caps s" and a = c for c s, derivable_caps_combinators]
 declare Run_bindE[where thesis = "c \<in> derivable_caps s" and a = c for c s, derivable_caps_combinators]
+
+text \<open>The above elimination rules sometimes eliminate binds at earlier points in the trace
+  without reflecting the deconstruction of the trace in the goal (only in the assumptions).
+  The following rule allows us to get back on track once we reach the right point in the trace.\<close>
+
+lemma run_append_derivable_capsE[derivable_caps_combinators]:
+  assumes "t = t1 @ t2"
+    and "t = t1 @ t2 \<longrightarrow> c \<in> derivable_caps (run (run s t1) t2)"
+  shows "c \<in> derivable_caps (run s t)"
+  using assms
+  by auto
 
 lemma return_derivable_caps[derivable_capsE]:
   assumes "Run (return a) t c"

@@ -15,7 +15,8 @@ inductive_set derivable :: "'cap set \<Rightarrow> 'cap set" for C :: "'cap set"
 | Unseal:
     "\<lbrakk>c' \<in> derivable C; c'' \<in> derivable C; is_tagged_method CC c'; is_tagged_method CC c'';
       \<not>is_sealed_method CC c''; is_sealed_method CC c'; permits_unseal_method CC c'';
-      get_obj_type_method CC c' = get_cursor_method CC c''\<rbrakk> \<Longrightarrow>
+      get_obj_type_method CC c' = get_cursor_method CC c'';
+      get_cursor_method CC c'' \<in> get_mem_region CC c''\<rbrakk> \<Longrightarrow>
      clear_global_unless CC (is_global_method CC c'') (unseal_method CC c') \<in> derivable C"
 | Seal:
     "\<lbrakk>c' \<in> derivable C; c'' \<in> derivable C; is_tagged_method CC c'; is_tagged_method CC c'';
@@ -23,8 +24,8 @@ inductive_set derivable :: "'cap set \<Rightarrow> 'cap set" for C :: "'cap set"
       permits_seal_method CC c''; get_cursor_method CC c'' \<in> get_mem_region CC c''\<rbrakk> \<Longrightarrow>
      seal_method CC c' (get_cursor_method CC c'') \<in> derivable C"
 | SealEntry:
-    "\<lbrakk>c' \<in> derivable C; \<not>is_sealed_method CC c'; permits_execute_method CC c';
-      is_sentry_method CC (seal_method CC c' otype)\<rbrakk> \<Longrightarrow>
+    "\<lbrakk>c' \<in> derivable C; is_tagged_method CC c';
+      \<not>is_sealed_method CC c'; is_sentry_method CC (seal_method CC c' otype)\<rbrakk> \<Longrightarrow>
      seal_method CC c' otype \<in> derivable C"
 
 lemma leq_cap_refl[simp, intro]:

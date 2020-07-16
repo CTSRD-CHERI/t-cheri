@@ -82,13 +82,14 @@ let rec cap_derivable_bounded n C c = match n with
   | 0 -> (c IN C)
   | n+1 ->
      (exists c'. cap_derivable_bounded n C c' && leq_cap c c') ||
-     (exists c' otype. cap_derivable_bounded n C c' && not (is_sealed c') && permits_execute c' && seal c' otype = c && is_sentry c) ||
+     (exists c' otype. cap_derivable_bounded n C c' && is_tagged c' && not (is_sealed c') && seal c' otype = c && is_sentry c) ||
      (exists c' c''.
         cap_derivable_bounded n C c' &&
         cap_derivable_bounded n C c'' &&
         is_tagged c' && is_tagged c'' && not (is_sealed c'') &&
+        get_cursor c'' IN get_mem_region c'' &&
         ((is_sealed c' && permits_unseal c'' && get_obj_type c' = get_cursor c'' && clear_global_unless (is_global c'') (unseal c') = c) ||
-         (not (is_sealed c') && permits_seal c'' && get_cursor c'' IN get_mem_region c'' && seal c' (get_cursor c'') = c)))
+         (not (is_sealed c') && permits_seal c'' && seal c' (get_cursor c'') = c)))
 end
 
 declare termination_argument cap_derivable_bounded = automatic
