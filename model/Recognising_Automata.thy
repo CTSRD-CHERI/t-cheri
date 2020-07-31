@@ -835,11 +835,18 @@ lemma accessible_regs_no_writes_run_subset:
 named_theorems accessible_regsE
 named_theorems accessible_regsI
 
+method accessible_regs_subsetI uses assms =
+  (match conclusion in \<open>Rs \<subseteq> accessible_regs s\<close> for Rs s \<Rightarrow>
+     \<open>match assms in Rs': "Rs' \<subseteq> accessible_regs s" for Rs' \<Rightarrow>
+        \<open>rule subset_trans[OF _ Rs'];
+         solves \<open>intro insert_subsetI empty_subsetI insertI1 insertI2\<close>\<close>\<close>)
+
 method accessible_regs_step uses simp assms =
   ((erule accessible_regsE eqTrueE)
     | (rule accessible_regsI TrueI)
     | (erule accessible_regs_no_writes_run_subset,
-       solves \<open>use assms in \<open>no_reg_writes_toI simp: simp\<close>\<close>))
+       solves \<open>use assms in \<open>no_reg_writes_toI simp: simp\<close>\<close>)
+    | (solves \<open>accessible_regs_subsetI assms: assms\<close>))
 
 method accessible_regsI_with methods solve uses simp assms =
   ((erule accessible_regsE eqTrueE; accessible_regsI_with solve simp: simp assms: assms)
@@ -847,6 +854,7 @@ method accessible_regsI_with methods solve uses simp assms =
     | (erule accessible_regs_no_writes_run_subset,
        solves \<open>use assms in \<open>no_reg_writes_toI simp: simp\<close>\<close>,
        accessible_regsI_with solve simp: simp assms: assms)
+    | (solves \<open>accessible_regs_subsetI assms: assms\<close>)
     | (rule non_special_regs_accessible non_special_reg_accessible,
        solves \<open>solve\<close>)
     | solve)
