@@ -2,6 +2,39 @@ theory Capabilities_lemmas
 imports Capabilities
 begin
 
+lemma leq_cap_refl[simp, intro]:
+  "leq_cap CC c c"
+  by (simp add: leq_cap_def)
+
+lemma leq_cap_tag_imp[intro]:
+  assumes "leq_cap CC c c'"
+    and "is_tagged_method CC c"
+  shows "is_tagged_method CC c'"
+  using assms
+  by (auto simp: leq_cap_def)
+
+lemma leq_bools_iff:
+  "leq_bools bs1 bs2 \<longleftrightarrow> (\<forall>n < length bs1. bs1 ! n \<longrightarrow> bs2 ! n) \<and> length bs2 = length bs1"
+  by (induction bs1 bs2 rule: leq_bools.induct) (auto simp: nth_Cons split: nat.splits)
+
+lemma leq_perms_refl[simp, intro]:
+  "leq_perms p p"
+  unfolding leq_perms_def leq_bools_iff
+  by auto
+
+lemma address_range_upt[simp]: "address_range start len = [start ..< start + len]"
+  by (induction len) (auto simp: address_range_def)
+
+lemma get_mem_region_base_upt_top:
+  "get_mem_region CC c = {get_base_method CC c ..< get_top_method CC c}"
+  by (auto simp: get_mem_region_def)
+
+lemma leq_cap_get_mem_region_subseteq:
+  assumes "leq_cap CC c c'" and "is_tagged_method CC c"
+  shows "get_mem_region CC c \<subseteq> get_mem_region CC c'"
+  using assms
+  by (auto simp: leq_cap_def leq_bounds_def get_mem_region_base_upt_top)
+
 locale Capabilities =
   fixes CC :: "'cap Capability_class"
   assumes is_tagged_set_tag[simp]: "\<And>c tag. is_tagged_method CC (set_tag_method CC c tag) = tag"
@@ -27,30 +60,6 @@ inductive_set derivable :: "'cap set \<Rightarrow> 'cap set" for C :: "'cap set"
     "\<lbrakk>c' \<in> derivable C; is_tagged_method CC c';
       \<not>is_sealed_method CC c'; is_sentry_method CC (seal_method CC c' otype)\<rbrakk> \<Longrightarrow>
      seal_method CC c' otype \<in> derivable C"
-
-lemma leq_cap_refl[simp, intro]:
-  "leq_cap CC c c"
-  by (simp add: leq_cap_def)
-
-lemma leq_cap_tag_imp[intro]:
-  assumes "leq_cap CC c c'"
-    and "is_tagged_method CC c"
-  shows "is_tagged_method CC c'"
-  using assms
-  by (auto simp: leq_cap_def)
-
-lemma address_range_upt[simp]: "address_range start len = [start ..< start + len]"
-  by (induction len) (auto simp: address_range_def)
-
-lemma get_mem_region_base_upt_top:
-  "get_mem_region CC c = {get_base_method CC c ..< get_top_method CC c}"
-  by (auto simp: get_mem_region_def)
-
-lemma leq_cap_get_mem_region_subseteq:
-  assumes "leq_cap CC c c'" and "is_tagged_method CC c"
-  shows "get_mem_region CC c \<subseteq> get_mem_region CC c'"
-  using assms
-  by (auto simp: leq_cap_def get_mem_region_base_upt_top)
 
 lemma derivable_mono:
   assumes "C \<subseteq> C'"
@@ -164,6 +173,27 @@ next
     then show ?case by blast
   qed
   then show "cap_derivable CC C c" by (simp add: cap_derivable_def)
+qed
+
+end
+
+locale Capabilities_Bounds_Invariants = Capabilities +
+  assumes base_seal_eq: "\<And>c otype. get_base_method CC (seal_method CC c otype) = get_base_method CC c"
+    and top_seal_eq: "\<And>c otype. get_top_method CC (seal_method CC c otype) = get_base_method CC c"
+    and base_clear_global_eq: "\<And>c cond. get_base_method CC (clear_global_unless CC cond c) = get_base_method CC c"
+    and top_clear_global_eq: "\<And>c cond. get_top_method CC (clear_global_unless CC cond c) = get_base_method CC c"
+begin
+
+lemma derivable_base_leq_top:
+  assumes "\<forall>c \<in> C. is_tagged_method CC c \<longrightarrow> get_base_method CC c \<le> get_top_method CC c"
+  shows "\<forall>c \<in> derivable C. is_tagged_method CC c \<longrightarrow> get_base_method CC c \<le> get_top_method CC c"
+proof (intro ballI impI)
+  fix c
+  assume "c \<in> derivable C" and "is_tagged_method CC c"
+  then show "get_base_method CC c \<le> get_top_method CC c"
+    using assms
+    by (induction rule: derivable.induct)
+       (auto simp: leq_cap_def leq_bounds_def base_seal_eq top_seal_eq base_clear_global_eq top_clear_global_eq)
 qed
 
 end

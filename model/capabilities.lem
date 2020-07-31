@@ -52,15 +52,20 @@ declare termination_argument leq_bools = automatic
 val leq_perms : perms -> perms -> bool
 let leq_perms p1 p2 = leq_bools p1 p2
 
+val leq_bounds : forall 'cap. Capability 'cap => 'cap -> 'cap -> bool
+let leq_bounds c1 c2 =
+  (get_base c1 = get_base c2 && get_top c1 = get_top c2) ||
+  (get_base c1 >= get_base c2 &&
+   get_top c1 <= get_top c2 &&
+   get_base c1 <= get_top c1)
+
 val leq_cap : forall 'cap. Capability 'cap, Eq 'cap => 'cap -> 'cap -> bool
 let leq_cap c1 c2 =
   (c1 = c2) ||
   (not (is_tagged c1)) ||
     ((is_tagged c2) &&
      (not (is_sealed c1) && not (is_sealed c2)) &&
-     (get_base c1 >= get_base c2) &&
-     (get_top c1 <= get_top c2) &&
-     (get_base c1 <= get_top c1) &&
+     (leq_bounds c1 c2) &&
      (is_global c1 --> is_global c2) &&
      (leq_perms (get_perms c1) (get_perms c2)))
 
