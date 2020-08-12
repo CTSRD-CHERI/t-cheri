@@ -944,13 +944,13 @@ lemma if_derivable_capsI[derivable_capsI]:
 
 method derivable_caps_step =
   (rule derivable_capsI allI impI conjI
-      | erule derivable_capsE eqTrueE
+      | erule derivable_capsE conjE
       | erule derivable_caps_combinators eqTrueE
       | rule derivable_caps_runI)
 
 method derivable_capsI_with methods solve uses intro elim simp assms =
   ((rule intro derivable_capsI allI impI conjI
-      | erule elim derivable_capsE eqTrueE
+      | erule elim derivable_capsE conjE
       | erule derivable_caps_combinators eqTrueE
       | rule derivable_caps_runI
       | solve (*
@@ -1523,14 +1523,14 @@ declare bool.split[where P = "\<lambda>m. traces_enabled m s" for s, traces_enab
 
 method traces_enabled_step uses intro elim =
   ((rule intro allI impI conjI)
-    | (erule elim eqTrueE)
+    | (erule elim conjE)
     | ((rule traces_enabled_combinatorI traces_enabled_builtin_combinatorsI[rotated], try_simp_traces_enabled))
     | (rule traces_enabledI TrueI)
     | (rule traces_enabled_split[THEN iffD2]; intro allI conjI impI))
 
 method traces_enabledI_with methods solve uses intro elim =
   ((rule intro TrueI; traces_enabledI_with solve intro: intro elim: elim)
-    | (erule elim eqTrueE; traces_enabledI_with solve intro: intro elim: elim)
+    | (erule elim conjE; traces_enabledI_with solve intro: intro elim: elim)
     | ((rule traces_enabled_combinatorI traces_enabled_builtin_combinatorsI[rotated], try_simp_traces_enabled); traces_enabledI_with solve intro: intro elim: elim)
     | (rule traces_enabledI; traces_enabledI_with solve intro: intro elim: elim)
     | (rule traces_enabled_split[THEN iffD2]; intro conjI impI; traces_enabledI_with solve intro: intro elim: elim)
