@@ -73,10 +73,10 @@ val invokable : forall 'cap. Capability 'cap => 'cap -> 'cap -> bool
 let invokable cc cd =
   is_tagged cc && is_tagged cd &&
   is_sealed cc && is_sealed cd &&
+  not (is_sentry cc) && not (is_sentry cd) &&
   permits_ccall cc && permits_ccall cd &&
   get_obj_type cc = get_obj_type cd &&
-  permits_execute cc && (get_cursor cc IN get_mem_region cc) &&
-  not (permits_execute cd)
+  permits_execute cc && not (permits_execute cd)
 
 val clear_global_unless : forall 'cap. Capability 'cap => bool -> 'cap -> 'cap
 let clear_global_unless g c = if g then c else clear_global c
