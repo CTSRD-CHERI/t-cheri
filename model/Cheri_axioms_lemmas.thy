@@ -108,8 +108,27 @@ lemma reads_mem_cap_Some_iff:
    (\<exists>wk bytes. e = E_read_memt wk addr sz (bytes, B1) \<and> cap_of_mem_bytes_method CC bytes B1 = Some c \<and> is_tagged_method CC c)"
   by (cases e; fastforce simp: reads_mem_cap_def bind_eq_Some_conv)
 
+lemma available_reg_capsE:
+  assumes "c \<in> available_reg_caps CC ISA i t"
+  obtains r v j where "t ! j = E_read_reg r v"
+    and "c \<in> caps_of_regval ISA v" and "is_tagged_method CC c"
+    and "j < length t" and "j < i"
+    and "r \<in> PCC ISA \<or> r \<in> IDC ISA \<longrightarrow> \<not>cap_reg_written_before_idx CC ISA j r t"
+    and "r \<in> privileged_regs ISA \<longrightarrow> system_access_permitted_before_idx CC ISA j t"
+  using assms
+  by (induction i) (auto split: option.splits if_splits)
+
+lemma available_mem_capsE:
+  assumes "c \<in> available_mem_caps CC ISA i t"
+  obtains wk paddr bytes j sz where "t ! j = E_read_memt wk paddr sz (bytes, B1)"
+    and "\<not>is_translation_event ISA (t ! j)"
+    and "cap_of_mem_bytes_method CC bytes B1 = Some c"
+    and "j < i" and "j < length t" and "is_tagged_method CC c"
+  using assms
+  by (induction i) (auto split: option.splits if_splits)
+
 lemma available_caps_cases:
-  assumes "c \<in> available_caps CC ISA i t"
+  assumes "c \<in> available_caps CC ISA use_mem_caps i t"
   obtains (Reg) r v j where "t ! j = E_read_reg r v"
     and "c \<in> caps_of_regval ISA v" and "is_tagged_method CC c"
     and "j < length t" and "j < i"
@@ -119,8 +138,9 @@ lemma available_caps_cases:
     and "\<not>is_translation_event ISA (t ! j)"
     and "cap_of_mem_bytes_method CC bytes B1 = Some c"
     and "j < i" and "j < length t" and "is_tagged_method CC c"
+    and "use_mem_caps"
   using assms
-  by (induction i) (auto split: option.splits if_splits)
+  by (fastforce split: if_splits elim: available_reg_capsE available_mem_capsE)
 
 lemma cap_reg_written_before_idx_0_False[simp]:
   "cap_reg_written_before_idx CC ISA 0 r t \<longleftrightarrow> False"
@@ -201,16 +221,14 @@ lemma reads_from_reg_None_reads_reg_caps_empty[simp]:
   "reads_from_reg e = None \<Longrightarrow> reads_reg_caps CC cor e = {}"
   by (cases e) auto
 
-lemma available_caps_0[simp]: "available_caps CC ISA 0 t = {}"
+lemma available_caps_0[simp]: "available_caps CC ISA use_mem_caps 0 t = {}"
   by (auto simp: available_caps.simps)
 
 lemma available_caps_Suc:
-  "available_caps CC ISA (Suc i) t =
-   available_caps CC ISA i t \<union>
-   (if i < length t
-    then accessed_mem_caps (t ! i) \<union>
-         accessed_reg_caps (accessible_regs_at_idx i t) (t ! i)
-    else {})"
+  "available_caps CC ISA use_mem_caps (Suc i) t =
+   available_caps CC ISA use_mem_caps i t \<union>
+   (if i < length t then accessed_reg_caps (accessible_regs_at_idx i t) (t ! i) else {}) \<union>
+   (if i < length t \<and> use_mem_caps then accessed_mem_caps (t ! i) else {})"
   by (cases "t ! i")
      (auto simp: available_caps.simps accessible_regs_at_idx_def reads_mem_cap_def bind_eq_Some_conv
            split: option.splits)
@@ -220,12 +238,13 @@ abbreviation instr_sem_ISA ("\<lbrakk>_\<rbrakk>") where "\<lbrakk>instr\<rbrakk
 end
 
 lemma load_mem_axiomE:
-  assumes "load_mem_axiom CC ISA is_fetch t"
+  assumes "load_mem_axiom CC ISA is_fetch inv_mem_caps invoked_caps t"
     and "reads_mem_val_at_idx i t = Some (paddr, sz, v, tag)"
     and "\<not>translation_event_at_idx ISA i t"
   obtains c' vaddr
-  where "cap_derivable CC (available_caps CC ISA i t) c'"
-    and "is_tagged_method CC c'" and "\<not>is_sealed_method CC c'"
+  where "cap_derivable CC (available_caps CC ISA (\<not>inv_mem_caps) i t) c'"
+    and "is_tagged_method CC c'"
+    and "is_sealed_method CC c' \<longrightarrow> is_sentry_method CC c' \<and> unseal_method CC c' \<in> invoked_caps \<and> inv_mem_caps"
     and "translate_address ISA vaddr (if is_fetch then Fetch else Load) (take i t) = Some paddr"
     and "set (address_range vaddr sz) \<subseteq> get_mem_region CC c'"
     and "if is_fetch then permits_execute_method CC c' else permits_load_method CC c'"
@@ -236,20 +255,24 @@ lemma load_mem_axiomE:
   by blast
 
 lemma store_cap_reg_axiomE:
-  assumes "store_cap_reg_axiom CC ISA has_ex invoked_caps t"
+  assumes "store_cap_reg_axiom CC ISA has_ex inv_mem_caps invoked_caps t"
     and "writes_to_reg_at_idx i t = Some r"
     and "c \<in> writes_reg_caps_at_idx CC ISA i t"
-  obtains (Derivable) "cap_derivable CC (available_caps CC ISA i t) c"
+  obtains (Derivable) "cap_derivable CC (available_caps CC ISA (\<not>inv_mem_caps) i t) c"
   | (Ex) has_ex and "r \<in> PCC ISA"
     and "c \<in>  exception_targets ISA {v'. \<exists>r' j. j < i \<and> index t j = Some (E_read_reg r' v') \<and> r' \<in> KCC ISA}"
-  | (Sentry) cs where "c \<in> invoked_caps" and "cap_derivable CC (available_caps CC ISA i t) cs"
+  | (Sentry) cs where "c \<in> invoked_caps" and "cap_derivable CC (available_caps CC ISA (\<not>inv_mem_caps) i t) cs"
     and "is_sentry_method CC cs" and "is_sealed_method CC cs"
-    and "leq_cap CC c (unseal_method CC cs)" and "r \<in> PCC ISA"
+    and "leq_cap CC c (unseal_method CC cs)" and "r \<in> PCC ISA \<union> IDC ISA"
   | (CCall) cc cd where "c \<in> invoked_caps"
-    and "cap_derivable CC (available_caps CC ISA i t) cc"
-    and "cap_derivable CC (available_caps CC ISA i t) cd"
+    and "cap_derivable CC (available_caps CC ISA (\<not>inv_mem_caps) i t) cc"
+    and "cap_derivable CC (available_caps CC ISA (\<not>inv_mem_caps) i t) cd"
     and "invokable CC cc cd"
     and "(leq_cap CC c (unseal_method CC cc) \<and> r \<in> PCC ISA) \<or> (leq_cap CC c (unseal_method CC cd) \<and> r \<in> IDC ISA)"
+  | (Indirect) c' where "c \<in> invoked_caps" and "inv_mem_caps"
+    and "cap_derivable CC (available_mem_caps CC ISA i t) c'"
+    and "(leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c' \<and> r \<in> PCC ISA) \<or>
+         (leq_cap CC c c' \<and> r \<in> PCC ISA \<union> IDC ISA)"
   using assms
   unfolding store_cap_reg_axiom_def
   by blast

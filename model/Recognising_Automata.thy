@@ -1020,7 +1020,7 @@ fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Righta
           (c \<in> exception_targets ISA (read_from_KCC s) \<and> ex_traces \<and> r \<in> PCC ISA) \<or>
           (\<exists>cs. c \<in> invoked_caps \<and> cs \<in> derivable (accessed_caps s) \<and>
                 is_sentry_method CC cs \<and> is_sealed_method CC cs \<and>
-                leq_cap CC c (unseal_method CC cs) \<and> r \<in> PCC ISA) \<or>
+                leq_cap CC c (unseal_method CC cs) \<and> r \<in> PCC ISA \<union> IDC ISA) \<or>
           (\<exists>cc cd. c \<in> invoked_caps \<and> invokable CC cc cd \<and>
                    cc \<in> derivable (accessed_caps s) \<and> cd \<in> derivable (accessed_caps s) \<and>
                    (r \<in> PCC ISA \<and> leq_cap CC c (unseal_method CC cc) \<or>
@@ -1039,7 +1039,7 @@ lemma enabled_E_write_reg_cases:
       "r \<in> PCC ISA" and "c \<notin> derivable (accessed_caps s)"
   | (Sentry) cs where "c \<in> invoked_caps" and "cs \<in> derivable (accessed_caps s)" and
       "is_sentry_method CC cs" and "is_sealed_method CC cs" and
-      "leq_cap CC c (unseal_method CC cs)" and "r \<in> PCC ISA"
+      "leq_cap CC c (unseal_method CC cs)" and "r \<in> PCC ISA \<union> IDC ISA"
   | (CCall) cc cd where "c \<in> invoked_caps" and "invokable CC cc cd" and
       "cc \<in> derivable (accessed_caps s)" and "cd \<in> derivable (accessed_caps s)" and
       "r \<in> PCC ISA \<and> leq_cap CC c (unseal_method CC cc) \<or> r \<in> IDC ISA \<and> leq_cap CC c (unseal_method CC cd)" and

@@ -7,7 +7,7 @@ type perms = list bool
 class (Capability 'c)
   val is_tagged : 'c -> bool
   val is_sealed : 'c -> bool
-  val is_sentry : 'c -> bool
+  val is_sentry : 'c -> bool  (* TODO: Differentiate between different forms of sentries, e.g. direct vs. indirect? *)
   val get_base : 'c -> nat
   val get_top : 'c -> nat
   val get_obj_type : 'c -> nat
