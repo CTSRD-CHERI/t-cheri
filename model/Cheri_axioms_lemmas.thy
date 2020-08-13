@@ -157,28 +157,28 @@ definition accessible_regs_at_idx :: "nat \<Rightarrow> 'regval trace \<Rightarr
      {r. (r \<in> PCC ISA \<or> r \<in> IDC ISA \<longrightarrow> \<not>cap_reg_written_before_idx CC ISA i r t) \<and>
          (r \<in> privileged_regs ISA \<longrightarrow> system_access_permitted_before_idx CC ISA i t)}"
 
-fun accessed_reg_caps :: "register_name set \<Rightarrow> 'regval event \<Rightarrow> 'cap set" where
-  "accessed_reg_caps regs (E_read_reg r v) =
+fun accessed_reg_caps_of_ev :: "register_name set \<Rightarrow> 'regval event \<Rightarrow> 'cap set" where
+  "accessed_reg_caps_of_ev regs (E_read_reg r v) =
      {c. r \<in> regs \<and> c \<in> caps_of_regval ISA v \<and> is_tagged_method CC c}"
-| "accessed_reg_caps regs _ = {}"
+| "accessed_reg_caps_of_ev regs _ = {}"
 
-lemma member_accessed_reg_capsE[elim!]:
-  assumes "c \<in> accessed_reg_caps regs e"
+lemma member_accessed_reg_caps_of_evE[elim!]:
+  assumes "c \<in> accessed_reg_caps_of_ev regs e"
   obtains r v where "e = E_read_reg r v" and "r \<in> regs"
     and "c \<in> caps_of_regval ISA v" and "is_tagged_method CC c"
   using assms
   by (cases e) auto
 
-fun accessed_mem_caps :: "'regval event \<Rightarrow> 'cap set" where
-  "accessed_mem_caps (E_read_memt rk a sz val) =
+fun accessed_mem_caps_of_ev :: "'regval event \<Rightarrow> 'cap set" where
+  "accessed_mem_caps_of_ev (E_read_memt rk a sz val) =
      (case cap_of_mem_bytes_method CC (fst val) (snd val) of
         Some c \<Rightarrow>
          if is_tagged_method CC c \<and> \<not>is_translation_event ISA (E_read_memt rk a sz val) then {c} else {}
       | None \<Rightarrow> {})"
-| "accessed_mem_caps _ = {}"
+| "accessed_mem_caps_of_ev _ = {}"
 
-lemma member_accessed_mem_capsE[elim!]:
-  assumes "c \<in> accessed_mem_caps e"
+lemma member_accessed_mem_caps_of_evE[elim!]:
+  assumes "c \<in> accessed_mem_caps_of_ev e"
   obtains rk a sz bytes tag where "e = E_read_memt rk a sz (bytes, tag)"
     and "cap_of_mem_bytes_method CC bytes tag = Some c" and "is_tagged_method CC c"
   using assms
@@ -215,23 +215,42 @@ lemma accessible_regs_at_idx_Suc:
      {r \<in> PCC ISA \<union> IDC ISA. \<exists>c v. i < length t \<and> t ! i = E_write_reg r v \<and> c \<in> caps_of_regval ISA v \<and> is_tagged_method CC c}"
   by (auto simp: accessible_regs_at_idx_def)
 
-declare available_caps.simps[simp del]
-
 lemma reads_from_reg_None_reads_reg_caps_empty[simp]:
   "reads_from_reg e = None \<Longrightarrow> reads_reg_caps CC cor e = {}"
   by (cases e) auto
 
+declare available_reg_caps.simps[simp del]
+declare available_mem_caps.simps[simp del]
+declare available_caps.simps[simp del]
+
+lemma available_reg_caps_0[simp]: "available_reg_caps CC ISA 0 t = {}"
+  by (auto simp: available_reg_caps.simps)
+
+lemma available_mem_caps_0[simp]: "available_mem_caps CC ISA 0 t = {}"
+  by (auto simp: available_mem_caps.simps)
+
 lemma available_caps_0[simp]: "available_caps CC ISA use_mem_caps 0 t = {}"
   by (auto simp: available_caps.simps)
+
+lemma available_reg_caps_Suc:
+  "available_reg_caps CC ISA (Suc i) t =
+     available_reg_caps CC ISA i t
+     \<union> (if i < length t then accessed_reg_caps_of_ev (accessible_regs_at_idx i t) (t ! i) else {})"
+  by (cases "t ! i") (auto simp: available_reg_caps.simps accessible_regs_at_idx_def)
+
+lemma available_mem_caps_Suc:
+  "available_mem_caps CC ISA (Suc i) t =
+     available_mem_caps CC ISA i t
+     \<union> (if i < length t then accessed_mem_caps_of_ev (t ! i) else {})"
+  by (cases "t ! i")
+     (auto simp: available_mem_caps.simps reads_mem_cap_def bind_eq_Some_conv split: option.splits)
 
 lemma available_caps_Suc:
   "available_caps CC ISA use_mem_caps (Suc i) t =
    available_caps CC ISA use_mem_caps i t \<union>
-   (if i < length t then accessed_reg_caps (accessible_regs_at_idx i t) (t ! i) else {}) \<union>
-   (if i < length t \<and> use_mem_caps then accessed_mem_caps (t ! i) else {})"
-  by (cases "t ! i")
-     (auto simp: available_caps.simps accessible_regs_at_idx_def reads_mem_cap_def bind_eq_Some_conv
-           split: option.splits)
+   (if i < length t then accessed_reg_caps_of_ev (accessible_regs_at_idx i t) (t ! i) else {}) \<union>
+   (if i < length t \<and> use_mem_caps then accessed_mem_caps_of_ev (t ! i) else {})"
+  by (auto simp: available_caps.simps available_reg_caps_Suc available_mem_caps_Suc)
 
 abbreviation instr_sem_ISA ("\<lbrakk>_\<rbrakk>") where "\<lbrakk>instr\<rbrakk> \<equiv> instr_sem ISA instr"
 

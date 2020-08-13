@@ -367,7 +367,7 @@ lemma reads_reg_cap_non_privileged_accessible[intro]:
   shows "c \<in> available_caps CC ISA use_mem_caps i t"
 proof -
   from assms have c: "c \<in> available_caps CC ISA use_mem_caps (Suc j) t"
-    by (auto simp: bind_eq_Some_conv image_iff available_caps.simps)
+    by (auto simp: bind_eq_Some_conv image_iff available_caps.simps available_reg_caps.simps)
   consider "i = Suc j" | "Suc j < i" using \<open>j < i\<close>
     by (cases "i = Suc j") auto
   then show "c \<in> available_caps CC ISA use_mem_caps i t"
