@@ -14,6 +14,7 @@ type fun_info =
     regs_read_no_exc : IdSet.t;
     regs_written : IdSet.t;
     regs_written_no_exc : IdSet.t;
+    trans_calls : IdSet.t;
     trans_regs_read : IdSet.t;
     trans_regs_read_no_exc : IdSet.t;
     trans_regs_written : IdSet.t;
@@ -107,6 +108,10 @@ let add_fun_infos_of_def env exception_funs fun_infos = function
      let regs_read_no_exc = if IdSet.mem id exception_funs then IdSet.empty else regs_read in
      let regs_written = merge (List.map regs_written_in_exp exps) in
      let regs_written_no_exc = if IdSet.mem id exception_funs then IdSet.empty else regs_written in
+     let trans_calls =
+       List.map (fun (_, info) -> info.trans_calls) (Bindings.bindings calls_infos)
+       |> List.fold_left IdSet.union calls
+     in
      let trans_regs_read =
        List.map (fun (_, info) -> info.trans_regs_read) (Bindings.bindings calls_infos)
        |> List.fold_left IdSet.union regs_read
@@ -136,7 +141,7 @@ let add_fun_infos_of_def env exception_funs fun_infos = function
      Bindings.add id
        {
          typquant; arg_typs; ret_typ; effect; calls; regs_read; regs_read_no_exc; regs_written; regs_written_no_exc;
-         trans_regs_read; trans_regs_read_no_exc; trans_regs_written; trans_regs_written_no_exc
+         trans_calls; trans_regs_read; trans_regs_read_no_exc; trans_regs_written; trans_regs_written_no_exc
        }
        fun_infos
   | DEF_internal_mutrec _ ->
