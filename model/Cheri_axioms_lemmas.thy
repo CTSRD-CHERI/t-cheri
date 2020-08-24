@@ -257,13 +257,13 @@ abbreviation instr_sem_ISA ("\<lbrakk>_\<rbrakk>") where "\<lbrakk>instr\<rbrakk
 end
 
 lemma load_mem_axiomE:
-  assumes "load_mem_axiom CC ISA is_fetch inv_mem_caps invoked_caps t"
+  assumes "load_mem_axiom CC ISA is_fetch invoked_indirect_caps t"
     and "reads_mem_val_at_idx i t = Some (paddr, sz, v, tag)"
     and "\<not>translation_event_at_idx ISA i t"
   obtains c' vaddr
-  where "cap_derivable CC (available_caps CC ISA (\<not>inv_mem_caps) i t) c'"
+  where "cap_derivable CC (available_caps CC ISA (invoked_indirect_caps = {}) i t) c'"
     and "is_tagged_method CC c'"
-    and "is_sealed_method CC c' \<longrightarrow> is_sentry_method CC c' \<and> unseal_method CC c' \<in> invoked_caps \<and> inv_mem_caps"
+    and "is_sealed_method CC c' \<longrightarrow> is_indirect_sentry_method CC c' \<and> c' \<in> invoked_indirect_caps"
     and "translate_address ISA vaddr (if is_fetch then Fetch else Load) (take i t) = Some paddr"
     and "set (address_range vaddr sz) \<subseteq> get_mem_region CC c'"
     and "if is_fetch then permits_execute_method CC c' else permits_load_method CC c'"
@@ -274,27 +274,33 @@ lemma load_mem_axiomE:
   by blast
 
 lemma store_cap_reg_axiomE:
-  assumes "store_cap_reg_axiom CC ISA has_ex inv_mem_caps invoked_caps t"
+  assumes "store_cap_reg_axiom CC ISA has_ex invoked_caps invoked_indirect_caps t"
     and "writes_to_reg_at_idx i t = Some r"
     and "c \<in> writes_reg_caps_at_idx CC ISA i t"
-  obtains (Derivable) "cap_derivable CC (available_caps CC ISA (\<not>inv_mem_caps) i t) c"
+  obtains (Derivable) "cap_derivable CC (available_caps CC ISA (invoked_indirect_caps = {}) i t) c"
   | (Ex) has_ex and "r \<in> PCC ISA"
     and "c \<in>  exception_targets ISA {v'. \<exists>r' j. j < i \<and> index t j = Some (E_read_reg r' v') \<and> r' \<in> KCC ISA}"
-  | (Sentry) cs where "c \<in> invoked_caps" and "cap_derivable CC (available_caps CC ISA (\<not>inv_mem_caps) i t) cs"
+  | (Sentry) cs where "c \<in> invoked_caps"
+    and "cap_derivable CC (available_caps CC ISA (invoked_indirect_caps = {}) i t) cs"
     and "is_sentry_method CC cs" and "is_sealed_method CC cs"
-    and "leq_cap CC c (unseal_method CC cs)" and "r \<in> PCC ISA \<union> IDC ISA"
+    and "leq_cap CC c (unseal_method CC cs)" and "r \<in> PCC ISA"
+  | (IndirectSentry) cs where "cs \<in> invoked_indirect_caps"
+    and "cap_derivable CC (available_reg_caps CC ISA i t) cs"
+    and "is_indirect_sentry_method CC cs" and "is_sealed_method CC cs"
+    and "leq_cap CC c (unseal_method CC cs)" and "r \<in> IDC ISA"
   | (CCall) cc cd where "c \<in> invoked_caps"
-    and "cap_derivable CC (available_caps CC ISA (\<not>inv_mem_caps) i t) cc"
-    and "cap_derivable CC (available_caps CC ISA (\<not>inv_mem_caps) i t) cd"
+    and "cap_derivable CC (available_caps CC ISA (invoked_indirect_caps = {}) i t) cc"
+    and "cap_derivable CC (available_caps CC ISA (invoked_indirect_caps = {}) i t) cd"
     and "invokable CC cc cd"
     and "(leq_cap CC c (unseal_method CC cc) \<and> r \<in> PCC ISA) \<or> (leq_cap CC c (unseal_method CC cd) \<and> r \<in> IDC ISA)"
-  | (Indirect) c' where "c \<in> invoked_caps" and "inv_mem_caps"
+  | (Indirect) c' where "c \<in> invoked_caps"
+    and "invoked_indirect_caps \<noteq> {}"
     and "cap_derivable CC (available_mem_caps CC ISA i t) c'"
     and "(leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c' \<and> r \<in> PCC ISA) \<or>
          (leq_cap CC c c' \<and> r \<in> PCC ISA \<union> IDC ISA)"
   using assms
   unfolding store_cap_reg_axiom_def
-  by blast
+  by (elim allE[where x = i] allE[where x = c] allE[where x = r]) blast
 
 (*lemma store_cap_reg_axiom_invoked_caps_mono:
   fixes invoked_caps :: "('cap \<times> 'cap) set"
