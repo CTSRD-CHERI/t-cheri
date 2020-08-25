@@ -22,7 +22,7 @@ type isa =
     reg_ref_renames : string Bindings.t;
     skip_funs : IdSet.t;
     invoked_regs : string list Bindings.t;
-    invokes_mem_caps : IdSet.t;
+    invoked_indirect_regs : string list Bindings.t;
     cap_load_funs : IdSet.t;
   }
 
@@ -157,6 +157,6 @@ let load_isa file src_dir =
     reg_ref_renames = Bindings.map to_string (optional_bindings (member "reg_ref_renames" arch));
     skip_funs = optional_idset (member "skips" arch);
     invoked_regs = optional_bindings (member "invoked_regs" arch) |> Bindings.map to_string_list;
-    invokes_mem_caps = optional_idset (member "invokes_mem_caps" arch);
+    invoked_indirect_regs = optional_bindings (member "invoked_indirect_regs" arch) |> Bindings.map to_string_list;
     cap_load_funs = optional_idset (member "cap_load_funs" arch);
   }

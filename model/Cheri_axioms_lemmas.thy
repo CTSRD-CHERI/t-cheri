@@ -263,7 +263,7 @@ lemma load_mem_axiomE:
   obtains c' vaddr
   where "cap_derivable CC (available_caps CC ISA (invoked_indirect_caps = {}) i t) c'"
     and "is_tagged_method CC c'"
-    and "is_sealed_method CC c' \<longrightarrow> is_indirect_sentry_method CC c' \<and> c' \<in> invoked_indirect_caps"
+    and "is_sealed_method CC c' \<longrightarrow> is_indirect_sentry_method CC c' \<and> unseal_method CC c' \<in> invoked_indirect_caps"
     and "translate_address ISA vaddr (if is_fetch then Fetch else Load) (take i t) = Some paddr"
     and "set (address_range vaddr sz) \<subseteq> get_mem_region CC c'"
     and "if is_fetch then permits_execute_method CC c' else permits_load_method CC c'"
@@ -284,7 +284,7 @@ lemma store_cap_reg_axiomE:
     and "cap_derivable CC (available_caps CC ISA (invoked_indirect_caps = {}) i t) cs"
     and "is_sentry_method CC cs" and "is_sealed_method CC cs"
     and "leq_cap CC c (unseal_method CC cs)" and "r \<in> PCC ISA"
-  | (IndirectSentry) cs where "cs \<in> invoked_indirect_caps"
+  | (IndirectSentry) cs where "c \<in> invoked_indirect_caps"
     and "cap_derivable CC (available_reg_caps CC ISA i t) cs"
     and "is_indirect_sentry_method CC cs" and "is_sealed_method CC cs"
     and "leq_cap CC c (unseal_method CC cs)" and "r \<in> IDC ISA"
@@ -294,7 +294,6 @@ lemma store_cap_reg_axiomE:
     and "invokable CC cc cd"
     and "(leq_cap CC c (unseal_method CC cc) \<and> r \<in> PCC ISA) \<or> (leq_cap CC c (unseal_method CC cd) \<and> r \<in> IDC ISA)"
   | (Indirect) c' where "c \<in> invoked_caps"
-    and "invoked_indirect_caps \<noteq> {}"
     and "cap_derivable CC (available_mem_caps CC ISA i t) c'"
     and "(leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c' \<and> r \<in> PCC ISA) \<or>
          (leq_cap CC c c' \<and> r \<in> PCC ISA \<union> IDC ISA)"

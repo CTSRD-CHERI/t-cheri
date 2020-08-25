@@ -133,6 +133,7 @@ let store_cap_reg_axiom ISA has_ex invoked_caps invoked_indirect_caps t =
      (writes_to_reg_at_idx i t = Just r && c IN (writes_reg_caps_at_idx ISA i t))
      -->
      (cap_derivable (available_caps ISA (invoked_indirect_caps = {}) i t) c ||
+     (* Exception *)
      (has_ex &&
       ((*exists r' v' j.
          j < i &&
@@ -143,20 +144,7 @@ let store_cap_reg_axiom ISA has_ex invoked_caps invoked_indirect_caps t =
          leq_cap c c' &&
          r' IN (ISA.KCC (*take j t*)) &&*)
          r IN (ISA.PCC (*take i t*)))) ||
-     (exists cs.
-        c IN invoked_caps &&
-        cap_derivable (available_caps ISA (invoked_indirect_caps = {}) i t) cs &&
-        is_sentry cs &&
-        is_sealed cs &&
-        leq_cap c (unseal cs) &&
-        r IN ISA.PCC) ||
-     (exists cs.
-        cs IN invoked_indirect_caps &&
-        cap_derivable (available_reg_caps ISA i t) cs &&
-        is_indirect_sentry cs &&
-        is_sealed cs &&
-        leq_cap c (unseal cs) &&
-        r IN ISA.IDC) ||
+     (* Capability pair invocation *)
      (exists cc cd.
         c IN invoked_caps &&
         cap_derivable (available_caps ISA (invoked_indirect_caps = {}) i t) cc &&
@@ -164,9 +152,25 @@ let store_cap_reg_axiom ISA has_ex invoked_caps invoked_indirect_caps t =
         invokable cc cd &&
         ((leq_cap c (unseal cc) && r IN ISA.PCC) ||
          (leq_cap c (unseal cd) && r IN ISA.IDC))) ||
+     (* Direct sentry invocation *)
+     (exists cs.
+        c IN invoked_caps &&
+        cap_derivable (available_caps ISA (invoked_indirect_caps = {}) i t) cs &&
+        is_sentry cs &&
+        is_sealed cs &&
+        leq_cap c (unseal cs) &&
+        r IN ISA.PCC) ||
+     (* Indirect sentry invocation (writing the unsealed sentry to IDC) *)
+     (exists cs.
+        c IN invoked_indirect_caps &&
+        cap_derivable (available_reg_caps ISA i t) cs &&
+        is_indirect_sentry cs &&
+        is_sealed cs &&
+        leq_cap c (unseal cs) &&
+        r IN ISA.IDC) ||
+     (* Indirect capability (pair) invocation (writing the loaded capability/capabilities to PCC/IDC) *)
      (exists c'.
         c IN invoked_caps &&
-        (invoked_indirect_caps <> {}) &&
         cap_derivable (available_mem_caps ISA i t) c' &&
         ((leq_cap c (unseal c') && is_sealed c' && is_sentry c' && r IN ISA.PCC) ||
          (leq_cap c c' && r IN (ISA.PCC union ISA.IDC))))))
@@ -184,7 +188,7 @@ let load_mem_axiom ISA is_fetch invoked_indirect_caps t =
      -->
      (exists c' vaddr.
         cap_derivable (available_caps ISA (invoked_indirect_caps = {}) i t) c' && is_tagged c' &&
-        (is_sealed c' --> is_indirect_sentry c' && c' IN invoked_indirect_caps) &&
+        (is_sealed c' --> is_indirect_sentry c' && unseal c' IN invoked_indirect_caps) &&
         ISA.translate_address vaddr (if is_fetch then Fetch else Load) (take i t) = Just paddr &&
         Set.fromList (address_range vaddr sz) subset (get_mem_region c') &&
         (if is_fetch then permits_execute c' else permits_load c') &&
