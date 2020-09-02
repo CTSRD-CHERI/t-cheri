@@ -1,0 +1,831 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=1.0in]{geometry}
+\usepackage{isabelle,isabellesym}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{color}
+\usepackage{url}
+
+\usepackage{listings}
+
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+
+\usepackage[scaled=0.82]{beramono}
+
+\usepackage[svgnames]{xcolor}
+\usepackage[colorlinks,citecolor=DarkGreen]{hyperref}
+
+% 19-07-2018 Thomas and Kyndylan thinking about an abstaction of CHERI,
+% otherwise known as a theoretician's CHERI
+
+\title{Towards a Theoretician's {CHERI}\\(working note)}
+\author{Thomas Bauereiss, Kyndylan Nienhuis, Peter Sewell}
+
+\newtheorem{axiom}{Axiom}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+
+\newcommand{\TODO}[1]{{\color{blue}[TODO: #1]}}
+%\newcommand{\TODO}[1]{{}}
+\newcommand{\Note}[1]{{\color{magenta}[#1]}}
+
+% lst listings setup from cheri ISAv7 document
+
+\lstset{basicstyle=\small\ttfamily,
+        stringstyle=\textit, %italic strings
+        keywordstyle=\textbf, %Bold keywords
+        commentstyle=,
+        breaklines=true, % Wrap long lines
+        numbers=left, % Line numbers on the left
+        frame=l, %Border on the left
+        framerule=0.8pt, % Thick border
+        backgroundcolor=\color{CodeColour}, %Coloured code listings
+        numberstyle={\small \oldstylenums},  %tiny, old style line numbers
+		%stepnumber=5, % Number every fifth line
+        numbersep=5pt, % Five points between the line numbers and the text
+        tabsize=4
+}
+
+\lstdefinelanguage{sail}
+  { morekeywords={val,function,cast,type,forall,overload,operator,enum,union,undefined,exit,and,assert,sizeof,
+      scattered,register,inc,dec,if,then,else,effect,let,as,@,in,end,Type,Int,Order,match,clause,struct},
+    morestring=[b]",
+    stringstyle={\ttfamily\color{red}},
+    morecomment=[l][\itshape\color{DarkGreen}]{//},
+    morecomment=[s][\itshape\color{DarkGreen}]{/*}{*/},
+    deletestring=[bd]{'},
+    escapechar=\#,
+    emphstyle={\it},
+%    numbers=none,
+    frame=none,
+    backgroundcolor=\color{White},
+    aboveskip=\smallskipamount,
+    belowskip=0em,
+  }
+
+\sloppy
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+CHERI is an extension for Instruction Set Architectures (ISAs) that
+adds ca\-pa\-bi\-li\-ty  primitives to the underlying base architecture, designed to enable fine-grained memory protection and software compartmentalisation~\cite{UCAM-CL-TR-927,2665740}.
+%Technically  
+%PS: ``Technically'' can have a connotation of ``...but not really''
+%when used like this.
+CHERI adds capability registers, new instructions for manipulating capabilities, and tagged memory that can be used to load and store capabilities.
+
+Such security mechanisms are %notoriously
+%PS: ``notoriously'' is a bit strong, esp. because there have been few
+%previous implementations of such mechanisms.
+hard to get right, and
+even small mistakes in their design or their integration with the base ISA can compromise the desired security properties.
+Hence, it is crucial to rigorously justify that these mechanisms are sound and cannot be circumvented. %, e.g.~by using features of the base ISA.
+In recent work, Nienhuis has formalised key properties of the CHERI-MIPS architecture in a mathematically precise way~\cite{cheri-arw18}, using a formal model of the instruction semantics specified in the L3 language.
+The properties have been verified using the interactive theorem prover Isabelle/HOL, with the proofs fully machine-checked.
+%In particular, this includes a monotonicity property for reachable permissions within compartments (where reachable permissions are those granted by capabilities in accessible registers, capabilities that are loaded from memory segments for which a load permission is reachable, and sealed capabilities for which an unseal permission is reachable).
+%Intuitively, this means that compartments cannot escalate their memory privileges beyond what they can legally derive from the capabilities available to them.
+%The proofs have been fully machine-checked, giving very high confidence in their correctness.
+
+The CHERI extensions are intended to also be applicable to other
+architectures, not just CHERI-MIPS.  In particular, there is work
+underway exploring how they can be adapted to, variously, ARMv8-A,
+ARMv8-M, and RISC-V, and
+x86 is also discussed as a potential target in the CHERI ISA specification~\cite{UCAM-CL-TR-927}.
+We would like to formalise and verify security properties of CHERI adaptions
+of some of those ISAs, analogous to the CHERI-MIPS proof, and also
+address more involved properties, using the methods of Skorstengaard et al.~\cite{DBLP:conf/esop/SkorstengaardDB18}.
+However, 
+to help manage the complexity of dealing with real ISAs, 
+to avoid duplication of effort in repeating proof work for multiple
+architectures, and to help clarify the fundamental properties that the
+CHERI design embodies, 
+we intend to factor out common parts of the proofs via an abstraction layer that captures essential properties of the capability mechanisms in CHERI architectures.
+%envisioned CHERI architecture, e.g.~CHERI-RISC-V, CHERI-x86, or a minimal ``theoretician's CHERI'' suitable as an illustrative example for presentation in research papers,
+%
+Note that we aim for an \emph{abstraction}, that captures properties that
+hold in a precise mathematical sense of each
+full CHERI architecture, not merely an \emph{idealisation}, that could
+be expressed as a simplified ISA that embodies some CHERI features but
+has no precise relationship to the full CHERI ISA behavioural
+specifications. 
+%
+This abstraction layer needs to support proofs of high-level properties, e.g.~isolation properties between software components, and it has to be simple enough to keep the proof that each concrete ISA refines the abstract model tractable.
+
+
+
+
+%One of the main security guarantees of the CHERI architecture is monotonicity of capability permissions inside protection domains.
+%The architecture enforces that new capabilities can only be derived from existing ones, with non-increasing privileges.
+%\TODO{That's not really true: the architecture allows you to unseal and invoke capabilities which increases their privileges.}
+%We formulate corresponding requirements on the behaviour of instructions in terms of an abstract model that is not tied to a particular architecture, but can be instantiated for any CHERI-like architecture.
+%Our model is inspired by, but formulated in a different style than one of the abstraction layers used in \cite{cheri-arw18} for proving capability monotonicity for CHERI-MIPS.
+%\TODO{When the CHERI ISA uses ``capability monotonicity'' most of the time they mean the property that the memory-segment and the permission-bits of a particular capability cannot increase, although occasionally they mean monotonicity of reachable permissions. It's fair to blame them for any confusion, but nevertheless we should try to avoid confusion by not using the term ``capability monotonicity''.}
+%The goal is to make this model sufficiently strong to prove this and related properties like well-bracketed control-flow or local state encapsulation \cite{DBLP:conf/esop/SkorstengaardDB18,StkTokens} for the abstract model, so that these properties can then directly be transferred to any concrete architecture that satisfies the axioms of the model, e.g.~CHERI-MIPS, an envisioned CHERI-RISC-V, or a minimal ``theoretician's CHERI'' suitable as an illustrative example for presentation in research papers.
+
+%% CHERI-MIPS is an Instruction Set Architecture (ISA) that enables fine-grained memory control and scalable software compartmentalisation. This is achieved by adding support for capabilities, 
+
+%A suitable abstraction of CHERI would allow focusing on its essence when
+%reasoning about its properties, without getting lost in the details of concrete
+%ISA semantics.  Using a suitable refinement relation between concrete ISAs and
+%the abstract model, it should be possible to transfer results proved abstractly
+%to concrete ISAs (at least for certain classes of properties preserved by the
+%refinement).  The abstraction could be formulated either in an operational or
+%an axiomatic style.
+
+%\section{Towards an Abstraction}
+
+%Depending on the use case,
+There are different possible choices for such an ISA abstraction.
+The existing proofs about CHERI-MIPS~\cite{cheri-arw18} are centered around abstract actions that represent basic operations involving capabilities:
+StoreCap, LoadCap, RestrictCap, SealCap, UnsealCap, InvokeCap, StoreData, LoadData.
+Each of these is associated with properties that capture their intended behaviour.
+For example, when restricting a capability, the resulting capability must not grant more permissions than the original; when unsealing, the capability used to unseal must have the \verb|Unseal|
+permission, and so on.
+These properties become proof obligations when showing that the instructions of the concrete CHERI-MIPS ISA only perform allowed capability actions, and they can then be used to prove higher-level properties.
+
+It is tempting to further factor these actions out into a stand-alone abstraction of CHERI, where the actions become labels of a transition system with an abstract state, and the valid transitions are those satisfying the above properties.
+However, there is not a one-to-one correspondence between abstract actions and
+concrete instructions in the ISA in general. In CHERI-MIPS in particular, an ISA instruction can perform multiple capability actions.
+%For example, the CStore instruction stores data, clears a tag (RestrictCap) and potentially also copies a capability from a delay slot to the PCC.
+For example, the CJALR instruction (``Jump and link capability register'') not only loads the capability in the source register into the branch delay slot of the PCC register (which holds the program counter capability used for instruction fetching), but also increments and saves the current PCC to the destination register; both of these actions are modelled as instances of RestrictCap.
+This granularity mismatch (unusual in the sense that abstract actions are more fine-grained than concrete instructions) complicates the proof of abstraction and the transfer of properties between the layers.
+%This also
+%means that properties of abstract traces do not always translate to properties
+%of concrete traces.
+For example, a temporal property of the form ``X until Y'' might hold
+in an abstract trace, but not in a corresponding concrete trace if the first abstract
+state where Y holds does not correspond to any concrete state.
+
+In \cite{StkTokens}, Skorstengaard et al.~use an abstraction that is
+much closer to the (idealised) original ISA used there.
+It has the same instructions as the original, but adds an explicit representation and handling of the stack, such that the desired properties of well-bracketed control flow and local state encapsulation hold by construction.
+This ``overlay semantics'' is then shown to be indistinguishable by an
+adversary from the original, and therefore the desired properties hold for the original as well.
+%An operational model could be close to existing notions in Kyndylan's proofs
+%about the L3 CHERI-MIPS model:
+In our setting, however, there is not only one concrete ISA, but we want to simultaneously abstract several different CHERI ISAs with different underlying base architectures.
+Hence, our model has to be significantly more abstract than any single one of the concrete ISAs, which again makes it harder to prove a refinement relation between them and the abstract model.
+
+An alternative is to formulate an abstraction of CHERI in a more axiomatic way, in terms of predicates that all possible executions of instructions have to satisfy.
+For example, in the proof of the fundamental theorem in \cite{DBLP:conf/esop/SkorstengaardDB18}, such predicates are derived as an intermediate step, summarizing the specific ways in which an instruction may change memory and register contents:
+a register may either remain unchanged, or be updated either by writing a non-capability value, or copying a capability from another register, or restricting the capability stored in the register, etc.
+These simple predicates are easy to check for the concrete ISA, yet they have been chosen to be strong enough to allow proving the desired higher-level properties.
+
+
+
+In this note, we also follow an axiomatic approach, but the axioms we
+formulate below assume a somewhat different style of instruction semantics.
+Instead of using relations between global machine states, we model the set of possible behaviours of an instruction as a set of \emph{event traces}, where each event in a trace represents an effect such as writing a specific value to a register, reading a specific value from a register, loading a data value from memory, etc.
+This expresses the \emph{instruction-local} semantics of instructions in isolation, factored
+out from the inter-instruction register and memory semantics.
+% PS: think the above, and the clarity it gives, is the real point here; the concurrency stuff is
+% also long-term important but right now irrelevant for CHERI.
+
+This style of semantics also has the advantage that it does not commit to a sequential model, where instructions execute atomically and sequentially and the final state of one instruction becomes the initial state of the next one.
+Such a sequential model is not adequate for multiprocessors with concurrent hardware threads.
+Instruction-local traces, however, can be interleaved;
+together with a relaxed memory model specifying which interleavings
+are allowed we can obtain a concurrent model.  This is the style of
+semantics used in our operational models for relaxed-memory
+architectural concurrent behaviour. 
+%The axioms we formulate below focus on the local behaviour of individual instructions and are therefore unaffected by the choice of sequential vs.~concurrent model.
+%We have so far used this semantics mainly for testing and exploration of allowed behaviours, but would like to support verification above it for future work.
+
+The Sail tool~\cite{sail-sw,sail-popl2019} can generate theorem prover
+definitions of ISA models with this style of semantics, and
+substantial and well-validated Sail models exist for several
+architectures, including CHERI-MIPS, RISC-V, and ARMv8-A.
+Sail models for smaller (user-mode) fragments of IBM Power and x86 also
+exist, albeit currently in an older version of Sail.
+
+\section{Instruction-local semantics}
+\label{sec:local-sem}
+
+\begin{figure}
+% PS hack to fix ghastly isabelle default
+\renewcommand{\isacharbar}{{\rm\texttt{|}}}
+%
+\begin{isabelle}
+\isacommand{datatype}\isamarkupfalse%
+\ {\isacharprime}regval\ event\ {\isacharequal}\isanewline
+\ \ {\isacharbar}\ {\rm\texttt{E{\isacharunderscore}read{\isacharunderscore}reg}}\ register{\isacharunderscore}name\ {\isacharprime}regval\isanewline
+\ \ {\isacharbar}\ {\rm\texttt{E{\isacharunderscore}write{\isacharunderscore}reg}}\ register{\isacharunderscore}name\ {\isacharprime}regval\isanewline
+\ \ {\isacharbar}\ {\rm\texttt{E{\isacharunderscore}read{\isacharunderscore}mem}}\ read{\isacharunderscore}kind\ addr\ nat\ {\isacharparenleft}memory{\isacharunderscore}byte\ list{\isacharparenright}\isanewline
+\ \ {\isacharbar}\ {\rm\texttt{E{\isacharunderscore}read{\isacharunderscore}memt}}\ read{\isacharunderscore}kind\ addr\ nat\ {\isacharparenleft}memory{\isacharunderscore}byte\ list{\isacharparenright}\ bitU\isanewline
+\ \ {\isacharbar}\ {\rm\texttt{E{\isacharunderscore}write{\isacharunderscore}ea}}\ write{\isacharunderscore}kind\ addr\ nat\isanewline
+\ \ {\isacharbar}\ {\rm\texttt{E{\isacharunderscore}write{\isacharunderscore}mem}}\ write{\isacharunderscore}kind\ addr\ nat\ {\isacharparenleft}memory{\isacharunderscore}byte\ list{\isacharparenright}\isanewline
+\ \ {\isacharbar}\ {\rm\texttt{E{\isacharunderscore}write{\isacharunderscore}memt}}\ write{\isacharunderscore}kind\ addr\ nat\ {\isacharparenleft}memory{\isacharunderscore}byte\ list{\isacharparenright}\ bitU\isanewline
+\ \ {\isacharbar}\ {\rm\texttt{E{\isacharunderscore}excl{\isacharunderscore}res}}\ bool\isanewline
+\ \ {\isacharbar}\ {\rm\texttt{E{\isacharunderscore}barrier}}\ barrier{\isacharunderscore}kind\isanewline
+\ \ {\isacharbar}\ {\rm\texttt{E{\isacharunderscore}footprint}}\isanewline
+\ \ {\isacharbar}\ {\rm\texttt{E{\isacharunderscore}choose}}\ string\ bool\isanewline
+\ \ {\isacharbar}\ {\rm\texttt{E{\isacharunderscore}print}}\ string
+\end{isabelle}
+\caption{Event datatype in Isabelle/HOL\label{fig:events}}
+\end{figure}
+
+Figure~\ref{fig:events} lists the events used in our model (as an Isabelle/HOL
+datatype), including memory and register reads and writes.
+Reading from memory is represented using either an \texttt{E\_read\_memt} event, for reading a value together with a tag, or \texttt{E\_read\_mem}, for reading just a value;
+having these two kinds of events allows us to distinguish whether the instruction \emph{intended} to read a tagged value, i.e., a capability, or not, which is useful for formulating axioms about memory reads.
+%\footnote{Note that the value of the tag bit in a \texttt{E\_read\_memt} event is an input that comes from the memory model and is not under the control of the instruction, so this bit alone does not say whether the instruction \emph{intended} to read the tag bit.}
+When storing to memory, we likewise allow capability sized and aligned
+writes to explicitly provide a tag bit together with a value
+(\texttt{E\_write\_memt}), or just write a plain value
+(\texttt{E\_write\_mem}), in which case the system semantics will
+clear the appropriate tag bit(s) in memory.  Memory stores must be preceded by an announcement of the address (\texttt{E\_write\_ea}), so that, in a concurrent model, program-order
+succeeding instructions can be informed about the write address as early as it
+is known.  There are also other events needed for concurrent models
+that can be ignored here: \texttt{E\_excl\_res} for the result of a
+store-exclusive; \texttt{E\_barrier} for memory barriers;
+\texttt{E\_footprint} for the rare instructions that need dynamically
+recalculated register footprints; \texttt{E\_choose} for nondeterministic
+choice, and \texttt{E\_print} for printing debugging information
+when executing Sail models.
+
+\newcommand{\sailfnexecuteCLoad}{ \lstinputlisting[language=sail]{sail_latex/sailfnexecuteCLoad.tex}}
+
+\begin{figure}
+\sailfnexecuteCLoad
+\caption{Sail execution semantics for a sample CHERI-MIPS Instruction}\label{fig:CLoad}
+\end{figure}
+
+Figure~\ref{fig:CLoad} shows the semantics for a sample family of CHERI-MIPS
+instructions, for loads via an explicitly given capability register,
+as a clause of the Sail
+\lstinline{execute} function.
+For example, the instruction \lstinline{CLW rd,cb,offset}, which 
+reads 4 bytes from the addresses of capability \lstinline{cb + offset} into target
+register \lstinline{rd}, will execute this with \lstinline{width=4},
+\lstinline{linked=false}, and \lstinline{signext=false}.
+
+The Sail code involves several auxiliary functions: \lstinline{checkCP2usable}, 
+\lstinline{readCapRegDDC}, 
+\lstinline{raise_c2_exception}, 
+\lstinline{wordWidthBytes}, etc.
+Some of these are pure, while others do a variety of register and
+memory reads and writes.
+Leaving aside many auxiliary checks and exception cases, the main
+events are:
+\begin{itemize}
+  \item In Line 3, the \lstinline{readCapRegDDC} function contains a
+    read of the capability value of the
+\lstinline{cb} register.
+In the instruction-local traces of the instruction, this will give rise to an \texttt{E\_read\_reg} event with an
+arbitrary value.
+%CapRegs[i]
+The whole-system semantics will then cut down to those traces in which this
+arbitrary value is constrained to be equal to that of the most recent
+program-order predecessor write to this register. 
+
+
+\item In Line 33 (in the non-load-linked case), the
+  \lstinline{MEMr_wrapper} contains a memory read of the appropriate
+  \lstinline{size} bytes from the physical address \lstinline{pAddr}
+  calculated, with address translation, in Lines 14--24.
+This will give rise to an \texttt{E\_read\_mem} event with an
+arbitrary value.
+  
+\item In Line 34 the \lstinline{wGPR} function contains a register
+  write of the resulting value (sign extended if required) into the
+  general-purpose register \lstinline{rd}.
+  This will give rise to an \texttt{E\_write\_reg} event with that
+  value. 
+  \end{itemize}
+
+
+The instruction-local semantics of the \lstinline{CLW rd,cb,offset}
+instruction is thus roughly the set of traces of the form:
+\begin{align*}
+	[ \texttt{E\_read\_reg}(\texttt{cb}, c),\
+          \texttt{E\_read\_mem}(\texttt{Read\_plain}, \mathit{addr},
+          4, c'),\ \texttt{E\_write\_reg}(\texttt{rd}, c'') ]
+\end{align*}
+(still ignoring exceptional cases, which add many more traces) where $c$ is an arbitrary capability value 
+with load permission, with a virtual address (and 4-byte footprint)
+within its bounds; $c'$ is an arbitrary value; and $c''$ is the
+appropriately sign-extended value. 
+
+
+% val readCapRegDDC : regno -> Capability effect {rreg}
+% function readCapRegDDC(n) =
+%   let i = unsigned(n) in
+%   reg_deref(CapRegs[i])
+% 
+% 
+% % checkCP2usable
+% % 
+% % reads:  CP0Status
+% % writes: CP0Cause
+% % calls:  SignalException
+% % 
+% % SignalException
+% % 
+% % reads: CP0Status PCC KCC
+% % writes: EPCC
+% % calls: set_next_pcc getCapBase SignalExceptionMIPS
+% % 
+% % SignalExceptionMIPS
+% 
+% 
+% line 33 MEMr_wrapper 
+% ...inside nested functions does reverse_endianness(MEMr(addr, size))
+% 
+%   
+% val wGPR : (bits(5), bits(64)) -> unit effect {wreg}
+% function wGPR (idx, v) = {
+%   let i as atom(_) = unsigned(idx) in
+%   if i != 0 then {
+%     if trace then {
+%       prerr(string_of_int(i));
+%       prerr_bits(" <- ", v);
+%     };
+%     GPR[i] = v;
+%   };
+% }
+
+
+
+
+
+
+
+\section{Axiomatic model}
+\label{sec:axiomatic-model}
+
+Our axioms place constraints on what instructions are allowed to do with capabilities and which
+capabilities are required in order to perform certain operations.
+We formulate different axioms for different basic actions, i.e.~writing a capability to a register, storing a capability to memory, and storing or loading data to or from memory.
+For example, when an instruction stores a capability to memory, then that capability must be derivable from capabilities that have been legally read by the instruction before.
+These axioms are parametric in some ISA details, such as the concrete
+representation of capabilities or the relation between virtual and physical
+memory addresses.  Given an instantiation of these parameters, we can say that
+an ISA implements our CHERI abstraction if, for any instruction of the ISA, any local event trace possibly
+generated by that instruction satisfies all of our axioms.
+We aim for these axioms to be minimal in the sense that they place just enough
+constraints on instructions to rule out behaviour that would violate the security
+properties that we are interested in, without constraining the design space for
+CHERI architectures more than necessary.  % TODO: sharpen minimality statement
+
+We begin formalising these predicates by defining some auxiliary notions,
+starting with the set of capabilities that are available at a certain point
+in the execution of an instruction.
+An instruction may load capabilities from memory if there is another
+capability available that authorises that load (we formulate this as a separate
+constraint below).  Capabilities may also be read from registers, if those
+registers are accessible.  This includes general purpose registers, but
+typically excludes certain privileged registers, unless access to the latter is
+enabled by a permission bit in the PCC capability.  For example, the
+KCC register in CHERI-MIPS contains a capability that is meant to allow
+executing an exception handler in kernel mode.  Hence, this register is not
+supposed to be accessed by user space processes directly, as that would allow
+direct access to kernel memory.  Which registers are privileged is
+architecture-specific;
+% and possibly dynamic (depending, for example, on the current exception level in ARMv8-A).
+%we assume that the set of privileged registers is given as a model parameter $\mathit{privileged\_regs}$.
+%that is a function from a (partial) trace to a set of registers, specifying the privileged registers at that point in time.
+%TB: Not exactly sure if a dynamic set of privileged registers is really needed, and it complicates reasoning, so I made it static in the current formalisation.
+for CHERI-MIPS, they include registers such as KCC, KDC, EPCC, or \mbox{CapCause}.
+\newcommand{\take}{\mathit{take}}
+
+The register reads and memory loads that an execution of an instruction performs
+are reflected in its event trace, as described in Section~\ref{sec:local-sem}.
+Let $t$ be such a trace of a single instruction execution, and let $i$ with
+$0 \leq i < \mathit{length}(t)$ be an index representing a point in (local)
+time during this execution of the instruction.
+Formally, a capability $c$ is read from a register $r$ at index $i$ of $t$ if
+the event at that position in the trace has the form $\texttt{E\_read\_reg}(r, c)$;
+similarly for loaded capabilities from memory.
+We consider system register access to be permitted at index $i$ of $t$
+if a tagged and unsealed capability with the \verb|Access_System_Registers| permission
+has been read from PCC before $i$ (i.e., a some index $j < t$).
+%We denote the partial trace of the first $i$ events of $t$ as $\take(i, t)$.
+We define the set of ``available capabilities at
+index $i$ of a trace $t$'' as the set of tagged capabilities that
+have either been
+\begin{itemize}
+\item loaded from memory before $i$, or
+\item read from a register $r$ before $i$, such that, if % either
+  %\begin{itemize}
+  %\item
+  $r$ is privileged, then %, or
+  %\item
+  system register access is permitted at index $i$ of $t$.
+  %a tagged and unsealed capability with the \verb|Access_System_Registers| permission
+  %has been read from PCC before $i$.
+  %\end{itemize}
+\end{itemize}
+
+This captures the set of capabilities that an instruction may use
+at a given point. We further constrain it in Axiom~\ref{ax:load-data} below,
+which requires that capabilities are only loaded from memory if there is another
+capability already available that authorises the load.
+
+Note that our axioms always consider available capabilities w.r.t.~a local
+trace of a \emph{single} instruction.  In a global execution with multiple
+instructions, each of those may only use the capabilities available in its
+local trace.
+
+%\Note{TB: I've changed the last bullet point to allow any derivable capability
+%instead of just capabilities read from PCC, in response to the following
+%comment.}
+%
+%\Note{KN: in CHERI-MIPS this would suffice, but in architectures that do
+%more complicated operations during an instruction it might not: an
+%instruction could first read a capability with the
+%Access\_System\_Registers permission from memory, write it to the PCC
+%and then (without reading the PCC again) read a system register. Or
+%it could read a sealed PCC, read a capability that has authority to
+%unseal it, and then read a system register.}
+
+%
+%
+%For example, an execution of the \verb|CSetBounds| instruction of CHERI-MIPS
+%with an immediate argument for the new bound might produce the following trace,
+%where it first reads the \verb|CP0Status| register to check whether CP2 is
+%usable, then reads a capability $c$ from register \verb|C01|, internally
+%calculates the capability $c'$ with the new bounds using the immediate
+%argument, and writes it to \verb|C02|:
+%\begin{align*}
+%	[ \texttt{E\_read\_reg}(\texttt{"CP0Status"}, s), \texttt{E\_read\_reg}(\texttt{"C01"}, c), \texttt{E\_write\_reg}(\texttt{"C02"}, c') ]
+%\end{align*}
+%
+%As another example, consider an instruction of some hypothetical CHERI
+%architecture that allows sealing a capability and storing it to memory within
+%the same instruction.  In the following trace, the capability to seal and
+%another one authorising the sealing are read from registers, the sealing is
+%performed internally, and the resulting capability is stored to memory.  The
+%last step is represented using two events: first the address and the size
+%of the memory write is announced, and then the actual write is
+%performed.  This is necessary for concurrent models, so that program-order
+%succeeding instructions can be informed about the write address as early as it
+%is known.  The parameters of the $\texttt{E\_write\_mem}$ event indicate that it is a
+%plain (non-exclusive) write of 8 bytes to the physical address $\mathit{paddr}$,
+%and it stores the capability $c''$ with the tag bit set to $1$.
+%\begin{align*}
+%	[ & \texttt{E\_read\_reg}(\texttt{"C01"}, c), \\
+%	  & \texttt{E\_read\_reg}(\texttt{"C02"}, c'), \\
+%	  & \texttt{E\_write\_ea}(\text{Write\_plain}, \mathit{paddr}, 8) \\
+%	  & \texttt{E\_write\_mem}(\text{Write\_plain}, \mathit{paddr}, 8, c'', \mathtt{Bit1}) ]
+%\end{align*}
+
+
+In order to give an upper bound on what instructions may do with capabilities,
+we define a notion that captures the reflexive-transitive closure of a set of
+capabilities under the capability manipulations that CHERI allows.
+This includes the restriction of
+permissions and memory regions of capabilities, as well as sealing and
+unsealing, provided that another capability is available that authorises the
+sealing or unsealing operation.
+Taking the transitive closure here gives more flexibility than is currently
+used by existing CHERI implementations, which only perform up to one of those
+manipulations, but it leaves room for future architectures with more complex
+capability instructions.
+Formally, we define the capabilities ``derivable from a
+set of capabilities $C$'' inductively as the set of tagged capabilities $c$
+such that
+\begin{itemize}
+	\item $c \in C$, or
+	\item $c$ can be derived from another capability $c'$ derivable from $C$ via a
+	restriction operation (so that $c$ has at most the permission bits of $c'$ set,
+	the memory region of $c$ is included in or equal to that of $c'$, and both $c$ and $c'$ are tagged
+	and unsealed), or
+	\item there are capabilities $c'$ and $c''$ derivable from $C$ such that $c'$ is sealed,
+	$c''$ authorises unsealing of $c'$, and $c$ is the result of unsealing $c'$ using
+	$c''$, or
+	\item there are capabilities $c'$ and $c''$ derivable from $C$ such that $c'$ is unsealed,
+	$c''$ authorises sealing of $c'$, and $c$ is the result of sealing $c'$ using $c''$.
+\end{itemize}
+
+This is used in the following axiom, stating that a capability that is stored to memory by
+an instruction must be derivable from a capability that has been
+legally read (by that instruction)
+beforehand:
+
+\begin{axiom}
+  If a tagged capability $c$ is stored to memory at index $i$ of a local trace
+  $t$ of an instruction, then $c$ is derivable from
+  capabilities that are available at index $i$ of $t$.
+\end{axiom}
+
+Note that the notion of capability derivation as defined above does not include
+invocation of capabilities (in a CCall), so the above axiom does not allow
+storing capabilities to memory that are generated by a CCall and are not
+derivable from available capabilities via regular unsealing.  This is necessary
+because a CCall involves a non-monotonic crossing of protection domains, and
+the unsealed code and data capabilities are only intended to be used for
+executing the jump by writing them to the PC and default data capability
+registers, and nothing else.
+
+%\Note{(KN: btw, here I'm happy with the term monotonicity, because
+%monotonicity of domains can be defined whereas monotonicity of
+%capabilities is a bit more shady)}
+
+We specify constraints about these jumps in an axiom about register writes.
+For specifying CCalls, we define the auxiliary notion of an
+invokable capability pair, consisting of a code and a data capability with
+matching object type:
+
+\begin{definition}
+  An ordered pair of capabilities $(cc, cd)$ is invokable iff
+  \begin{itemize}
+  \item both are tagged, sealed, have the same object type, and have the \verb|CCall|
+    permission,
+  \item $cc$ has the \verb|Execute| permission and its current pointer is within its memory region, and
+  \item $cd$ does not have the \verb|Execute| permission.
+  \end{itemize}
+\end{definition}
+
+The specification of CCalls and exception handling also has to refer to
+relevant registers such as the PC and invoked data capability registers, whose
+names are architecture-specific (in CHERI-MIPS, they are called PCC and IDC, respectively).
+We again model these as parameters of the
+abstraction.
+%(again as functions of the preceding trace, because, for
+%example, there might be different registers holding exception jump targets for
+%different exception levels).
+With these considerations in mind, we formulate an axiom about
+register writes as follows.
+
+%\Note{KN: since exceptions are also non-monotonic crossings of protection
+%domain I'd treat them separately (just like CCall). Here you then know
+%that all read registers are accessible.}
+
+%\Note{TB: It would be possible to have different axioms for CCalls/exceptions and
+%regular instructions, but the following one might capture both (and
+%instructions that perform both some regular register writes and a
+%CCall/exception; for example, raising an exception in CHERI-MIPS also saves the
+%current PCC to EPCC, which should be covered by the first clause of the
+%following axiom)}
+
+\begin{axiom}
+  \label{axiom:reg-write}
+  If a tagged capability $c$ is written to a register $r$ at index $i$ of a
+  local trace $t$ of an instruction, then one of the
+  following holds:
+  \begin{itemize}
+  \item c is derivable from the available capabilities at index i of t, or
+  \item t raises an exception, c has been read from KCC before $i$ (at some index $j < i$ of $t$), and $r$ is
+    PCC and is not read after $i$ (at any index $k > i$ of $t$), or
+  \item t invokes the capability pair $(cc, cd)$, where $cc$ and $cd$ are derivable from the available capabilities
+    at $i$, $(cc, cd)$ is invokable, and either
+    \begin{itemize}
+    \item $r$ is PCC, $c$ is the unsealed version of $cc$, and $r$ is not read after $i$, or
+    \item $r$ is IDC, $c$ is the unsealed version of $cd$, and $r$ is not read after $i$.
+    \end{itemize}
+  \end{itemize}
+\end{axiom}
+
+%\Note{TB: I've added the requirement of having an invokable *pair* of capabilities in
+%order to perform a CCall, as pointed out by Kyndylan.}
+
+%\Note{KN: It would be nice if ``accessible registers'' also includes the
+%notion that the capabilities that CCall or exceptions produce are
+%inaccessible.}
+
+%\Note{TB: I think this can be handled by the following, together with the fact that
+%KCC is not accessible in user mode, and the capabilities produced by a CCall
+%are not derivable from the source capabilities in the above sense.}
+
+The newly installed PCC (or IDC) capability is intended for use only by the
+\emph{following} instructions, after the domain switch has occurred.  This
+means we have to make sure that the current instruction cannot (mis)use these
+capabilities if it is not supposed to have them available, in particular the
+sealed arguments of a CCall or the privileged KCC capability in user mode.  In
+order to ensure this, the above axiom requires that PCC and IDC are not read
+after the invoked capabilities have been written.  In combination with the
+other axioms and our definition of ``available capabilities'', which only
+includes capabilities that have been read by the instruction, this forbids the
+instruction to derive capabilities from these invoked capabilities or use their
+privileges, if they are not available to the instruction already.
+
+Note that the axioms so far do not forbid an instruction to access privileged
+registers if it does not have permission to do so.  The axioms so far only
+constrain the \emph{usage} of capabilities read from privileged registers
+without permission:  Since those are not included in the ``available
+capabilities'' by definition, an instruction is not allowed to use them
+in regular capability operations, and Axiom~\ref{axiom:reg-write} only
+allows the value of KCC to be copied to PCC for exception handling.
+The following axiom ensures that this is the only special case by
+forbiding instructions to read privileged registers without permission
+in all other cases.
+
+\begin{axiom}
+	If a register $r$ is read at index $i$ of a local trace $t$ of an instruction and $r$ is privileged,
+	then either system register access is permitted at index $i$ of $t$, or
+	%a tagged and unsealed capability with the \verb|Access_System_Registers| permission
+	%has been read from PCC before $i$, unless
+	$r$ is KCC and $t$ raises an exception.
+\end{axiom}
+
+Memory accesses in CHERI are guarded by capabilities; the virtual address range
+of each load and store has to be within the memory region of an available
+capability with the corresponding permission.  Formalising this in terms of
+effect traces is somewhat complicated by the fact that the events in those
+traces carry physical addresses, while capabilities talk about virtual
+addresses.  However, the traces also contain the events belonging to
+address \emph{translation}.  This includes the reading of translation table entries from memory, which can be used to reconstruct the relevant
+mappings of virtual to physical addresses from the trace.  We capture this
+architecture-specific mapping as a parameter $\mathit{translate\_address}$, a
+partial function that takes a trace, an index, a flag indicating a load or a store,
+and a virtual address, and may return a physical address.
+Note that, if the memory accesses of address translation itself are not guarded by capabilities, %access memory, in order to load or update translation table entries.
+%If those memory accesses are not guarded by capabilities, then
+we have to exclude them from the axioms below; we model this using a parameter
+$\mathit{translation\_tables}$ that maps a trace to a set of physical addresses that belong
+to the translation and should be excluded from the capability requirements.
+
+\begin{axiom}
+  \label{ax:load-data}
+  If a data value $\mathit{val}$ of size $\mathit{sz}$ is loaded from a
+  physical memory address $\mathit{paddr}$ at index $i$ of a local trace $t$
+  of an instruction and $\mathit{paddr}$ is not in
+  $\mathit{translation\_tables}(t)$, then there are $c'$ and vaddr such that
+  \begin{itemize}
+  \item $c'$ is a tagged and unsealed capability with the \verb|Load| permission available at index $i$ of $t$,
+  \item $\mathit{vaddr}$ gets mapped to $\mathit{paddr}$ by $\mathit{translate\_address}(Load, i, t)$,
+  \item the address range from $\mathit{vaddr}$ up to and including $\mathit{vaddr}+\mathit{sz}-1$ is in the memory region of $c'$,
+  \item if the load operation is a tagged memory load,
+  then it is aligned to the tag granularity and
+  $c'$ has the \verb|Load_Capability| permission.
+  \end{itemize}
+\end{axiom}
+
+An analogous axiom constrains memory stores:
+
+\begin{axiom}
+  If a data value $\mathit{val}$ of size $\mathit{sz}$ is stored to the
+  physical memory address $\mathit{paddr}$ at index $i$ of a local trace $t$
+  of an instruction and $\mathit{paddr}$ is not in
+  $\mathit{translation\_tables}(t)$, then there are $c'$ and vaddr such that
+  \begin{itemize}
+  \item $c'$ is a tagged and unsealed capability with the \verb|Store| permission available at index $i$ of $t$,
+  \item $\mathit{vaddr}$ gets mapped to $\mathit{paddr}$ by $\mathit{translate\_address}(Store, i, t)$,
+  \item the address range from $\mathit{vaddr}$ up to and including $\mathit{vaddr}+\mathit{sz}-1$ is in the memory region of $c'$,
+  \item if the store operation is a tagged memory store, then
+  it is aligned to the tag granularity and
+  $c'$ has the \verb|Store_Capability| permission;
+  additionally, if $val$ is a tagged local capability, then $c'$ has the
+  \verb|Store_Local_Capability| permission.
+ \end{itemize}
+\end{axiom}
+
+Note that address translation is trusted in this model.  In particular, even if
+we subject all events belonging to address translations to the same constraints
+as the other events (i.e. guarding them with capabilities), address
+translation is still trusted to not modify the mapping of virtual to physical
+addresses in a way that circumvents the capability mechanism (for example, by
+changing a page table entry for a virtual address range of a userspace process
+to point into physical memory belonging to the kernel).  Hence, the security
+guarantees of the CHERI mechanisms depend on properties of the virtual memory
+mechanism, e.g. the invariance of address translation in user space, possibly
+with additional preconditions.
+In \cite{cheri-arw18}, such an invariant is proved separately, and then used together
+with the capability abstraction to derive the high-level result.
+
+Our axioms focus on one instruction execution at a time.  When
+considering sequences of instructions, the axioms must still hold for each instruction individually, to avoid capabilities read by one
+instruction to wrongly be considered available for following instructions, which might be in a different
+protection domain.
+
+In addition to the semantics of the instructions themselves, our Sail
+specifications also model instruction \emph{fetching}, so event traces can be
+obtained for that aspect as well.  We subject these traces to the same
+requirements as those of instructions, with one difference in
+Axiom~\ref{ax:load-data}: while loading data requires a capability with a
+\verb|Load| permission, fetching an instruction requires the \verb|Execute|
+permission.
+
+%This could be done by tagging all events belonging to a
+%given instruction with a unique identifier.  One could also model instruction
+%fetching on this level, tagging fetching events separately and adding an axiom
+%that the fetched address must be within PCC's memory region (for CCalls, this
+%is checked by the above register-write axiom, but not for other ways of setting
+%PCC, e.g. regular fetching of the next instruction).
+
+%\Note{KN: fetches are ordinary loads, right? Then we also need to exclude
+%instruction fetch from the rule about loading data/capabilities,
+%because one doesn't need the Permit\_Load permission to fetch
+%instructions.}
+%
+%\Note{TB: Yes, I added an exception for instruction fetches to the axiom (although
+%the rule above was mainly intended to be applied to intra-instruction traces
+%that do not include fetches; but with a bit of care it should be possible to
+%have one set of rules that applies to both intra-instruction traces as well as
+%events coming from fetches).  One way to formalise the distinction of data
+%loads and instruction fetches could be to mark the latter in traces, e.g. using
+%the ``read\_kind'' parameter of memory load events (which currently does not have
+%a value to indicate fetches, but that could be added).}
+
+%\TODO{Discuss properties that follow from the axioms, e.g. monotonicity properties?}
+
+%\section{Example ISA}
+
+%\TODO{Give an example of a small, illustrative ISA, e.g. similar to the one of Lau et al, that can be shown to satisfy the axioms}
+
+\section{Reasoning above the model}
+\label{sec:proof}
+
+Our axioms are designed to support proofs of fundamental security properties of
+CHERI architectures.  We have formalised our model in the interactive theorem
+prover Isabelle/HOL and proved a monotonicity property for reachable
+capabilities: given an ISA that satisfies our axioms, executing an arbitrary
+instruction does not increase the set of reachable capabilities, if the
+instruction does not raise an exception or jump to another protection domain
+by invoking capabilities.
+
+Our proof is with respect to a sequential model that is defined in terms of a
+global state that holds the values of registers, memory locations, and tag
+bits.  It sequentially executes instructions according to their local
+semantics.  A read event is allowed to be produced in a given state if the
+value it contains matches the value of the corresponding register or memory
+location in that state, while write events update the state accordingly.
+
+We extend the model by state-based variants of trace-based parameters,
+e.g.~$\mathit{translate\_address}$.  The reachable capabilities are defined
+similarly to available capabilities in Section~\ref{sec:axiomatic-model}, but
+with respect to a state instead of a trace, and we also include derivable
+capabilities.  Formally, we define the set of capabilities reachable in a state
+$s$ inductively as the capabilities stored in accessible registers in $s$, or
+in memory locations in $s$ that are within the memory region of a reachable
+capability with the \texttt{Load\_Capability} permission, or derivable from a
+reachable capability.
+
+We show that, for any instruction-local trace $t$ of an arbitrary instruction
+that can be executed in a state $s$ resulting in a new state $s'$, if
+\begin{itemize}
+\item no exception is raised in $t$,
+\item no capability pair is invoked in $t$,
+\item address translation stays invariant along $t$, and
+\item the in-memory translation tables in $s$ do not contain tagged capabilities,
+\end{itemize}
+then the set of capabilities reachable in $s'$ is a subset of the capabilities
+reachable in $s$.
+
+Invariance of address translation ensures that the instruction cannot re-map a
+reachable virtual memory region to physical memory with additional
+capabilities.  Since address translation is architecture-specific, it is not
+covered by our axioms and has to be reasoned about separately.  In CHERI-MIPS,
+invariance of address translation always holds in user space, whereas in
+\mbox{ARMv8-A}, it only holds if the in-memory translation tables are set up suitably
+by the operating system.
+
+The final assumption about capabilities in translation tables is due to the
+fact that our axioms do not cover translation table lookups, again in order to
+avoid having to model architecture-specific details of address translation.  If
+one wants to allow capabilities in translation tables, then these lookups
+should be subject to the same capability checks as regular memory loads.
+%This can be reflected in the model without changing the axioms by choosing the
+%$\mathit{translation\_tables}$ parameter of the model to be the empty set, for
+%example; memory accesses related to address translation are then treated the
+%same as other memory loads.
+
+The result above can be lifted from single instructions to sequences of
+multiple instructions.  Given a concatenation of, alternatingly, local
+instruction traces and fetch traces, we can apply the above result (and a
+corresponding one for fetches) to the individual traces and use transitivity to
+obtain a monotonicity property for the complete sequence, provided that the
+assumptions hold for all individual traces in the sequence.
+
+We plan to continue proving high-level properties above our model,
+e.g.~isolation properties between software compartments.  We also plan to go in
+the other direction and show that concrete CHERI ISAs satisfy our axioms.
+
+\section{Conclusion}
+
+We have discussed an axiomatic model of essential properties of the capability features in CHERI architectures.
+Its requirements are designed to be both easy to verify for concrete ISAs and to enable abstract proofs of high-level properties.
+In particular, we have used the axioms to show a monotonicity property for the capabilities reachable within a compartment.
+This can be used to rule out unauthorised privilege escalations by arbitrary code running in a compartment.
+%e.g.~isolation properties between software compartments.
+%We focus on capability monotonicity because it is one of the most essential properties of CHERI, and it allows us to abstract away many unrelated details of concrete ISAs, simplifying reasoning and making the results less architecture-specific.
+It has to be noted, though, that there are desirable properties in CHERI-based systems for which our abstraction is not sufficient. % that require more than capability monotonicity.
+Consider, for example, operating system code that is initially started with an all-powerful capability, and suppose that we want to prove that this code only passes sufficiently restricted capabilities to user-space processes so that those cannot write to kernel memory.
+This requires detailed reasoning about the exact capability restrictions performed, including calculations of bounds and pointers using instructions of the base ISA. %\footnote{and possibly about the compilation from source to binary code, if the former is to be used for high-level reasoning}
+Hence, such a proof has to include ISA details that we specifically want to abstract away from, so the kernel code will have to be reasoned about in more detail outside of our model. %we do not consider this kind of property here.
+However, our model can be used to reason about arbitrary code running in user-space processes, complementing the verification of kernel code.
+%Our axioms are designed to give \emph{upper bounds} on the capabilities reachable within a compartment, as we have seen with the property proved above our axioms in Section~\ref{sec:proof}.
+%In the above setting, we can use this to rule out unauthorised privilege escalations in the user-space processes, while the kernel code will have to be reasoned about in more detail separately.
+%but it does not help with reasoning about kernel code that has access to an all-powerful capability.
+%Since we want to abstract from the latter, we do not consider this kind of properties in this note.
+%However, the most convenient abstraction level for this proof is likely to be the OS source code or some abstract model of it, rather than machine instructions. \TODO{Convenient yes, but if you don't want to trust the compilation, the machine instructions might still be the right target.}
+%For capability monotonicity, in contrast, we want to prove once and for all that a CHERI ISA itself guarantees this property for arbitrary code, so we have to find a suitable ISA abstraction.
+%\TODO{I'm not sure whether I understood the point. Are you trying to say the following: there is no easy way to prove properties such as ``only sufficiently restricted capabilities are passed'' in a platform independent way, because it depends on the source/machine code; therefore we won't consider these properties here.}
+%
+%Still, an abstract monotonicity result might usefully complement more detailed reasoning about certain critical sections.
+%\TODO{Looking again at the proofs for the local capability machine paper by Lau et al, the following seems to hold, but might want to double-check:}
+%Similarly, the proof of well-bracketed control-flow and local state encapsulation of given example programs calling arbitrary adversarial code in \cite{DBLP:conf/esop/SkorstengaardDB18} uses both
+%the details of the concrete ISA semantics to reason about the known code of the example programs, and an abstract capability safety result to reason about adversarial code.
+%%These details might be useful for reasoning about other properties, such as proving that an OS does not leak capabilities to user-space processes that would allow access to kernel-space, but such a proof likely requires more details beyond the ISA in any case, e.g.~about the OS code and/or the compiler used.
+
+% -----
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}
