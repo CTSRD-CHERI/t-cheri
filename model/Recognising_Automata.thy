@@ -2241,6 +2241,8 @@ locale Mem_Automaton = Capability_ISA_Fixed_Translation where CC = CC and ISA = 
     and invoked_indirect_caps :: "'cap set"
 begin
 
+abbreviation invokes_indirect_caps where "invokes_indirect_caps \<equiv> (invoked_indirect_caps \<noteq> {})"
+
 definition addrs_in_mem_region :: "'cap \<Rightarrow> acctype \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> bool" where
   "addrs_in_mem_region c acctype vaddr paddr sz =
      (set (address_range vaddr sz) \<subseteq> get_mem_region CC c \<and>
