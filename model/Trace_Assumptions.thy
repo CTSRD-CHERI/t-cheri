@@ -248,14 +248,14 @@ lemma runs_no_reg_writes_to_case_prod[intro, simp, runs_no_reg_writes_toI]:
   by (cases z) auto
 
 lemma no_reg_writes_to_case_bool[intro, simp, no_reg_writes_toI]:
-  assumes "\<And>x. no_reg_writes_to Rs (f x)"
-  shows "no_reg_writes_to Rs (case z of True \<Rightarrow> f True | False \<Rightarrow> f False)"
+  assumes "z \<Longrightarrow> no_reg_writes_to Rs m1" and "\<not>z \<Longrightarrow> no_reg_writes_to Rs m2"
+  shows "no_reg_writes_to Rs (case z of True \<Rightarrow> m1 | False \<Rightarrow> m2)"
   using assms
   by (cases z) auto
 
 lemma runs_no_reg_writes_to_case_bool[intro, simp, runs_no_reg_writes_toI]:
-  assumes "\<And>x. runs_no_reg_writes_to Rs (f x)"
-  shows "runs_no_reg_writes_to Rs (case z of True \<Rightarrow> f True | False \<Rightarrow> f False)"
+  assumes "z \<Longrightarrow> runs_no_reg_writes_to Rs m1" and "\<not>z \<Longrightarrow> runs_no_reg_writes_to Rs m2"
+  shows "runs_no_reg_writes_to Rs (case z of True \<Rightarrow> m1 | False \<Rightarrow> m2)"
   using assms
   by (cases z) auto
 
@@ -373,6 +373,25 @@ lemma no_reg_writes_to_of_bits_nondet[simp, no_reg_writes_toI]:
   shows "no_reg_writes_to Rs (of_bits_nondet BC bits)"
   by (auto simp: of_bits_nondet_def)
 
+definition
+  bind_ignore :: "('rv, 'a, 'e) monad \<Rightarrow> ('rv, 'b, 'e) monad \<Rightarrow> ('rv, 'b, 'e) monad"
+  where
+  "bind_ignore f g = Sail2_prompt_monad.bind f (\<lambda>_. g)"
+
+lemma bind_ignored_after_one:
+  "(m1 \<bind> (\<lambda>x. bind_ignore (m2 x) m3)) = (bind_ignore (m1 \<bind> m2) m3)"
+  by (simp add: bind_ignore_def)
+
+lemmas fold_bind_ignore = bind_ignored_after_one bind_ignore_def[symmetric]
+
+lemma fold_trio_bind_ignore:
+  "(m1 \<bind> (\<lambda>x. m2 x \<bind> (\<lambda>y. m3))) = (bind_ignore (m1 \<bind> m2) m3)"
+  by (simp add: bind_ignore_def)
+
+lemma no_reg_writes_to_bind_ignore[no_reg_writes_toI]:
+  "no_reg_writes_to Rs m1 \<Longrightarrow> no_reg_writes_to Rs m2 \<Longrightarrow> no_reg_writes_to Rs (bind_ignore m1 m2)"
+  by (simp add: bind_ignore_def)
+
 lemmas no_reg_write_builtins =
   no_reg_writes_to_return no_reg_writes_to_throw no_reg_writes_to_Fail
   no_reg_writes_to_early_return no_reg_writes_to_assert_exp
@@ -387,6 +406,8 @@ lemmas no_reg_write_builtins =
 
 method no_reg_writes_toI uses simp intro =
   (intro intro runs_no_reg_writes_toI no_reg_writes_runs_no_reg_writes no_reg_writes_toI conjI impI allI;
+    (erule contra_subsetD subset_trans)?;
+    (simp(no_asm) only: simp insert_subset empty_subsetI insert_iff empty_iff simp_thms list.simps)?;
    auto simp: simp split del: if_split split: option.splits)
 
 abbreviation "exp_fails m \<equiv> (\<forall>t a. \<not>Run m t a)"
