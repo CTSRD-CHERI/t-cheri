@@ -406,8 +406,9 @@ lemmas no_reg_write_builtins =
 
 method no_reg_writes_toI uses simp intro =
   (intro intro runs_no_reg_writes_toI no_reg_writes_runs_no_reg_writes no_reg_writes_toI conjI impI allI;
-    (erule contra_subsetD subset_trans)?;
-    (simp(no_asm) only: simp insert_subset empty_subsetI insert_iff empty_iff simp_thms list.simps)?;
+    (erule contra_subsetD subset_trans;
+      simp(no_asm) only: simp register_ref.simps insert_subset empty_subsetI insert_iff
+                         empty_iff simp_thms list.simps)?;
    auto simp: simp split del: if_split split: option.splits)
 
 abbreviation "exp_fails m \<equiv> (\<forall>t a. \<not>Run m t a)"
