@@ -1024,7 +1024,7 @@ method derivable_capsI_with methods solve uses intro elim simp assms =
       | erule derivable_caps_combinators eqTrueE
       | rule derivable_caps_runI
       | solve (*
-      | solves \<open>use assms in \<open>auto simp: simp\<close>\<close>*));
+      | solves \<open>use assms in \<open>auto simp: simp\<close>\<close>*))+;
    derivable_capsI_with solve intro: intro elim: elim simp: simp assms: assms)
 
 method derivable_capsI uses intro elim simp assms =
@@ -1650,7 +1650,7 @@ method traces_enabledI_with methods solve uses intro elim =
      intro: intro)*)
 
 method traces_enabledI uses simp intro elim assms =
-  ((traces_enabled_step intro: intro elim: elim; traces_enabledI simp: simp intro: intro elim: elim assms: assms)
+  ((traces_enabled_step intro: intro elim: elim; traces_enabledI simp: simp intro: intro elim: elim assms: assms)+
     | (accessible_regs_step simp: simp assms: assms; solves \<open>traces_enabledI simp: simp intro: intro elim: elim assms: assms\<close>)
     | (derivable_caps_step; solves \<open>traces_enabledI simp: simp intro: intro elim: elim assms: assms\<close>)
     | (solves \<open>no_reg_writes_toI simp: simp\<close>)
@@ -2028,7 +2028,7 @@ method traces_enabledI_with methods solve uses intro elim =
      intro: intro)*)
 
 method traces_enabledI uses simp intro elim assms =
-  ((traces_enabled_step intro: intro elim: elim; traces_enabledI simp: simp intro: intro elim: elim assms: assms)
+  ((traces_enabled_step intro: intro elim: elim; traces_enabledI simp: simp intro: intro elim: elim assms: assms)+
     | (accessible_regs_step simp: simp assms: assms; solves \<open>traces_enabledI simp: simp intro: intro elim: elim assms: assms\<close>)
     | (derivable_caps_step; solves \<open>traces_enabledI simp: simp intro: intro elim: elim assms: assms\<close>)
     | (solves \<open>no_reg_writes_toI simp: simp\<close>)
