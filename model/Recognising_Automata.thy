@@ -1393,11 +1393,11 @@ lemma traces_enabled_or_boolM[traces_enabledI]:
   by (auto simp: or_boolM_def intro!: traces_enabledI intro: non_cap_exp_traces_enabledI non_cap_expI)
 
 lemma traces_enabled_foreachM_index_list_inv:
-  assumes "\<And>idx vars t t'.
+  assumes "\<And>idx vars t.
               Inv idx vars (run s t) \<Longrightarrow>
               min from to \<le> idx \<Longrightarrow> idx \<le> max from to \<Longrightarrow>
-              trace_assms t \<Longrightarrow> trace_assms t' \<Longrightarrow>
-              traces_enabled (body idx vars) (run (run s t) t')"
+              trace_assms t \<Longrightarrow>
+              traces_enabled (body idx vars) (run s t)"
     and "\<And>idx vars t t' vars'.
               Inv idx vars (run s t) \<Longrightarrow>
               min from to \<le> min idx (idx + step) \<Longrightarrow> max idx (idx + step) \<le> max from to \<Longrightarrow>
@@ -1414,12 +1414,12 @@ proof (use assms in \<open>induction "from" to step arbitrary: vars s rule: inde
     if "0 < step \<and> from \<le> to \<or> step < 0 \<and> to \<le> from"
   proof (rule traces_enabled_bind)
     show "traces_enabled (body from vars) s"
-      using body[of "from" vars "[]" "[]"] Inv_base[OF that]
+      using body[of "from" vars "[]"] Inv_base[OF that]
       by auto
   next
     fix t vars'
     assume t: "Run (body from vars) t vars'" "trace_assms t"
-    note body' = body[of _ _ "t @ t'" t'' for t' t'', simplified]
+    note body' = body[of _ _ "t @ t'" for t', simplified]
     note Inv_step' = Inv_step[of _ _ "t @ t'" t'' for t' t'', simplified]
     note Inv_base' = Inv_step[of "from" vars "[]" t vars', simplified]
     have "traces_enabled (foreachM (index_list (from + step) to step) vars' body) (run s t)"
