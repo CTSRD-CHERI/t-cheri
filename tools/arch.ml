@@ -63,6 +63,7 @@ let load_isa file src_dir =
     { name_override = to_option to_string (member "name" json);
       attrs_override = to_option to_string (member "attrs" json);
       assms_override = to_option to_string_list (member "assms" json);
+      extra_assms = Util.option_default [] (to_option to_string_list (member "extra_assms" json));
       stmts_override = to_option to_string_list (member "stmts" json);
       using_override = to_option to_string_list (member "using" json);
       unfolding_override = to_option to_string_list (member "unfolding" json);
