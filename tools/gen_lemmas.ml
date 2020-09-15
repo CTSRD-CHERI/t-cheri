@@ -205,7 +205,7 @@ let add_needed_footprints isa needed_funs = function
   | _ -> needed_funs
 
 let needed_footprints isa =
-  let ids = List.fold_left (add_needed_footprints isa) IdSet.empty isa.ast in
+  let ids = List.fold_left (add_needed_footprints isa) isa.needed_footprints isa.ast in
   (* Add dependencies *)
   let nodes = List.map (fun id -> Slice.Function id) (IdSet.elements ids) in
   let module NodeSet = Set.Make(Slice.Node) in
