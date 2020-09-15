@@ -33,7 +33,7 @@ let format_lemma l =
   shows ^ String.concat stmt_sep (List.map dquot l.stmts) ^ "\n" ^
   (if l.using = [] then "" else "  using " ^ String.concat " " l.using ^ "\n") ^
   (if l.unfolding = [] then "" else "  unfolding " ^ String.concat " " l.unfolding ^ "\n") ^
-  "  by " ^ l.proof ^ "\n"
+  (if l.proof = "sorry" then "  sorry" else ("  by " ^ l.proof)) ^ "\n"
 
 let apply_override o l =
   (* let using = match (o.using_override, l.using, o.assms_override, l.assms) with
