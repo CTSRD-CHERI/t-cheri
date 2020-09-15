@@ -167,10 +167,12 @@ let load_files ?mutrecs:(mutrecs=IdSet.empty) files =
   Constant_propagation_mutrec.targets := IdSet.elements mutrecs;
   Util.opt_verbosity := 1;
 
-  let _, ast, env = load_files [] Type_check.initial_env files in
-  let ast, env = descatter env ast in
-  let ast, env =
+  let (_, ast, env) = load_files [] Type_check.initial_env files in
+  let (ast, env) = descatter env ast in
+  let (ast, env) =
     List.fold_right (fun file (ast,_) -> Splice.splice ast file)
       (!opt_splice) (ast, env)
   in
-  rewrite_ast_target "lem" env ast
+  let (ast, env) = rewrite_ast_target "lem" env ast in
+  Constraint.save_digests ();
+  (ast, env)
