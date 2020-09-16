@@ -1,5 +1,5 @@
 theory Trace_Assumptions
-  imports "Sail.Sail2_state_lemmas" "HOL-Eisbach.Eisbach_Tools"
+  imports "Sail.Sail2_state_lemmas" "HOL-Eisbach.Eisbach_Tools" More_Methods
 begin
 
 section \<open>Trivia\<close>
@@ -404,11 +404,20 @@ lemmas no_reg_write_builtins =
   no_reg_writes_to_read_memt_bytes no_reg_writes_to_read_memt
   no_reg_writes_to_write_mem_ea no_reg_writes_to_write_mem no_reg_writes_to_write_memt
 
-method no_reg_writes_toI uses simp intro =
+declare TrueI[simp_rules_add subset_assms_simp]
+
+method subset_assms uses assms simp =
+  (rule subset_trans[rotated] subsetD contra_subsetD,
+    (rule assms TrueI | assumption),
+    solves \<open>simp_rules_concl subset_assms_simp; simp\<close>)
+
+method no_reg_writes_toI_steps uses simp intro =
   (intro intro runs_no_reg_writes_toI no_reg_writes_runs_no_reg_writes no_reg_writes_toI conjI impI allI;
-    (erule contra_subsetD subset_trans;
-      simp(no_asm) only: simp register_ref.simps insert_subset empty_subsetI insert_iff
-                         empty_iff simp_thms list.simps)?;
+    (subset_assms assms: intro simp: simp)?)
+
+method no_reg_writes_toI uses simp intro =
+  (no_reg_writes_toI_steps simp: simp intro: intro;
+   simp_rules_asm subset_assms_simp;
    auto simp: simp split del: if_split split: option.splits)
 
 abbreviation "exp_fails m \<equiv> (\<forall>t a. \<not>Run m t a)"

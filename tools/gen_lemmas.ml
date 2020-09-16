@@ -131,7 +131,7 @@ let no_reg_writes_to_lemma no_exc isa id =
     "Rs \\<subseteq> {" ^ String.concat ", " reg_names ^ "}"
     (* @ List.concat (List.mapi get_arg_assm f.arg_typs) *)
   in
-  let simps = if regs = [] then "" else " simp: register_defs" in
+  let simps = ""
   let exc_prefix = if no_exc then "runs_" else "" in
   { name = exc_prefix ^ "no_reg_writes_to_" ^ name;
     attrs = "[" ^ exc_prefix ^ "no_reg_writes_toI, simp]"; assms = [];
@@ -432,6 +432,8 @@ let output_cap_lemmas chan (isa : isa) =
   output_line chan  "theory CHERI_Gen_Lemmas";
   output_line chan  "imports CHERI_Instantiation";
   output_line chan  "begin";
+  output_line chan  "";
+  output_line chan  "declare register_defs[simp_rules_add subset_assms_simp]";
   output_line chan  "";
   output_line chan ("context " ^ isa.name ^ "_Axiom_Automaton");
   output_line chan  "begin";
