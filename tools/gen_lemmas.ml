@@ -271,10 +271,16 @@ let arg_assms_of_typquant arg_kids tq =
 
 let traces_enabled_lemma mem isa id =
   let (f, name, call) = get_fun_info ~annot_kids:true isa id in
-  let cap_regs_read = IdSet.inter (special_regs isa) f.trans_regs_read_no_exc in
+  let priv_cap_regs_read = IdSet.inter isa.privileged_regs f.trans_regs_read_no_exc in
+  let nonpriv_cap_regs_read = IdSet.inter (IdSet.diff (special_regs isa) isa.privileged_regs) f.trans_regs_read in
+  let cap_regs_read = IdSet.union priv_cap_regs_read nonpriv_cap_regs_read in
   let cap_reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") (IdSet.elements cap_regs_read) in
   let cap_assm =
-    if ids_overlap cap_regs_read isa.privileged_regs || (writes isa.cap_regs f && not (IdSet.is_empty cap_regs_read)) then
+    if IdSet.subset cap_regs_read isa.privileged_regs && not (writes isa.cap_regs f) && not (IdSet.is_empty cap_regs_read) && not mem then
+      (* The register read axiom allows reading privileged registers in the exception case (ex_traces), although that is not sufficient
+       * to allow use of the read capabilities for general purposes, only for writing the PCC *)
+      ["{" ^ String.concat ", " cap_reg_names ^ "} \\<subseteq> accessible_regs s \\<or> ex_traces"]
+    else if ids_overlap cap_regs_read isa.privileged_regs || (writes isa.cap_regs f && not (IdSet.is_empty cap_regs_read)) then
       ["{" ^ String.concat ", " cap_reg_names ^ "} \\<subseteq> accessible_regs s"]
     else []
   in
