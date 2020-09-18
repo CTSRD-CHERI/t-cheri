@@ -1443,7 +1443,19 @@ lemma traces_enabled_foreachM_inv:
   by (use assms in \<open>induction xs arbitrary: vars s\<close>;
       fastforce intro!: traces_enabledI intro: non_cap_exp_traces_enabledI non_cap_expI)
 
-lemma traces_enabled_foreachM[traces_enabledI]:
+lemma traces_enabled_foreachM_accessible_regs:
+  assumes "Rs \<subseteq> accessible_regs s0" and "Rs \<subseteq> accessible_regs s0 \<Longrightarrow> Rs \<subseteq> accessible_regs s"
+    and "\<And>x vars. x \<in> set xs \<Longrightarrow> runs_no_reg_writes_to (Rs \<inter> (PCC ISA \<union> IDC ISA)) (body x vars)"
+    and "\<And>x vars s. Rs \<subseteq> accessible_regs s \<Longrightarrow> x \<in> set xs \<Longrightarrow> traces_enabled (body x vars) s"
+  shows "traces_enabled (foreachM xs vars body) s"
+proof (intro traces_enabled_foreachM_inv[where P = "\<lambda>vars s. Rs \<subseteq> accessible_regs s"])
+  fix x vars s t vars'
+  assume "Rs \<subseteq> accessible_regs s" and "x \<in> set xs" and "Run (body x vars) t vars'"
+  then show "Rs \<subseteq> accessible_regs (run s t)"
+    by (elim accessible_regs_no_writes_run_subset) (auto intro: assms)
+qed (use assms in auto)
+
+lemma traces_enabled_foreachM:
   assumes "\<And>x vars t. x \<in> set xs \<Longrightarrow> trace_assms t \<Longrightarrow> traces_enabled (body x vars) (run s t)"
   shows "traces_enabled (foreachM xs vars body) s"
 proof (intro traces_enabled_foreachM_inv[where P = "\<lambda>vars s'. \<exists>t. s' = run s t \<and> trace_assms t"])
@@ -1627,12 +1639,21 @@ declare prod.split[where P = "\<lambda>m. traces_enabled m s" for s, traces_enab
 declare sum.split[where P = "\<lambda>m. traces_enabled m s" for s, traces_enabled_split]
 declare bool.split[where P = "\<lambda>m. traces_enabled m s" for s, traces_enabled_split]
 
-method traces_enabled_step uses intro elim =
+method traces_enabled_foreachM_intro uses assms simp =
+  (match conclusion in \<open>traces_enabled (foreachM _ _ _) _\<close> \<Rightarrow>
+     \<open>match assms in Rs_acc: \<open>Rs \<subseteq> accessible_regs _\<close> for Rs \<Rightarrow>
+        \<open>(rule traces_enabled_foreachM_accessible_regs[OF Rs_acc],
+          solves \<open>accessible_regsI\<close>,
+          solves \<open>no_reg_writes_toI simp: simp\<close>)\<close>\<close>
+   | (rule traces_enabled_foreachM))
+
+method traces_enabled_step uses simp intro elim assms =
   ((rule intro allI impI conjI)
     | (erule elim conjE)
     | ((rule traces_enabled_combinatorI traces_enabled_builtin_combinatorsI[rotated], try_simp_traces_enabled))
     | (rule traces_enabledI TrueI)
     | (rule traces_enabled_split[THEN iffD2]; intro allI conjI impI)
+    | (traces_enabled_foreachM_intro assms: assms simp: simp)
     | (rule insert_subset[where B="insert y C" for y C, THEN iffD2], simp(no_asm)))
 
 method traces_enabledI_with methods solve uses intro elim =
@@ -1651,7 +1672,7 @@ method traces_enabledI_with methods solve uses intro elim =
      intro: intro)*)
 
 method traces_enabledI uses simp intro elim assms =
-  (((traces_enabled_step intro: intro elim: elim)+; traces_enabledI simp: simp intro: intro elim: elim assms: assms)
+  (((traces_enabled_step simp: simp intro: intro elim: elim assms: assms)+; traces_enabledI simp: simp intro: intro elim: elim assms: assms)
     | (accessible_regs_step simp: simp assms: assms; solves \<open>traces_enabledI simp: simp intro: intro elim: elim assms: assms\<close>)
     | (derivable_caps_step; solves \<open>traces_enabledI simp: simp intro: intro elim: elim assms: assms\<close>)
     | (solves \<open>no_reg_writes_toI simp: simp\<close>)
