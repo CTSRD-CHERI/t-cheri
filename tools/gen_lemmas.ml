@@ -168,6 +168,20 @@ let fun_requirements isa id =
       checked_reads = IdSet.inter (write_checked_regs isa) f.trans_regs_read }
   else no_requirements
 
+(* Always generate footprints for effectful functions used in loops (the
+ * algorithm below that checks sequences of statements inside blocks for
+ * required footprints might otherwise miss those) *)
+let loop_requirements r =
+  { r with needed_footprints = IdSet.union r.needed_footprints r.called_cap_funs }
+
+let is_loop_combinator id =
+  let combinators = IdSet.of_list (List.map mk_id ["foreach#"; "while#"; "until#"; "while#t"; "until#t"]) in
+  IdSet.mem id combinators
+
+let join_fun_arg_requirements isa id rs =
+  let r = List.fold_left join_requirements (fun_requirements isa id) rs in
+  if is_loop_combinator id then loop_requirements r else r
+
 let reg_requirements isa id =
   { no_requirements with checked_reads = IdSet.inter (write_checked_regs isa) (IdSet.singleton id) }
 
@@ -184,10 +198,12 @@ let check_requirements left right =
 let requirements_alg isa =
   { (Rewriter.pure_exp_alg no_requirements join_requirements) with
     e_id = reg_requirements isa;
-    e_app = (fun (id, rs) -> List.fold_left join_requirements (fun_requirements isa id) rs);
-    e_app_infix = (fun (r1, id, r2) -> List.fold_left join_requirements (fun_requirements isa id) [r1; r2]);
+    e_app = (fun (id, rs) -> join_fun_arg_requirements isa id rs);
+    e_app_infix = (fun (r1, id, r2) -> join_fun_arg_requirements isa id [r1; r2]);
     lEXP_memory = (fun (id, rs) -> List.fold_left join_requirements (fun_requirements isa id) rs);
     e_block = (fun rs -> List.fold_right check_requirements rs no_requirements);
+    e_loop = (fun (_, _, r_cond, r_body) -> join_requirements r_cond (loop_requirements r_body));
+    e_for = (fun (_, r1, r2, r3, _, r_body) -> List.fold_left join_requirements (loop_requirements r_body) [r1; r2; r3]);
     e_let = (fun (r1, r2) -> check_requirements r1 r2);
     e_internal_plet = (fun (r1, r2, r3) -> List.fold_right check_requirements [r1; r2; r3] no_requirements);
     pat_when = (fun (r1, r2, r3) -> List.fold_right check_requirements [r1; r2; r3] no_requirements); }
