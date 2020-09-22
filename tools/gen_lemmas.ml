@@ -234,7 +234,12 @@ let needed_footprints isa =
 
 let return_caps_derivable_lemma isa id =
   let (f, name, call) = get_fun_info isa id in
-  let cap_regs_read = IdSet.inter (special_regs isa) f.trans_regs_read_no_exc in
+  let priv_cap_regs_read =
+    if ids_overlap isa.system_access_checks f.trans_calls then IdSet.empty else
+    IdSet.inter isa.privileged_regs f.trans_regs_read_no_exc
+  in
+  let nonpriv_cap_regs_read = IdSet.inter (IdSet.diff (special_regs isa) isa.privileged_regs) f.trans_regs_read in
+  let cap_regs_read = IdSet.union priv_cap_regs_read nonpriv_cap_regs_read in
   let cap_reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") (IdSet.elements cap_regs_read) in
   let get_arg_assm i r = if (is_cap_typ isa (base_typ_of isa r)) then ["arg" ^ string_of_int i ^ " \\<in> derivable_caps s \\<Longrightarrow> "] else [] in
   let arg_assm = String.concat "" (List.concat (List.mapi get_arg_assm f.arg_typs)) in
@@ -242,10 +247,11 @@ let return_caps_derivable_lemma isa id =
     if IdSet.is_empty cap_regs_read then "" else
     ("{" ^ String.concat ", " cap_reg_names ^ "} \\<subseteq> accessible_regs s \\<Longrightarrow> ")
   in
+  let sysreg_assms = if ids_overlap isa.system_access_checks f.trans_calls then "sysreg_trace_assms t \\<Longrightarrow> " else "" in
   let (next_state, next_stateI) = if is_cap_fun isa f then ("(run s t)", "") else ("s", "non_cap_exp_insert_run s, ") in
   { name = name ^ "_derivable"; attrs = "[derivable_capsE]";
     assms = [];
-    stmts = ["Run (" ^ call ^ ") t c \\<Longrightarrow> " ^ arg_assm ^ access_assm ^ "c \\<in> derivable_caps " ^ next_state];
+    stmts = ["Run (" ^ call ^ ") t c \\<Longrightarrow> " ^ arg_assm ^ access_assm ^ sysreg_assms ^ "c \\<in> derivable_caps " ^ next_state];
     unfolding = []; using = [];
     proof = "(" ^ next_stateI ^ "unfold " ^ name ^ "_def, derivable_capsI)" }
   |> apply_lemma_override isa id "derivable_caps"
@@ -287,7 +293,10 @@ let arg_assms_of_typquant arg_kids tq =
 
 let traces_enabled_lemma mem isa id =
   let (f, name, call) = get_fun_info ~annot_kids:true isa id in
-  let priv_cap_regs_read = IdSet.inter isa.privileged_regs f.trans_regs_read_no_exc in
+  let priv_cap_regs_read =
+    if ids_overlap isa.system_access_checks f.trans_calls then IdSet.empty else
+    IdSet.inter isa.privileged_regs f.trans_regs_read_no_exc
+  in
   let nonpriv_cap_regs_read = IdSet.inter (IdSet.diff (special_regs isa) isa.privileged_regs) f.trans_regs_read in
   let cap_regs_read = IdSet.union priv_cap_regs_read nonpriv_cap_regs_read in
   let cap_reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") (IdSet.elements cap_regs_read) in

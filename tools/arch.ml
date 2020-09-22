@@ -12,6 +12,7 @@ type isa =
     type_env : Type_check.Env.t;
     cap_regs : IdSet.t;
     privileged_regs : IdSet.t;
+    system_access_checks : IdSet.t;
     pcc_regs : IdSet.t;
     idc_regs : IdSet.t;
     conf_regs : IdSet.t;
@@ -149,6 +150,7 @@ let load_isa file src_dir =
     type_env;
     cap_regs;
     privileged_regs = optional_idset (member "privileged_regs" arch);
+    system_access_checks = optional_idset (member "system_access_checks" arch);
     pcc_regs = optional_idset (member "pcc" arch);
     idc_regs = optional_idset (member "idc" arch);
     conf_regs;
