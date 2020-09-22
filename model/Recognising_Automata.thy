@@ -1435,20 +1435,74 @@ proof (use assms in \<open>induction "from" to step arbitrary: vars s rule: inde
     by (auto intro: non_cap_exp_return[THEN non_cap_exp_traces_enabledI])
 qed
 
+lemma traces_enabled_foreachM_index_list_inv2:
+  assumes "\<And>idx var_a var_b t.
+              Inv idx var_a var_b (run s t) \<Longrightarrow>
+              min from to \<le> idx \<Longrightarrow> idx \<le> max from to \<Longrightarrow>
+              trace_assms t \<Longrightarrow>
+              traces_enabled (body idx (var_a, var_b)) (run s t)"
+    and "\<And>idx var_a var_b t t' var_a' var_b'.
+              Inv idx var_a var_b (run s t) \<Longrightarrow>
+              min from to \<le> min idx (idx + step) \<Longrightarrow> max idx (idx + step) \<le> max from to \<Longrightarrow>
+              Run (body idx (var_a, var_b)) t' (var_a', var_b') \<Longrightarrow> trace_assms t \<Longrightarrow> trace_assms t' \<Longrightarrow>
+              Inv (idx + step) var_a' var_b' (run (run s t) t')"
+    and "(step > 0 \<and> from \<le> to) \<or> (step < 0 \<and> from \<ge> to) \<Longrightarrow> Inv from var_a var_b s"
+  shows "traces_enabled (foreachM (index_list from to step) (var_a, var_b) body) s"
+  using assms
+  by (intro traces_enabled_foreachM_index_list_inv[where Inv = "\<lambda>idx vars s. case vars of (var_a, var_b) \<Rightarrow> Inv idx var_a var_b s"]) auto
+
+lemma traces_enabled_foreachM_index_list_inv3:
+  assumes "\<And>idx var_a var_b var_c t.
+              Inv idx var_a var_b var_c (run s t) \<Longrightarrow>
+              min from to \<le> idx \<Longrightarrow> idx \<le> max from to \<Longrightarrow>
+              trace_assms t \<Longrightarrow>
+              traces_enabled (body idx (var_a, var_b, var_c)) (run s t)"
+    and "\<And>idx var_a var_b var_c t t' var_a' var_b' var_c'.
+              Inv idx var_a var_b var_c (run s t) \<Longrightarrow>
+              min from to \<le> min idx (idx + step) \<Longrightarrow> max idx (idx + step) \<le> max from to \<Longrightarrow>
+              Run (body idx (var_a, var_b, var_c)) t' (var_a', var_b', var_c') \<Longrightarrow> trace_assms t \<Longrightarrow> trace_assms t' \<Longrightarrow>
+              Inv (idx + step) var_a' var_b' var_c' (run (run s t) t')"
+    and "(step > 0 \<and> from \<le> to) \<or> (step < 0 \<and> from \<ge> to) \<Longrightarrow> Inv from var_a var_b var_c s"
+  shows "traces_enabled (foreachM (index_list from to step) (var_a, var_b, var_c) body) s"
+  using assms
+  by (intro traces_enabled_foreachM_index_list_inv2[where Inv = "\<lambda>idx var_a vars s. case vars of (var_b, var_c) \<Rightarrow> Inv idx var_a var_b var_c s"]) auto
+
 lemma traces_enabled_foreachM_inv:
-  assumes "\<And>x vars s. P vars s \<Longrightarrow> x \<in> set xs \<Longrightarrow> traces_enabled (body x vars) s"
-    and "\<And>x vars s t vars'. P vars s \<Longrightarrow> x \<in> set xs \<Longrightarrow> Run (body x vars) t vars' \<Longrightarrow> trace_assms t \<Longrightarrow> P vars' (run s t)"
-    and "P vars s"
+  assumes "\<And>x vars t. Inv vars (run s t) \<Longrightarrow> x \<in> set xs \<Longrightarrow> traces_enabled (body x vars) (run s t)"
+    and "\<And>x vars t t' vars'. Inv vars (run s t) \<Longrightarrow> x \<in> set xs \<Longrightarrow> Run (body x vars) t' vars' \<Longrightarrow> trace_assms t' \<Longrightarrow> Inv vars' (run (run s t) t')"
+    and "Inv vars s"
   shows "traces_enabled (foreachM xs vars body) s"
-  by (use assms in \<open>induction xs arbitrary: vars s\<close>;
-      fastforce intro!: traces_enabledI intro: non_cap_exp_traces_enabledI non_cap_expI)
+proof (use assms in \<open>induction xs arbitrary: vars s\<close>)
+  case (Cons x xs vars s)
+  note body = Cons.prems(1)
+  note Inv_step = Cons.prems(2)
+  note Inv_base = Cons.prems(3)
+  have "traces_enabled (body x vars \<bind> (\<lambda>vars'. foreachM xs vars' body)) s"
+  proof (rule traces_enabled_bind)
+    show "traces_enabled (body x vars) s"
+      using body[of vars "[]" x] Inv_base
+      by auto
+  next
+    fix t vars'
+    assume t: "Run (body x vars) t vars'" "trace_assms t"
+    note body' = body[of _ "t @ t'" for t', simplified]
+    note Inv_step' = Inv_step[of _ "t @ t'" for t', simplified]
+    note Inv_base' = Inv_step[of vars "[]" x t vars', simplified]
+    show "traces_enabled (foreachM xs vars' body) (run s t)"
+      using t Inv_base
+      by (intro Cons.IH) (auto intro: body' Inv_step' Inv_base')
+  qed
+  then show "traces_enabled (foreachM (x # xs) vars body) s"
+    by auto
+qed (auto intro: non_cap_exp_traces_enabledI non_cap_expI)
 
 lemma traces_enabled_foreachM_accessible_regs:
   assumes "Rs \<subseteq> accessible_regs s0" and "Rs \<subseteq> accessible_regs s0 \<Longrightarrow> Rs \<subseteq> accessible_regs s"
     and "\<And>x vars. x \<in> set xs \<Longrightarrow> runs_no_reg_writes_to (Rs \<inter> (PCC ISA \<union> IDC ISA)) (body x vars)"
-    and "\<And>x vars s. Rs \<subseteq> accessible_regs s \<Longrightarrow> x \<in> set xs \<Longrightarrow> traces_enabled (body x vars) s"
+    and "\<And>x vars t. Rs \<subseteq> accessible_regs (run s t) \<Longrightarrow> x \<in> set xs \<Longrightarrow> traces_enabled (body x vars) (run s t)"
   shows "traces_enabled (foreachM xs vars body) s"
-proof (intro traces_enabled_foreachM_inv[where P = "\<lambda>vars s. Rs \<subseteq> accessible_regs s"])
+  using assms
+proof (intro traces_enabled_foreachM_inv[where Inv = "\<lambda>vars s. Rs \<subseteq> accessible_regs s"])
   fix x vars s t vars'
   assume "Rs \<subseteq> accessible_regs s" and "x \<in> set xs" and "Run (body x vars) t vars'"
   then show "Rs \<subseteq> accessible_regs (run s t)"
@@ -1458,7 +1512,7 @@ qed (use assms in auto)
 lemma traces_enabled_foreachM:
   assumes "\<And>x vars t. x \<in> set xs \<Longrightarrow> trace_assms t \<Longrightarrow> traces_enabled (body x vars) (run s t)"
   shows "traces_enabled (foreachM xs vars body) s"
-proof (intro traces_enabled_foreachM_inv[where P = "\<lambda>vars s'. \<exists>t. s' = run s t \<and> trace_assms t"])
+proof (intro traces_enabled_foreachM_inv[where Inv = "\<lambda>vars s'. \<exists>t. s' = run s t \<and> trace_assms t"])
   fix x vars s'
   assume "\<exists>t. s' = run s t \<and> trace_assms t" and "x \<in> set xs"
   then show "traces_enabled (body x vars) s'"
