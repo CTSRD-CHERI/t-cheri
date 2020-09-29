@@ -853,6 +853,40 @@ lemma word_and_mask_shiftl_eq_shiftl[simp]:
 lemma word_and_mask_0_iff_not_testbits: "(w AND mask n) = 0 \<longleftrightarrow> (\<forall>i < n. \<not>w !! i)"
   using test_bit_size[of w] by (auto simp: word_ao_nth word_eq_iff word_size)
 
+lemma word_of_int_shiftl:
+  "word_of_int (Bits.shiftl x y) = Bits.shiftl (word_of_int x) y"
+  by (auto simp: word_eq_iff nth_shiftl)
+
+lemma shiftl_mask_eq_0:
+  "m \<le> n \<Longrightarrow> (x << n) AND mask m = 0"
+  by (simp add: word_eq_iff word_ops_nth_size nth_shiftl word_size)
+
+lemma test_bit_plus_mask_zero:
+  assumes high_eq: "x AND NOT (mask k) = y AND NOT (mask k)"
+    and low: "z AND mask k = 0"
+    and test: "n < k \<longrightarrow> test_bit x n = test_bit y n"
+  shows "test_bit (x + z) n = test_bit (y + z) n"
+proof -
+  have P: "(x + z) AND (NOT (mask k)) = (y + z) AND (NOT (mask k))"
+    apply (simp only: word_minus_word_and_mask[symmetric])
+    apply (simp add: word_plus_and_mask low word_and_le1 high_eq)
+    done
+
+  have Q: "(x + z) AND mask k = x AND mask k"
+    by (simp add: word_plus_and_mask low word_and_le1)
+
+  have R: "(y + z) AND mask k = y AND mask k"
+    by (simp add: word_plus_and_mask low word_and_le1)
+
+  from P Q R test show ?thesis
+    apply (simp add: word_eq_iff)
+    apply (drule spec[where x=n])+
+    apply (simp add: word_ops_nth_size word_size)
+    apply ((intro iffI; elim impCE; (frule test_bit_size)?), simp_all add: word_size)
+     apply auto
+    done
+qed
+
 subsection \<open>@{const slice}\<close>
 
 text \<open>We see @{const ucast} as a special case of @{const slice}.\<close>
