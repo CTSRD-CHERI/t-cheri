@@ -235,6 +235,12 @@ lemma runs_no_reg_writes_to_if[simp, runs_no_reg_writes_toI]:
   using assms
   by auto
 
+lemma runs_no_reg_writes_to_if_no_asm:
+  assumes "runs_no_reg_writes_to Rs m1" and "runs_no_reg_writes_to Rs m2"
+  shows "runs_no_reg_writes_to Rs (if c then m1 else m2)"
+  using assms
+  by auto
+
 lemma no_reg_writes_to_case_prod[intro, simp, no_reg_writes_toI]:
   assumes "\<And>x y. no_reg_writes_to Rs (f x y)"
   shows "no_reg_writes_to Rs (case z of (x, y) \<Rightarrow> f x y)"
