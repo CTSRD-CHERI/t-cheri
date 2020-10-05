@@ -371,9 +371,21 @@ fun trace_allows_system_reg_access where
      (allows_system_reg_access (accessible_regs s) e \<or>
       trace_allows_system_reg_access t (axiom_step s e))"
 
+lemma trace_allows_system_reg_access_append[simp]:
+  "trace_allows_system_reg_access (t1 @ t2) s
+  \<longleftrightarrow> trace_allows_system_reg_access t1 s \<or> trace_allows_system_reg_access t2 (run s t1)"
+  by (induction t1 arbitrary: t2 s) auto
+
 lemma system_reg_access_run_iff:
   "system_reg_access (run s t) \<longleftrightarrow> system_reg_access s \<or> trace_allows_system_reg_access t s"
   by (induction t s rule: trace_allows_system_reg_access.induct) auto
+
+lemma system_reg_access_accessible_regs:
+  assumes "system_reg_access s"
+    and "Rs - (privileged_regs ISA - (PCC ISA \<union> IDC ISA)) \<subseteq> accessible_regs s"
+  shows "Rs \<subseteq> accessible_regs s"
+  using assms
+  by (auto simp: accessible_regs_def)
 
 lemmas step_defs = axiom_step_def reads_mem_cap_def
 
@@ -802,24 +814,24 @@ lemma non_special_regs_accessible:
   using that
   by (auto simp: accessible_regs_def)
 
+lemma accessible_regs_no_writes_trace:
+  assumes "r \<in> PCC ISA \<union> IDC ISA \<longrightarrow> (\<forall>v. E_write_reg r v \<notin> set t)"
+    and "r \<in> accessible_regs s"
+  shows "r \<in> accessible_regs (run s t)"
+proof (use assms in \<open>induction t arbitrary: s\<close>)
+  case (Cons e t)
+  show ?case
+    using Cons.prems Cons.IH[of "axiom_step s e"]
+    by (auto simp: accessible_regs_def)
+qed simp
+
 lemma accessible_regs_no_writes_run:
   assumes t: "Run m t a"
     and m: "r \<in> PCC ISA \<union> IDC ISA \<longrightarrow> runs_no_reg_writes_to {r} m"
     and s: "r \<in> accessible_regs s"
   shows "r \<in> accessible_regs (run s t)"
-proof -
-  have no_write: "r \<in> PCC ISA \<union> IDC ISA \<longrightarrow> (\<forall>v. E_write_reg r v \<notin> set t)"
-    using m t
-    by (auto simp: runs_no_reg_writes_to_def)
-  show ?thesis
-  proof (use s no_write in \<open>induction t arbitrary: s\<close>)
-    case (Cons e t)
-    then have "r \<in> accessible_regs (axiom_step s e)"
-      and "r \<in> PCC ISA \<union> IDC ISA \<longrightarrow> (\<forall>v. E_write_reg r v \<notin> set t)"
-      by (auto simp: accessible_regs_def)
-    from Cons.IH[OF this] show ?case by auto
-  qed auto
-qed
+  using assms
+  by (intro accessible_regs_no_writes_trace) (auto simp: runs_no_reg_writes_to_def)
 
 lemma no_reg_writes_to_mono:
   assumes "runs_no_reg_writes_to Rs m"
@@ -912,6 +924,17 @@ lemma accessed_mem_caps_derivable_mem_caps:
 definition accessed_mem_cap_of_trace_if_tagged where
   "accessed_mem_cap_of_trace_if_tagged c t \<equiv>
      is_tagged_method CC c \<longrightarrow> c \<in> accessed_mem_caps_of_trace t"
+
+lemma accessed_mem_cap_of_trace_if_tagged_append[simp]:
+  "accessed_mem_cap_of_trace_if_tagged c (t @ t') \<longleftrightarrow>
+   accessed_mem_cap_of_trace_if_tagged c t \<or> accessed_mem_cap_of_trace_if_tagged c t'"
+  by (auto simp: accessed_mem_cap_of_trace_if_tagged_def)
+
+lemma untagged_accessed_mem_cap_of_trace[simp]:
+  assumes "\<not>is_tagged_method CC c"
+  shows "accessed_mem_cap_of_trace_if_tagged c t"
+  using assms
+  by (auto simp: accessed_mem_cap_of_trace_if_tagged_def)
 
 lemma accessed_mem_cap_of_trace_derivable_mem_cap:
   assumes "accessed_mem_cap_of_trace_if_tagged c t"
