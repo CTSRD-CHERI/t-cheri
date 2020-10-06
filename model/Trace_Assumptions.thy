@@ -229,6 +229,12 @@ lemma no_reg_writes_to_if[simp, no_reg_writes_toI]:
   using assms
   by auto
 
+lemma no_reg_writes_to_if_no_asm:
+  assumes "no_reg_writes_to Rs m1" and "no_reg_writes_to Rs m2"
+  shows "no_reg_writes_to Rs (if c then m1 else m2)"
+  using assms
+  by auto
+
 lemma runs_no_reg_writes_to_if[simp, runs_no_reg_writes_toI]:
   assumes "c \<Longrightarrow> runs_no_reg_writes_to Rs m1" and "\<not>c \<Longrightarrow> runs_no_reg_writes_to Rs m2"
   shows "runs_no_reg_writes_to Rs (if c then m1 else m2)"
@@ -413,7 +419,7 @@ lemmas no_reg_write_builtins =
 declare TrueI[simp_rules_add subset_assms_simp]
 
 method subset_assms uses assms simp =
-  (rule subset_trans[rotated] subsetD contra_subsetD,
+  (rule subset_trans subsetD contra_subsetD,
     (rule assms TrueI | assumption),
     solves \<open>simp_rules_concl subset_assms_simp; simp\<close>)
 
