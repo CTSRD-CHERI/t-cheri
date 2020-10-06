@@ -131,13 +131,12 @@ let no_reg_writes_to_lemma no_exc isa id =
     "Rs \\<subseteq> {" ^ String.concat ", " reg_names ^ "}"
     (* @ List.concat (List.mapi get_arg_assm f.arg_typs) *)
   in
-  let simps = ""
   let exc_prefix = if no_exc then "runs_" else "" in
   { name = exc_prefix ^ "no_reg_writes_to_" ^ name;
     attrs = "[" ^ exc_prefix ^ "no_reg_writes_toI, simp]"; assms = [];
     stmts = [assm ^ " \\<Longrightarrow> " ^ exc_prefix ^ "no_reg_writes_to Rs (" ^ call ^ ")"];
     unfolding = []; using = [];
-    proof = "(unfold " ^ name ^ "_def bind_assoc, no_reg_writes_toI" ^ simps ^ ")" }
+    proof = "(unfold " ^ name ^ "_def bind_assoc, no_reg_writes_toI)" }
   |> apply_lemma_override isa id (exc_prefix ^ "no_reg_writes_to")
 
 (* We (currently) only need register write footprints of functions that have
