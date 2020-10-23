@@ -1490,6 +1490,176 @@ lemma traces_enabled_foreachM_index_list_inv3:
   using assms
   by (intro traces_enabled_foreachM_index_list_inv2[where Inv = "\<lambda>idx var_a vars s. case vars of (var_b, var_c) \<Rightarrow> Inv idx var_a var_b var_c s"]) auto
 
+lemma mult_add_eq_add1_mult:
+  fixes x y :: int
+  shows "x * y + x = (y + 1) * x"
+  by (auto simp: algebra_simps)
+
+lemma foreachM_index_list_inv_post:
+  assumes "Run (foreachM (index_list from to step) vars body) t vars'" and "trace_assms t"
+    and "\<And>idx vars t t' vars'.
+              Inv idx vars (run s t) \<Longrightarrow>
+              min from to \<le> idx \<Longrightarrow> idx \<le> max from to \<Longrightarrow>
+              Run (body idx vars) t' vars' \<Longrightarrow> trace_assms t \<Longrightarrow> trace_assms t' \<Longrightarrow>
+              Inv (idx + step) vars' (run (run s t) t')"
+    and "Inv from vars s"
+    and "((step > 0 \<and> from \<le> to) \<or> (step < 0 \<and> from \<ge> to)) \<and> step dvd (to - from)"
+  shows "Inv (to + step) vars' (run s t)"
+proof (use assms in \<open>induction "from" to step arbitrary: vars s t rule: index_list.induct[case_names Step]\<close>)
+  case (Step "from" to step vars s t)
+  define k0 where "k0 \<equiv> from mod step"
+  define k_from where "k_from \<equiv> from div step"
+  define k_to where "k_to \<equiv> to div step"
+  have "step * (to div step) + (to mod step) = step * (to div step) + (from mod step)"
+    using Step.prems(5)
+    by (auto simp flip: mod_eq_dvd_iff)
+  then have k_from: "from = step * k_from + k0" and k_to: "to = step * k_to + k0"
+    by (auto simp: k0_def k_from_def k_to_def)
+  from Step obtain tb tf vars''
+    where tb: "Run (body from vars) tb vars'' \<and> trace_assms tb"
+      and tf: "Run (foreachM (index_list (from + step) to step) vars'' body) tf vars' \<and> trace_assms tf"
+      and t: "t = tb @ tf"
+    unfolding index_list.simps[of "from" to step]
+    by (auto elim!: Run_bindE)
+  have Inv': "Inv (from + step) vars'' (run s tb)"
+    using tb Step.prems(4,5)
+    by (intro Step.prems(3)[of "from" vars "[]" tb vars'', simplified]) auto
+  show ?case
+  proof (cases "(step > 0 \<and> from + step \<le> to) \<or> (step < 0 \<and> from + step \<ge> to)")
+    case True
+    then show ?thesis
+      using Inv' tb tf Step.prems(5)
+      unfolding t foldl_append
+      by (intro Step.IH[of vars'' tf "run s tb"])
+         (auto intro: Step.prems(3)[of _ _ "tb @ t" for t, simplified] simp: k_from k_to)
+  next
+    case False
+    then have "tf = []" and "vars'' = vars'" and "to = from"
+      using tf Step.prems(5)
+      unfolding index_list.simps[of "from + step"]
+      by (auto simp: k_from k_to mult_add_eq_add1_mult)
+    then show ?thesis
+      using Inv' t
+      by simp
+  qed
+qed
+
+lemma traces_enabled_double_foreachM_index_list_invs:
+  assumes Body: "\<And>idx_a idx_b vars t.
+              Inv_b idx_a idx_b vars (run s t) \<Longrightarrow>
+              min from_a to_a \<le> idx_a \<Longrightarrow> idx_a \<le> max from_a to_a \<Longrightarrow>
+              min (from_b idx_a) (to_b idx_a) \<le> idx_b \<Longrightarrow> idx_b \<le> max (from_b idx_a) (to_b idx_a) \<Longrightarrow>
+              trace_assms t \<Longrightarrow>
+              traces_enabled (body idx_a idx_b vars) (run s t)"
+    and Inv_ab: "\<And>idx_a vars t.
+              Inv_a idx_a (from_b idx_a) vars (run s t) \<Longrightarrow>
+              min from_a to_a \<le> idx_a \<Longrightarrow> idx_a \<le> max from_a to_a \<Longrightarrow>
+              trace_assms t \<Longrightarrow>
+              Inv_b idx_a (from_b idx_a) (f idx_a vars) (run s t)"
+    and Step: "\<And>idx_a idx_b vars t t' vars'.
+              Inv_b idx_a idx_b vars (run s t) \<Longrightarrow>
+              min from_a to_a \<le> idx_a \<Longrightarrow> idx_a \<le> max from_a to_a \<Longrightarrow>
+              min (from_b idx_a) (to_b idx_a) \<le> idx_b \<Longrightarrow> idx_b \<le> max (from_b idx_a) (to_b idx_a) \<Longrightarrow>
+              Run (body idx_a idx_b vars) t' vars' \<Longrightarrow> trace_assms t \<Longrightarrow> trace_assms t' \<Longrightarrow>
+              Inv_b idx_a (idx_b + step_b idx_a) vars' (run (run s t) t')"
+    and Inv_ba: "\<And>idx_a vars t.
+              Inv_b idx_a (to_b idx_a + step_b idx_a) vars (run s t) \<Longrightarrow>
+              min from_a to_a \<le> min idx_a (idx_a + step_a) \<Longrightarrow> max idx_a (idx_a + step_a) \<le> max from_a to_a \<Longrightarrow>
+              trace_assms t \<Longrightarrow>
+              Inv_a (idx_a + step_a) (from_b (idx_a + step_a)) vars (run s t)"
+    and Init: "(step_a > 0 \<and> from_a \<le> to_a) \<or> (step_a < 0 \<and> from_a \<ge> to_a) \<Longrightarrow> Inv_a from_a (from_b from_a) vars s"
+    and Idx_b: "\<And>idx_a. ((step_b idx_a > 0 \<and> from_b idx_a \<le> to_b idx_a) \<or> (step_b idx_a < 0 \<and> from_b idx_a \<ge> to_b idx_a)) \<and> step_b idx_a dvd to_b idx_a - from_b idx_a"
+  shows "traces_enabled (foreachM (index_list from_a to_a step_a) vars (\<lambda>idx_a vars. foreachM (index_list (from_b idx_a) (to_b idx_a) (step_b idx_a)) (f idx_a vars) (body idx_a))) s"
+proof (rule traces_enabled_foreachM_index_list_inv[where Inv = "\<lambda>idx_a vars s. Inv_a idx_a (from_b idx_a) vars s"], goal_cases Inner Step_a Base)
+  case (Inner idx_a vars t)
+  note Body' = Body[of idx_a _ _ "t @ t'" for t', simplified]
+  note Step' = Step[of idx_a _ _ "t @ t'" for t', simplified]
+  show ?case
+    using Inner
+    by (intro traces_enabled_foreachM_index_list_inv[where Inv = "Inv_b idx_a"])
+       (auto intro: Body' Step' Inv_ab)
+next
+  case (Step_a idx_a vars t t' vars')
+  then show ?case
+    using Idx_b[of idx_a]
+    by (intro foreachM_index_list_inv_post[where Inv = "Inv_b idx_a", THEN Inv_ba[of concl: _ _ "t @ t'", simplified]])
+       (auto intro: Step[of idx_a _ _ "t @ t''" for t'', simplified] Inv_ab)
+next
+  case Base
+  then show ?case
+    by (rule assms(5))
+qed
+
+lemma traces_enabled_triple_foreachM_index_list_invs:
+  assumes Body: "\<And>idx_a idx_b idx_c vars t.
+              Inv_c idx_a idx_b idx_c vars (run s t) \<Longrightarrow>
+              min from_a to_a \<le> idx_a \<Longrightarrow> idx_a \<le> max from_a to_a \<Longrightarrow>
+              min (from_b idx_a) (to_b idx_a) \<le> idx_b \<Longrightarrow> idx_b \<le> max (from_b idx_a) (to_b idx_a) \<Longrightarrow>
+              min (from_c idx_a idx_b) (to_c idx_a idx_b) \<le> idx_c \<Longrightarrow> idx_c \<le> max (from_c idx_a idx_b) (to_c idx_a idx_b) \<Longrightarrow>
+              trace_assms t \<Longrightarrow>
+              traces_enabled (body idx_a idx_b idx_c vars) (run s t)"
+    and Inv_ab: "\<And>idx_a vars t.
+              Inv_a idx_a (from_b idx_a) (from_c idx_a (from_b idx_a)) vars (run s t) \<Longrightarrow>
+              min from_a to_a \<le> idx_a \<Longrightarrow> idx_a \<le> max from_a to_a \<Longrightarrow>
+              trace_assms t \<Longrightarrow>
+              Inv_b idx_a (from_b idx_a) (from_c idx_a (from_b idx_a)) (f idx_a vars) (run s t)"
+    and Inv_bc: "\<And>idx_a idx_b vars t.
+              Inv_b idx_a idx_b (from_c idx_a idx_b) vars (run s t) \<Longrightarrow>
+              min from_a to_a \<le> idx_a \<Longrightarrow> idx_a \<le> max from_a to_a \<Longrightarrow>
+              min (from_b idx_a) (to_b idx_a) \<le> idx_b \<Longrightarrow> idx_b \<le> max (from_b idx_a) (to_b idx_a) \<Longrightarrow>
+              trace_assms t \<Longrightarrow>
+              Inv_c idx_a idx_b (from_c idx_a idx_b) (g idx_a idx_b vars) (run s t)"
+    and Step: "\<And>idx_a idx_b idx_c vars t t' vars'.
+              Inv_c idx_a idx_b idx_c vars (run s t) \<Longrightarrow>
+              min from_a to_a \<le> idx_a \<Longrightarrow> idx_a \<le> max from_a to_a \<Longrightarrow>
+              min (from_b idx_a) (to_b idx_a) \<le> idx_b \<Longrightarrow> idx_b \<le> max (from_b idx_a) (to_b idx_a) \<Longrightarrow>
+              min (from_c idx_a idx_b) (to_c idx_a idx_b) \<le> idx_c \<Longrightarrow> idx_c \<le> max (from_c idx_a idx_b) (to_c idx_a idx_b) \<Longrightarrow>
+              Run (body idx_a idx_b idx_c vars) t' vars' \<Longrightarrow> trace_assms t \<Longrightarrow> trace_assms t' \<Longrightarrow>
+              Inv_c idx_a idx_b (idx_c + step_c idx_a idx_b) vars' (run (run s t) t')"
+    and Inv_cb: "\<And>idx_a idx_b vars t t'.
+              Inv_c idx_a idx_b (to_c idx_a idx_b + step_c idx_a idx_b) vars (run (run s t) t') \<Longrightarrow>
+              min from_a to_a \<le> idx_a \<Longrightarrow> idx_a \<le> max from_a to_a \<Longrightarrow>
+              min (from_b idx_a) (to_b idx_a) \<le> idx_b \<Longrightarrow> idx_b \<le> max (from_b idx_a) (to_b idx_a) \<Longrightarrow>
+              trace_assms t \<Longrightarrow> trace_assms t' \<Longrightarrow>
+              Inv_b idx_a (idx_b + step_b idx_a) (from_c idx_a (idx_b + step_b idx_a)) vars (run (run s t) t')"
+    and Inv_ba: "\<And>idx_a vars t.
+              Inv_b idx_a (to_b idx_a + step_b idx_a) (from_c idx_a (to_b idx_a + step_b idx_a)) vars (run s t) \<Longrightarrow>
+              min from_a to_a \<le> min idx_a (idx_a + step_a) \<Longrightarrow> max idx_a (idx_a + step_a) \<le> max from_a to_a \<Longrightarrow>
+              trace_assms t \<Longrightarrow>
+              Inv_a (idx_a + step_a) (from_b (idx_a + step_a)) (from_c (idx_a + step_a) (from_b (idx_a + step_a))) vars (run s t)"
+    and Base_a: "(step_a > 0 \<and> from_a \<le> to_a) \<or> (step_a < 0 \<and> from_a \<ge> to_a) \<Longrightarrow> Inv_a from_a (from_b from_a) (from_c from_a (from_b from_a)) vars s"
+    and Bounds_b: "\<And>idx_a. ((step_b idx_a > 0 \<and> from_b idx_a \<le> to_b idx_a) \<or> (step_b idx_a < 0 \<and> from_b idx_a \<ge> to_b idx_a)) \<and> step_b idx_a dvd to_b idx_a - from_b idx_a"
+    and Bounds_c: "\<And>idx_a idx_b. ((step_c idx_a idx_b > 0 \<and> from_c idx_a idx_b \<le> to_c idx_a idx_b) \<or> (step_c idx_a idx_b < 0 \<and> from_c idx_a idx_b \<ge> to_c idx_a idx_b)) \<and> step_c idx_a idx_b dvd to_c idx_a idx_b - from_c idx_a idx_b"
+  shows "traces_enabled (foreachM (index_list from_a to_a step_a) vars (\<lambda>idx_a vars. foreachM (index_list (from_b idx_a) (to_b idx_a) (step_b idx_a)) (f idx_a vars) (\<lambda>idx_b vars. foreachM (index_list (from_c idx_a idx_b) (to_c idx_a idx_b) (step_c idx_a idx_b)) (g idx_a idx_b vars) (body idx_a idx_b)))) s"
+proof (rule traces_enabled_foreachM_index_list_inv[where Inv = "\<lambda>idx_a vars s. Inv_a idx_a (from_b idx_a) (from_c idx_a (from_b idx_a)) vars s"], goal_cases Inner Step_a Base)
+  case (Inner idx_a vars t)
+  note Body' = Body[of _ _ _ _ "t @ t'" for t', simplified]
+  note Inv_bc' = Inv_bc[of _ _ _ "t @ t'" for t', simplified]
+  note Step' = Step[of _ _ _ _ "t @ t'" for t', simplified]
+  from Inner show ?case
+    using Bounds_c
+    by (intro traces_enabled_double_foreachM_index_list_invs[where Inv_a = "\<lambda>idx_b idx_c vars s. Inv_b idx_a idx_b idx_c vars s" and Inv_b = "\<lambda>idx_b idx_c vars s. Inv_c idx_a idx_b idx_c vars s"])
+       (auto intro: Body' Inv_bc' Step' Inv_cb Inv_ab)
+next
+  case (Step_a idx_a vars t t' vars')
+  note Inv_ba' = Inv_ba[of idx_a vars' "t @ t'", simplified]
+  note Inv_b = foreachM_index_list_inv_post[where Inv = "\<lambda>idx_b vars s. Inv_b idx_a idx_b (from_c idx_a idx_b) vars s" and vars' = vars']
+  note Inv_cb' = Inv_cb[of idx_a _ _ "t @ t''" for t'', simplified]
+  note Inv_c = foreachM_index_list_inv_post[where Inv = "Inv_c idx_a idx_b" and s = "run (run s t) t''" for idx_b t'', simplified]
+  note Step' = Step[of idx_a _ _ _ "t @ t1 @ t2" for t1 t2, simplified]
+  note Inv_bc' = Inv_bc[of _ _ _ "t @ t1" for t1, simplified]
+  from Step_a show ?case
+    using Bounds_b Bounds_c
+    by (elim Inv_b[THEN Inv_ba'] Inv_c[THEN Inv_cb']) (auto intro: Inv_ab Step' Inv_bc')
+next
+  case Base
+  then show ?case
+    by (rule Base_a)
+qed
+
+lemmas traces_enabled_triple_foreachM_index_list_inv =
+  traces_enabled_triple_foreachM_index_list_invs[where Inv_a = Inv and Inv_b = Inv and Inv_c = Inv for Inv]
+
 lemma traces_enabled_foreachM_inv:
   assumes "\<And>x vars t. Inv vars (run s t) \<Longrightarrow> x \<in> set xs \<Longrightarrow> traces_enabled (body x vars) (run s t)"
     and "\<And>x vars t t' vars'. Inv vars (run s t) \<Longrightarrow> x \<in> set xs \<Longrightarrow> Run (body x vars) t' vars' \<Longrightarrow> trace_assms t' \<Longrightarrow> Inv vars' (run (run s t) t')"
