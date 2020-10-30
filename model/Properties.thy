@@ -5,8 +5,8 @@ begin
 locale CHERI_ISA = Capability_ISA CC ISA
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa" +
   fixes fetch_assms :: "'regval trace \<Rightarrow> bool" and instr_assms :: "'regval trace \<Rightarrow> bool"
-  assumes instr_cheri_axioms: "\<And>t instr. hasTrace t \<lbrakk>instr\<rbrakk> \<Longrightarrow> instr_assms t \<Longrightarrow> cheri_axioms CC ISA False (instr_raises_ex ISA instr t) (invokes_caps ISA instr t) (invokes_indirect_caps ISA instr t) t"
-    and fetch_cheri_axioms: "\<And>t. hasTrace t (instr_fetch ISA) \<Longrightarrow> fetch_assms t \<Longrightarrow> cheri_axioms CC ISA True (fetch_raises_ex ISA t) {} {} t"
+  assumes instr_cheri_axioms: "\<And>t instr. hasTrace t \<lbrakk>instr\<rbrakk> \<Longrightarrow> instr_assms t \<Longrightarrow> cheri_axioms CC ISA False (instr_raises_ex ISA instr t) (uses_mem_caps ISA instr t) (invokes_caps ISA instr t) (invokes_indirect_caps ISA instr t) t"
+    and fetch_cheri_axioms: "\<And>t. hasTrace t (instr_fetch ISA) \<Longrightarrow> fetch_assms t \<Longrightarrow> cheri_axioms CC ISA True (fetch_raises_ex ISA t) True {} {} t"
     and instr_assms_appendE: "\<And>t t' instr. instr_assms (t @ t') \<Longrightarrow> Run \<lbrakk>instr\<rbrakk> t () \<Longrightarrow> instr_assms t \<and> fetch_assms t'"
     and fetch_assms_appendE: "\<And>t t' instr. fetch_assms (t @ t') \<Longrightarrow> Run (instr_fetch ISA) t instr \<Longrightarrow> fetch_assms t \<and> instr_assms t'"
 
@@ -384,22 +384,22 @@ lemma system_access_permitted_at_idx_available_caps:
 
 lemma writes_reg_cap_nth_provenance[consumes 5]:
   assumes "t ! i = E_write_reg r v" and "c \<in> caps_of_regval ISA v"
-    and "cheri_axioms CC ISA is_fetch has_ex inv_caps inv_indirect_caps t"
+    and "cheri_axioms CC ISA is_fetch has_ex use_mem_caps inv_caps inv_indirect_caps t"
     and "i < length t"
     and tagged: "is_tagged_method CC c"
-  obtains (Accessible) "c \<in> derivable (available_caps CC ISA (inv_indirect_caps = {}) i t)"
+  obtains (Accessible) "c \<in> derivable (available_caps CC ISA (inv_indirect_caps = {} \<and> use_mem_caps) i t)"
   | (Exception) v' r' j where "c \<in> exception_targets ISA {v. \<exists>r j. j < i \<and> j < length t \<and> t ! j = E_read_reg r v \<and> r \<in> KCC ISA}" (* "leq_cap CC c c'"*)
     (*and "t ! j = E_read_reg r' v'" and "j < i"*) (*and "c' \<in> caps_of_regval ISA v'"*)
     (*and "r' \<in> KCC ISA"*) and "r \<in> PCC ISA" and "has_ex"
-  | (Sentry) cs where "c \<in> inv_caps" and "cs \<in> derivable (available_caps CC ISA (inv_indirect_caps = {}) i t)"
+  | (Sentry) cs where "c \<in> inv_caps" and "cs \<in> derivable (available_caps CC ISA (inv_indirect_caps = {} \<and> use_mem_caps) i t)"
     and "is_sentry_method CC cs" and "is_sealed_method CC cs"
     and "leq_cap CC c (unseal_method CC cs)" and "r \<in> PCC ISA"
   | (IndirectSentry) cs where "c \<in> inv_indirect_caps" and "cs \<in> derivable (available_reg_caps CC ISA i t)"
     and "is_indirect_sentry_method CC cs" and "is_sealed_method CC cs"
     and "leq_cap CC c (unseal_method CC cs)" and "r \<in> IDC ISA"
   | (CCall) cc cd where "c \<in> inv_caps" and "invokable CC cc cd"
-    and "cc \<in> derivable (available_caps CC ISA (inv_indirect_caps = {}) i t)"
-    and "cd \<in> derivable (available_caps CC ISA (inv_indirect_caps = {}) i t)"
+    and "cc \<in> derivable (available_caps CC ISA (inv_indirect_caps = {} \<and> use_mem_caps) i t)"
+    and "cd \<in> derivable (available_caps CC ISA (inv_indirect_caps = {} \<and> use_mem_caps) i t)"
     and "(r \<in> PCC ISA \<and> leq_cap CC c (unseal_method CC cc)) \<or>
          (r \<in> IDC ISA \<and> leq_cap CC c (unseal_method CC cd))"
   | (Indirect) c' where "c \<in> inv_caps"
@@ -501,7 +501,7 @@ lemma reads_mem_cap_at_idx_provenance:
   assumes read: "t ! i = E_read_memt rk addr (tag_granule ISA) (bytes, B1)"
     and c: "cap_of_mem_bytes_method CC bytes B1 = Some c"
     and s': "s_run_trace t s = Some s'"
-    and axioms: "cheri_axioms CC ISA is_fetch has_ex inv_mem_caps inv_caps t"
+    and axioms: "cheri_axioms CC ISA is_fetch has_ex use_mem_caps inv_mem_caps inv_caps t"
     and i: "i < length t"
     and tagged: "is_tagged_method CC c"
     and aligned: "address_tag_aligned ISA addr"
@@ -524,18 +524,18 @@ proof -
 qed
 
 lemma derivable_available_caps_subseteq_reachable_caps:
-  assumes axioms: "cheri_axioms CC ISA is_fetch has_ex inv_caps inv_indirect_caps t"
+  assumes axioms: "cheri_axioms CC ISA is_fetch has_ex use_mem_caps inv_caps inv_indirect_caps t"
     and t: "s_run_trace t s = Some s'"
-  shows "derivable (available_caps CC ISA (inv_indirect_caps = {}) i t) \<subseteq> reachable_caps s"
+  shows "derivable (available_caps CC ISA (inv_indirect_caps = {} \<and> use_mem_caps) i t) \<subseteq> reachable_caps s"
 proof (induction i rule: less_induct)
   case (less i)
   show ?case proof
     fix c
-    assume "c \<in> derivable (available_caps CC ISA (inv_indirect_caps = {}) i t)"
+    assume "c \<in> derivable (available_caps CC ISA (inv_indirect_caps = {} \<and> use_mem_caps) i t)"
     then show "c \<in> reachable_caps s"
     proof induction
       fix c
-      assume "c \<in> available_caps CC ISA (inv_indirect_caps = {}) i t"
+      assume "c \<in> available_caps CC ISA (inv_indirect_caps = {} \<and> use_mem_caps) i t"
       then show "c \<in> reachable_caps s"
       proof (cases rule: available_caps_cases)
         case (Reg r v j)
@@ -548,7 +548,7 @@ proof (induction i rule: less_induct)
             assume r: "r \<in> privileged_regs ISA"
             then obtain c' where c': "c' \<in> reachable_caps s" and "is_tagged_method CC c'"
               and "\<not>is_sealed_method CC c'" and p: "permits_system_access_method CC c'"
-              using Reg less.IH[OF \<open>j < i\<close>] derivable_refl[of "available_caps CC ISA (inv_indirect_caps = {}) j t"]
+              using Reg less.IH[OF \<open>j < i\<close>] derivable_refl[of "available_caps CC ISA (inv_indirect_caps = {} \<and> use_mem_caps) j t"]
               by (auto elim!: system_access_permitted_at_idx_available_caps)
             then show ?thesis
               using Reg
@@ -578,7 +578,7 @@ proof (induction i rule: less_induct)
           by (auto simp: translation_event_at_idx_def)
         then obtain vaddr c'
           where vaddr: "translate_address ISA vaddr Load (take j t) = Some paddr"
-            and c': "c' \<in> derivable (available_caps CC ISA (inv_indirect_caps = {}) j t)"
+            and c': "c' \<in> derivable (available_caps CC ISA (inv_indirect_caps = {} \<and> use_mem_caps) j t)"
                     "is_tagged_method CC c'"
                     "is_sealed_method CC c' \<longrightarrow> is_indirect_sentry_method CC c' \<and> unseal_method CC c' \<in> inv_indirect_caps"
                     "set (address_range vaddr sz) \<subseteq> get_mem_region CC c'"
@@ -586,7 +586,7 @@ proof (induction i rule: less_induct)
                     "permits_load_cap_method CC c'"
             and sz: "sz = tag_granule ISA"
             and aligned: "address_tag_aligned ISA paddr"
-          using read t axioms \<open>j < length t\<close> \<open>is_tagged_method CC c\<close>
+          using read t axioms \<open>j < length t\<close> \<open>is_tagged_method CC c\<close> \<open>inv_indirect_caps = {} \<and> use_mem_caps\<close>
           unfolding cheri_axioms_def
           by (auto elim!: load_mem_axiomE simp: reads_mem_val_at_idx_def cap_derivable_iff_derivable)
         have s_vaddr: "s_translate_address vaddr Load s = Some paddr"
@@ -625,7 +625,7 @@ definition system_access_reachable_plus :: "'cap set \<Rightarrow> 'regs sequent
 lemma get_reg_cap_intra_domain_trace_reachable:
   assumes r: "c \<in> get_reg_caps r s'"
     (*and t: "hasTrace t (instr_sem ISA instr)"*) and s': "s_run_trace t s = Some s'"
-    and axioms: "cheri_axioms CC ISA is_fetch False invoked_caps invoked_indirect_caps t"
+    and axioms: "cheri_axioms CC ISA is_fetch False use_mem_caps invoked_caps invoked_indirect_caps t"
     and C: "invoked_caps \<union> invoked_indirect_caps \<subseteq> C"
     (*and no_exception: "\<not>hasException t (instr_sem ISA instr)"
     and no_ccall: "invoked_caps ISA instr t = {}"*)
@@ -671,11 +671,11 @@ proof -
       from Update have "c \<in> writes_reg_caps CC (caps_of_regval ISA) (t ! j)"
         and "writes_to_reg (t ! j) = Some r"
         using tag by auto
-      then have "c \<in> derivable (available_caps CC ISA (invoked_indirect_caps = {}) j t)"
+      then have "c \<in> derivable (available_caps CC ISA (invoked_indirect_caps = {} \<and> use_mem_caps) j t)"
         using axioms tag \<open>j < length t\<close> c
         unfolding cheri_axioms_def
         by (auto elim!: store_cap_reg_axiomE simp: cap_derivable_iff_derivable)
-      moreover have "derivable (available_caps CC ISA (invoked_indirect_caps = {}) j t) \<subseteq> reachable_caps s"
+      moreover have "derivable (available_caps CC ISA (invoked_indirect_caps = {} \<and> use_mem_caps) j t) \<subseteq> reachable_caps s"
         using axioms s'
         by (intro derivable_available_caps_subseteq_reachable_caps)
       ultimately show ?thesis
@@ -686,7 +686,7 @@ proof -
 qed
 
 lemma reachable_caps_trace_intradomain_monotonicity:
-  assumes axioms: "cheri_axioms CC ISA is_fetch False invoked_caps invoked_indirect_caps t"
+  assumes axioms: "cheri_axioms CC ISA is_fetch False use_mem_caps invoked_caps invoked_indirect_caps t"
     and s': "s_run_trace t s = Some s'"
     and addr_trans_inv: "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t s"
   shows "reachable_caps_plus C s' \<subseteq> reachable_caps_plus (C \<union> invoked_caps \<union> invoked_indirect_caps) s"
@@ -723,7 +723,7 @@ proof
         by (intro reachable_caps_plus.Mem[of addr s c vaddr c']) (auto split: if_splits)
     next
       case (Update k wk bytes r)
-      have "derivable (available_caps CC ISA (invoked_indirect_caps = {}) k t) \<subseteq> reachable_caps s"
+      have "derivable (available_caps CC ISA (invoked_indirect_caps = {} \<and> use_mem_caps) k t) \<subseteq> reachable_caps s"
         using assms axioms
         by (intro derivable_available_caps_subseteq_reachable_caps)
       then have "c \<in> reachable_caps s"
