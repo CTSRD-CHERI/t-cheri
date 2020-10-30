@@ -527,6 +527,12 @@ lemma non_mem_exp_bindI[intro!]:
   using assms
   by (fastforce simp: non_mem_exp_def elim!: bind_Traces_cases)
 
+lemma non_mem_exp_bind_no_asm:
+  assumes "non_mem_exp m" and "\<And>a. non_mem_exp (f a)"
+  shows "non_mem_exp (m \<bind> f)"
+  using assms
+  by (intro non_mem_exp_bindI)
+
 lemma non_cap_exp_try_catch[intro!]:
   assumes m: "non_cap_exp m"
     and h: "\<And>t ex. (m, t, Exception ex) \<in> Traces \<Longrightarrow> non_cap_exp (h ex)"
@@ -695,6 +701,10 @@ lemma non_mem_exp_if:
   shows "non_mem_exp (if c then m1 else m2)"
   using assms
   by auto
+
+lemma non_mem_exp_if_no_asm:
+  "non_mem_exp m1 \<Longrightarrow> non_mem_exp m2 \<Longrightarrow> non_mem_exp (if c then m1 else m2)"
+  by (intro non_mem_exp_if)
 
 lemma non_cap_exp_read_non_cap_reg:
   assumes "non_cap_reg r"
