@@ -25,6 +25,7 @@ type isa =
     needed_footprints : IdSet.t;
     invoked_regs : string list Bindings.t;
     invoked_indirect_regs : string list Bindings.t;
+    load_auths : string list Bindings.t;
     cap_load_funs : IdSet.t;
   }
 
@@ -163,5 +164,6 @@ let load_isa file src_dir =
     needed_footprints = optional_idset (member "needed_footprints" arch);
     invoked_regs = optional_bindings (member "invoked_regs" arch) |> Bindings.map to_string_list;
     invoked_indirect_regs = optional_bindings (member "invoked_indirect_regs" arch) |> Bindings.map to_string_list;
+    load_auths = optional_bindings (member "load_auths" arch) |> Bindings.map to_string_list;
     cap_load_funs = optional_idset (member "cap_load_funs" arch);
   }
