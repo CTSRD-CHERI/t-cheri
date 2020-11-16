@@ -358,7 +358,11 @@ let traces_enabled_lemma mem isa id =
     | Some regs -> List.map (fun r -> r ^ " \\<in> invoked_indirect_regs") regs
     | None -> if IdSet.disjoint f.trans_calls isa.cap_load_funs then [] else ["\\<not>invokes_indirect_caps"]
   in
-  let assms = cap_assm @ arg_assms @ eq_assms @ ret_typ_assm @ invoked_reg_assms @ invoked_indirect_assms in
+  let load_auth_assms = match Bindings.find_opt id isa.load_auths with
+    | Some regs -> List.map (fun r -> r ^ " \\<in> load_auths") regs
+    | None -> []
+  in
+  let assms = cap_assm @ arg_assms @ eq_assms @ ret_typ_assm @ invoked_reg_assms @ invoked_indirect_assms @ load_auth_assms in
   let using = if assms = [] then "" else " assms: assms" in
   { name = "traces_enabled_" ^ name; attrs = "[traces_enabledI]";
     assms; unfolding = [(name ^ "_def"); "bind_assoc"]; using = [];
