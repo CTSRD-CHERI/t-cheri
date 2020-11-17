@@ -19,6 +19,7 @@ type isa =
     cap_types : typ list;
     fun_infos : Analyse_sail.fun_info Bindings.t;
     fun_renames : string Bindings.t;
+    arg_renames : string Bindings.t;
     lemma_overrides : lemma_override StringMap.t Bindings.t;
     reg_ref_renames : string Bindings.t;
     skip_funs : IdSet.t;
@@ -146,6 +147,8 @@ let load_isa file src_dir =
     (name :: orig_names, fun_renames)
   in
   let fun_renames = snd (List.fold_left add_fun_rename ([], fun_renames) (Analyse_sail.fun_ids ast)) in
+  let add_arg_rename id arg_renames = Bindings.add id (string_of_id id ^ "__arg") arg_renames in
+  let arg_renames = IdSet.fold add_arg_rename (optional_idset (member "reserved_ids" arch)) Bindings.empty in
   { name = to_string (member "name" arch);
     ast;
     type_env;
@@ -158,6 +161,7 @@ let load_isa file src_dir =
     cap_types;
     fun_infos;
     fun_renames;
+    arg_renames;
     lemma_overrides;
     reg_ref_renames = Bindings.map to_string (optional_bindings (member "reg_ref_renames" arch));
     skip_funs = optional_idset (member "skips" arch);
