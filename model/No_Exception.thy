@@ -281,7 +281,7 @@ lemmas monad_no_exception_Choose_return =
     monad_no_exception_Choose[rule_format, OF monad_no_exception_return, simplified]
 
 ML \<open>
-structure Monad_Trace_Subset_Exploration = struct
+structure Monad_No_Exception_Exploration = struct
 
 val triv = Thm.trivial @{cprop "monad_no_exception S m"}
   |> Drule.generalize (["'a", "'b", "'c"], ["S", "m"])
@@ -389,7 +389,7 @@ lemma bool_of_bitU_nondet_monad_no_exception[monad_no_exception]:
   "monad_no_exception {} (bool_of_bitU_nondet bitU)"
   by (cases bitU, simp_all add: bool_of_bitU_nondet_def, monad_no_exceptionI)
 
-setup \<open>Monad_Trace_Subset_Exploration.install_recs
+setup \<open>Monad_No_Exception_Exploration.install_recs
   ["Sail2_prompt_monad", "Sail2_prompt"]
   @{thms exit0_def assert_exp_def
     undefined_bool_def internal_pick_def
