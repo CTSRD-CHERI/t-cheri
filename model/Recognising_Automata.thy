@@ -1052,12 +1052,12 @@ method derivable_caps_step =
       | rule derivable_caps_runI)
 
 method derivable_capsI_with methods solve uses intro elim simp assms =
-  ((rule intro derivable_capsI allI impI conjI
+  (determ \<open>(rule intro derivable_capsI allI impI conjI
       | erule elim derivable_capsE conjE
       | erule derivable_caps_combinators eqTrueE
       | rule derivable_caps_runI
       | solve (*
-      | solves \<open>use assms in \<open>auto simp: simp\<close>\<close>*))+;
+      | solves \<open>use assms in \<open>auto simp: simp\<close>\<close>*))+\<close>;
    derivable_capsI_with solve intro: intro elim: elim simp: simp assms: assms)
 
 method derivable_capsI uses intro elim simp assms =
