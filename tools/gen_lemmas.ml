@@ -53,12 +53,14 @@ let cap_funs isa =
   Bindings.filter (fun _ f -> is_cap_fun isa f) isa.fun_infos
   |> Bindings.bindings |> List.map fst |> IdSet.of_list
 
-let has_ref_args f = List.exists is_ref_typ f.arg_typs
+let arg_typs f = List.map snd f.args
+let has_ref_args f = List.exists is_ref_typ (arg_typs f)
 
 let mangle_name renames n =
   (try Bindings.find n renames with Not_found -> isa_name n)
 
 let mangle_fun_name arch = mangle_name arch.fun_renames
+let mangle_arg_name arch = mangle_name arch.arg_renames
 let mangle_reg_ref arch n = mangle_name arch.reg_ref_renames (append_id n "_ref")
 
 let get_kid_itself typ = match unaux_typ typ with
@@ -68,21 +70,21 @@ let get_kid_itself typ = match unaux_typ typ with
   | _ -> None
 
 let format_fun_name arch id = mangle_fun_name arch id
-let format_fun_args ?annot_kids:(annot_kids=false) f =
-  let format_arg i typ =
-    let arg = "arg" ^ string_of_int i in
+let format_fun_args ?annot_kids:(annot_kids=false) arch f =
+  let format_arg i (id, typ) =
+    let arg = mangle_arg_name arch id in
     match get_kid_itself typ with
     | Some kid -> "(" ^ arg ^ " :: " ^ string_of_kid kid ^ "::len itself)"
     | None -> arg
   in
-  String.concat " " (List.mapi format_arg f.arg_typs)
+  String.concat " " (List.mapi format_arg f.args)
 let format_fun_call ?annot_kids:(annot_kids=false) arch id f =
   let tannot = match Type_check.destruct_bitvector arch.type_env f.ret_typ with
     | Some (Nexp_aux (Nexp_var kid, _), _) when annot_kids ->
        " :: " ^ string_of_kid kid ^ "::len word M"
     | _ -> ""
   in
-  format_fun_name arch id ^ " " ^ format_fun_args ~annot_kids f ^ tannot
+  format_fun_name arch id ^ " " ^ format_fun_args ~annot_kids arch f ^ tannot
 
 let apply_lemma_override arch id lemma_type lemma =
   match Bindings.find_opt id arch.lemma_overrides with
@@ -99,12 +101,12 @@ let get_fun_info ?annot_kids:(annot_kids=false) isa id =
 
 let non_cap_exp_lemma isa id : lemma =
   let (f, name, call) = get_fun_info isa id in
-  let get_arg_assm i r =
+  let get_arg_assm i (arg, r) =
     if (is_ref_typ r && not (is_cap_typ isa (base_typ_of isa r))) then
-      ["non_cap_reg arg" ^ string_of_int i]
+      ["non_cap_reg " ^ mangle_arg_name isa arg]
     else []
   in
-  let assms = List.concat (List.mapi get_arg_assm f.arg_typs) in
+  let assms = List.concat (List.mapi get_arg_assm f.args) in
   let using = (if assms = [] then [] else ["assms"]) in
   { name = "non_cap_exp_" ^ name; attrs = "[non_cap_expI]"; assms;
     stmts = ["non_cap_exp (" ^ call ^ ")"];
@@ -240,8 +242,8 @@ let return_caps_derivable_lemma isa id =
   let nonpriv_cap_regs_read = IdSet.inter (IdSet.diff (special_regs isa) isa.privileged_regs) f.trans_regs_read in
   let cap_regs_read = IdSet.union priv_cap_regs_read nonpriv_cap_regs_read in
   let cap_reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") (IdSet.elements cap_regs_read) in
-  let get_arg_assm i r = if (is_cap_typ isa (base_typ_of isa r)) then ["arg" ^ string_of_int i ^ " \\<in> derivable_caps s \\<Longrightarrow> "] else [] in
-  let arg_assm = String.concat "" (List.concat (List.mapi get_arg_assm f.arg_typs)) in
+  let get_arg_assm i (arg, r) = if (is_cap_typ isa (base_typ_of isa r)) then [mangle_arg_name isa arg ^ " \\<in> derivable_caps s \\<Longrightarrow> "] else [] in
+  let arg_assm = String.concat "" (List.concat (List.mapi get_arg_assm f.args)) in
   let access_assm =
     if IdSet.is_empty cap_regs_read then "" else
     ("{" ^ String.concat ", " cap_reg_names ^ "} \\<subseteq> accessible_regs s \\<Longrightarrow> ")
@@ -310,13 +312,13 @@ let traces_enabled_lemma mem isa id =
   in
   let cap_arg_assms =
     if has_mem_eff f || writes isa.cap_regs f then
-      List.concat (List.mapi (fun i t -> if is_cap_typ isa t then ["arg" ^ string_of_int i ^ " \\<in> derivable_caps s"] else []) f.arg_typs)
+      List.concat (List.mapi (fun i (a, t) -> if is_cap_typ isa t then [mangle_arg_name isa a ^ " \\<in> derivable_caps s"] else []) f.args)
     else []
   in
-  let add_arg_kid (i, arg_kids, kid_eqs) arg_typ =
+  let add_arg_kid (i, arg_kids, kid_eqs) (arg_id, arg_typ) =
     let new_kid = match Type_check.destruct_numeric arg_typ with
       | Some ([], _, Nexp_aux (Nexp_var kid, _)) ->
-         Some (kid, "arg" ^ string_of_int i)
+         Some (kid, mangle_arg_name isa arg_id)
       | _ ->
          begin match get_kid_itself arg_typ with
            | Some kid ->
@@ -324,7 +326,7 @@ let traces_enabled_lemma mem isa id =
            | _ ->
               begin match Type_check.destruct_bitvector isa.type_env arg_typ with
                 | Some (Nexp_aux (Nexp_var kid, _), _) ->
-                   Some (kid, "int (size arg" ^ string_of_int i ^ ")")
+                   Some (kid, "int (size " ^ mangle_arg_name isa arg_id ^ ")")
                 | _ -> None
               end
          end
@@ -338,7 +340,7 @@ let traces_enabled_lemma mem isa id =
     | _ ->
         (i + 1, arg_kids, kid_eqs)
   in
-  let (_, arg_kids, eq_assms) = List.fold_left add_arg_kid (0, KBindings.empty, []) f.arg_typs in
+  let (_, arg_kids, eq_assms) = List.fold_left add_arg_kid (0, KBindings.empty, []) f.args in
   let arg_assms = cap_arg_assms @ (arg_assms_of_typquant arg_kids f.typquant) in
   let is_kid_bitvector kid typ = match Type_check.destruct_bitvector isa.type_env typ with
     | Some (Nexp_aux (Nexp_var kid', _), _) -> Kid.compare kid kid' = 0
@@ -346,7 +348,7 @@ let traces_enabled_lemma mem isa id =
   in
   let ret_typ_assm = match Type_check.destruct_bitvector isa.type_env f.ret_typ with
     | Some (Nexp_aux (Nexp_var kid, _), _)
-      when KBindings.mem kid arg_kids && not (List.exists (is_kid_bitvector kid) f.arg_typs) ->
+      when KBindings.mem kid arg_kids && not (List.exists (is_kid_bitvector kid) (arg_typs f)) ->
        ["int LENGTH(" ^ string_of_kid kid ^ ") = " ^ KBindings.find kid arg_kids]
     | _ -> []
   in
@@ -358,7 +360,11 @@ let traces_enabled_lemma mem isa id =
     | Some regs -> List.map (fun r -> r ^ " \\<in> invoked_indirect_regs") regs
     | None -> if IdSet.disjoint f.trans_calls isa.cap_load_funs then [] else ["\\<not>invokes_indirect_caps"]
   in
-  let assms = cap_assm @ arg_assms @ eq_assms @ ret_typ_assm @ invoked_reg_assms @ invoked_indirect_assms in
+  let load_auth_assms = match Bindings.find_opt id isa.load_auths with
+    | Some regs -> List.map (fun r -> r ^ " \\<in> load_auths") regs
+    | None -> []
+  in
+  let assms = cap_assm @ arg_assms @ eq_assms @ ret_typ_assm @ invoked_reg_assms @ invoked_indirect_assms @ load_auth_assms in
   let using = if assms = [] then "" else " assms: assms" in
   { name = "traces_enabled_" ^ name; attrs = "[traces_enabledI]";
     assms; unfolding = [(name ^ "_def"); "bind_assoc"]; using = [];

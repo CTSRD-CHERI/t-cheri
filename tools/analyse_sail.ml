@@ -6,7 +6,7 @@ let opt_splice = ref ([]:string list)
 
 type fun_info =
   { typquant : typquant;
-    arg_typs : typ list;
+    args : (id * typ) list;
     ret_typ : typ;
     effect : effect;
     calls : IdSet.t;
@@ -99,6 +99,18 @@ let add_fun_infos_of_def env exception_funs fun_infos = function
        let (_, _, exp, _) = destruct_pexp pexp in
        exp
      in
+     let arg_ids = match funcls with
+       | [FCL_aux (FCL_Funcl (_, pexp), _)] ->
+          let (pat, _, _, _) = destruct_pexp pexp in
+          begin match unaux_pat pat with
+            | P_id id -> Some [id]
+            | P_tup pats ->
+               let get_id = function P_id id -> Some id | _ -> None in
+               List.map unaux_pat pats |> List.map get_id |> Util.option_all
+            | _ -> None
+          end
+       | _ -> None
+     in
      let exp_of_funcl (FCL_aux (FCL_Funcl (_, p), _)) = exp_of_pexp p in
      let exps = List.map exp_of_funcl funcls in
      let merge = List.fold_left IdSet.union IdSet.empty in
@@ -138,9 +150,14 @@ let add_fun_infos_of_def env exception_funs fun_infos = function
        | typquant, Typ_aux (Typ_fn (arg_typs, ret_typ, effect), _) -> typquant, arg_typs, ret_typ, effect
        | _ -> raise (Reporting.err_unreachable Parse_ast.Unknown __POS__ ("Function " ^ string_of_id id ^ " does not have function type"))
      in
+     let args = match arg_ids with
+       | Some ids when List.length ids = List.length arg_typs -> List.combine ids arg_typs
+       | _ ->
+          List.mapi (fun i typ -> (mk_id ("arg" ^ string_of_int i), typ)) arg_typs
+     in
      Bindings.add id
        {
-         typquant; arg_typs; ret_typ; effect; calls; regs_read; regs_read_no_exc; regs_written; regs_written_no_exc;
+         typquant; args; ret_typ; effect; calls; regs_read; regs_read_no_exc; regs_written; regs_written_no_exc;
          trans_calls; trans_regs_read; trans_regs_read_no_exc; trans_regs_written; trans_regs_written_no_exc
        }
        fun_infos
