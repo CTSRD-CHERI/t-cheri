@@ -2,20 +2,25 @@ open import Pervasives_extra
 open import Sail2_values
 open import Sail2_prompt_monad
 
+(* Abstraction of capabilities *)
+
 type perms = list bool
+
+type address = nat
+type otype = nat
 
 class (Capability 'c)
   val is_tagged : 'c -> bool
   val is_sealed : 'c -> bool
   val is_sentry : 'c -> bool  (* TODO: Differentiate between different forms of sentries, e.g. direct vs. indirect? *)
-  val get_base : 'c -> nat
-  val get_top : 'c -> nat
-  val get_obj_type : 'c -> nat
+  val get_base : 'c -> address
+  val get_top : 'c -> address
+  val get_obj_type : 'c -> otype
   val get_perms : 'c -> perms
-  val get_cursor : 'c -> nat
+  val get_cursor : 'c -> address
   val is_global : 'c -> bool
   val set_tag : 'c -> bool -> 'c
-  val seal : 'c -> nat -> 'c
+  val seal : 'c -> otype -> 'c
   val unseal : 'c -> 'c
   val clear_global : 'c -> 'c
   val cap_of_mem_bytes : list memory_byte -> bitU -> maybe 'c
@@ -31,10 +36,12 @@ class (Capability 'c)
   val permits_unseal : 'c -> bool
 end
 
-val address_range : nat -> nat -> list nat
+(* Capability ordering with respect to their bounds and permissions *)
+
+val address_range : address -> address -> list address
 let address_range start len = genlist (fun n -> start + n) len
 
-val get_mem_region : forall 'cap. Capability 'cap => 'cap -> set nat
+val get_mem_region : forall 'cap. Capability 'cap => 'cap -> set address
 let get_mem_region c =
   if get_top c < get_base c then {} else
   let len = get_top c - get_base c in
@@ -132,7 +139,7 @@ let writes_reg_caps caps_of_regval e = match e with
   | _ -> Set.empty
 end
 
-val reads_mem_val : forall 'regval. event 'regval -> maybe (nat * nat * list memory_byte * bitU)
+val reads_mem_val : forall 'regval. event 'regval -> maybe (address * nat * list memory_byte * bitU)
 let reads_mem_val e = match e with
   | E_read_memt _ addr sz (v, t) -> Just (addr, sz, v, t)
   | E_read_mem _ addr sz v -> Just (addr, sz, v, B0)
@@ -140,13 +147,13 @@ let reads_mem_val e = match e with
 end
 
 val reads_mem_cap : forall 'regval 'cap. Capability 'cap =>
-  event 'regval -> maybe (nat * nat * 'cap)
+  event 'regval -> maybe (address * nat * 'cap)
 let reads_mem_cap e =
   Maybe.bind (reads_mem_val e) (fun (addr, sz, v, t) ->
   Maybe.bind (cap_of_mem_bytes v t) (fun c ->
   if is_tagged c then Just (addr, sz, c) else Nothing))
 
-val writes_mem_val : forall 'regval. event 'regval -> maybe (nat * nat * list memory_byte * bitU)
+val writes_mem_val : forall 'regval. event 'regval -> maybe (address * nat * list memory_byte * bitU)
 let writes_mem_val e = match e with
   | E_write_memt _ addr sz v t _ -> Just (addr, sz, v, t)
   | E_write_mem _ addr sz v _ -> Just (addr, sz, v, B0)
@@ -154,7 +161,7 @@ let writes_mem_val e = match e with
 end
 
 val writes_mem_cap : forall 'regval 'cap. Capability 'cap =>
-  event 'regval -> maybe (nat * nat * 'cap)
+  event 'regval -> maybe (address * nat * 'cap)
 let writes_mem_cap e =
   Maybe.bind (writes_mem_val e) (fun (addr, sz, v, t) ->
   Maybe.bind (cap_of_mem_bytes v t) (fun c ->
