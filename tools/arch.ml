@@ -11,7 +11,8 @@ type isa =
     ast : Type_check.tannot def list;
     type_env : Type_check.Env.t;
     cap_regs : IdSet.t;
-    privileged_regs : IdSet.t;
+    read_privileged_regs : IdSet.t;
+    write_privileged_regs : IdSet.t;
     system_access_checks : IdSet.t;
     pcc_regs : IdSet.t;
     idc_regs : IdSet.t;
@@ -30,7 +31,8 @@ type isa =
     cap_load_funs : IdSet.t;
   }
 
-let special_regs isa = IdSet.union isa.privileged_regs (IdSet.union isa.pcc_regs isa.idc_regs)
+let privileged_regs isa = IdSet.union isa.read_privileged_regs isa.write_privileged_regs
+let special_regs isa = IdSet.union (privileged_regs isa) (IdSet.union isa.pcc_regs isa.idc_regs)
 let write_checked_regs isa = IdSet.union isa.pcc_regs isa.idc_regs
 
 let lstrip f s =
@@ -153,7 +155,8 @@ let load_isa file src_dir =
     ast;
     type_env;
     cap_regs;
-    privileged_regs = optional_idset (member "privileged_regs" arch);
+    read_privileged_regs = optional_idset (member "read_privileged_regs" arch);
+    write_privileged_regs = optional_idset (member "write_privileged_regs" arch);
     system_access_checks = optional_idset (member "system_access_checks" arch);
     pcc_regs = optional_idset (member "pcc" arch);
     idc_regs = optional_idset (member "idc" arch);

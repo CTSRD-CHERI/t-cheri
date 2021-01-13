@@ -24,7 +24,8 @@ type isa 'cap 'regval 'instr 'e =
      instr_raises_ex : 'instr -> trace 'regval -> bool;
      fetch_raises_ex : trace 'regval -> bool;
      exception_targets : set 'regval -> set 'cap;
-     privileged_regs : (* trace 'regval -> *) set register_name;
+     read_privileged_regs : set register_name;
+     write_privileged_regs : set register_name;
      is_translation_event : event 'regval -> bool;
      translate_address : nat -> acctype -> trace 'regval -> maybe nat |>
 
@@ -57,7 +58,7 @@ let system_access_permitted_before_idx ISA i t =
      reads_from_reg_at_idx j t = Just r &&
      not (cap_reg_written_before_idx ISA j r t) &&
      c IN (reads_reg_caps_at_idx ISA j t) &&
-     r IN ISA.PCC && r NIN ISA.privileged_regs &&
+     r IN ISA.PCC && r NIN ISA.read_privileged_regs &&
      is_tagged c && not (is_sealed c) &&
      permits_system_access c)
 
@@ -92,7 +93,7 @@ let rec available_reg_caps ISA i t = match i with
        (match reads_from_reg e with
           | Just r ->
              if (((r IN ISA.PCC || r IN ISA.IDC) --> not (cap_reg_written_before_idx ISA i r t)) &&
-                 (system_access_permitted_before_idx ISA i t || not (r IN ISA.privileged_regs)))
+                 (system_access_permitted_before_idx ISA i t || not (r IN ISA.read_privileged_regs)))
              then reads_reg_caps ISA.caps_of_regval e
              else Set.empty
           | Nothing -> Set.empty
@@ -114,10 +115,18 @@ val read_reg_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'ca
   isa 'cap 'regval 'instr 'e -> bool -> trace 'regval -> bool
 let read_reg_axiom ISA has_ex t =
   (forall i r v.
-     (index t i = Just (E_read_reg r v) && r IN ISA.privileged_regs)
+     (index t i = Just (E_read_reg r v) && r IN ISA.read_privileged_regs)
      -->
      (system_access_permitted_before_idx ISA i t ||
       (has_ex (*&& r IN ISA.KCC*))))
+
+val write_reg_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap, Eq 'regval =>
+  isa 'cap 'regval 'instr 'e -> bool -> trace 'regval -> bool
+let write_reg_axiom ISA has_ex t =
+  (forall i r v.
+     (index t i = Just (E_write_reg r v) && r IN ISA.write_privileged_regs)
+     -->
+     (system_access_permitted_before_idx ISA i t || has_ex))
 
 val store_cap_mem_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
   isa 'cap 'regval 'instr 'e -> bool -> set 'cap -> trace 'regval -> bool
@@ -235,6 +244,7 @@ let cheri_axioms ISA is_fetch has_ex use_mem_caps invoked_caps invoked_indirect_
   store_cap_mem_axiom ISA use_mem_caps invoked_indirect_caps t &&
   store_cap_reg_axiom ISA has_ex use_mem_caps invoked_caps invoked_indirect_caps t &&
   read_reg_axiom ISA has_ex t &&
+  write_reg_axiom ISA has_ex t &&
   load_mem_axiom ISA is_fetch use_mem_caps invoked_indirect_caps t &&
   store_tag_axiom ISA t &&
   store_mem_axiom ISA use_mem_caps invoked_indirect_caps t

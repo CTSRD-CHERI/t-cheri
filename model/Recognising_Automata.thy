@@ -275,7 +275,7 @@ locale Cap_Axiom_Automaton = Capability_ISA CC ISA
 begin
 
 definition accessible_regs :: "('cap, 'regval) axiom_state \<Rightarrow> register_name set" where
-  "accessible_regs s = {r. (r \<in> PCC ISA \<union> IDC ISA \<longrightarrow> r \<notin> written_regs s) \<and> (r \<in> privileged_regs ISA \<longrightarrow> system_reg_access s)}"
+  "accessible_regs s = {r. (r \<in> PCC ISA \<union> IDC ISA \<longrightarrow> r \<notin> written_regs s) \<and> (r \<in> read_privileged_regs ISA \<longrightarrow> system_reg_access s)}"
 
 definition axiom_step :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> ('cap, 'regval) axiom_state" where
   "axiom_step s e = \<lparr>accessed_reg_caps = accessed_reg_caps s \<union> accessed_reg_caps_of_ev (accessible_regs s) e,
@@ -295,7 +295,7 @@ lemma step_selectors[simp]:
 abbreviation "initial \<equiv> \<lparr>accessed_reg_caps = {}, accessed_mem_caps = {}, system_reg_access = False, read_from_KCC = {}, written_regs = {}\<rparr>"
 
 lemma accessible_regs_initial_iff[simp]:
-  "r \<in> accessible_regs initial \<longleftrightarrow> r \<notin> privileged_regs ISA"
+  "r \<in> accessible_regs initial \<longleftrightarrow> r \<notin> read_privileged_regs ISA"
   by (auto simp: accessible_regs_def)
 
 sublocale Deterministic_Automaton enabled axiom_step initial "\<lambda>_. True" .
@@ -311,7 +311,7 @@ qed auto
 lemma accessible_regs_axiom_step:
   "accessible_regs (axiom_step s e) =
      accessible_regs s \<union>
-     (if allows_system_reg_access (accessible_regs s) e then privileged_regs ISA else {}) -
+     (if allows_system_reg_access (accessible_regs s) e then read_privileged_regs ISA else {}) -
      (written_regs (axiom_step s e) \<inter> (PCC ISA \<union> IDC ISA))"
   by (auto simp: accessible_regs_def)
 
@@ -360,7 +360,7 @@ proof (induction i)
 qed auto
 
 lemma privileged_accessible_system_reg_access:
-  assumes "r \<in> accessible_regs s" and "r \<in> privileged_regs ISA"
+  assumes "r \<in> accessible_regs s" and "r \<in> read_privileged_regs ISA"
   shows "system_reg_access s"
   using assms
   by (auto simp: accessible_regs_def)
@@ -382,24 +382,26 @@ lemma system_reg_access_run_iff:
 
 lemma system_reg_access_accessible_regs:
   assumes "system_reg_access s"
-    and "Rs - (privileged_regs ISA - (PCC ISA \<union> IDC ISA)) \<subseteq> accessible_regs s"
+    and "Rs - (read_privileged_regs ISA - (PCC ISA \<union> IDC ISA)) \<subseteq> accessible_regs s"
   shows "Rs \<subseteq> accessible_regs s"
   using assms
   by (auto simp: accessible_regs_def)
 
 lemmas step_defs = axiom_step_def reads_mem_cap_def
 
-abbreviation "special_reg_names \<equiv> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> privileged_regs ISA"
+abbreviation "privileged_regs \<equiv> read_privileged_regs ISA \<union> write_privileged_regs ISA"
+
+abbreviation "special_reg_names \<equiv> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> read_privileged_regs ISA"
 
 definition non_cap_reg :: "('regstate, 'regval, 'a) register_ref \<Rightarrow> bool" where
   "non_cap_reg r \<equiv>
-     name r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> privileged_regs ISA \<and>
+     name r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<and>
      (\<forall>rv v. of_regval r rv = Some v \<longrightarrow> caps_of_regval ISA rv = {}) \<and>
      (\<forall>v. caps_of_regval ISA (regval_of r v) = {})"
 
 fun non_cap_event :: "'regval event \<Rightarrow> bool" where
-  "non_cap_event (E_read_reg r v) = (r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> privileged_regs ISA \<and> caps_of_regval ISA v = {})"
-| "non_cap_event (E_write_reg r v) = (r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> privileged_regs ISA \<and> caps_of_regval ISA v = {})"
+  "non_cap_event (E_read_reg r v) = (r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> read_privileged_regs ISA \<and> caps_of_regval ISA v = {})"
+| "non_cap_event (E_write_reg r v) = (r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> write_privileged_regs ISA \<and> caps_of_regval ISA v = {})"
 | "non_cap_event (E_read_memt _ _ _ _) = False"
 | "non_cap_event (E_read_mem _ _ _ _) = False"
 | "non_cap_event (E_write_memt _ _ _ _ _ _) = False"
@@ -707,7 +709,7 @@ lemma non_mem_exp_if_no_asm:
   by (intro non_mem_exp_if)
 
 lemma non_cap_exp_read_non_cap_reg:
-  assumes "non_cap_reg r"
+  assumes "non_cap_reg r" and "name r \<notin> read_privileged_regs ISA"
   shows "non_cap_exp (read_reg r :: ('regval, 'r, 'exception) monad)"
 proof -
   have "non_cap_trace t \<or> (\<exists>v msg. t = [E_read_reg (name r) v] \<and> name r \<notin> special_reg_names \<and> m' = Fail msg)"
@@ -726,7 +728,7 @@ lemma
   by (auto elim!: Read_reg_TracesE Write_reg_TracesE split: option.splits)
 
 lemma non_cap_exp_write_non_cap_reg:
-  assumes "non_cap_reg r"
+  assumes "non_cap_reg r" and "name r \<notin> write_privileged_regs ISA"
   shows "non_cap_exp (write_reg r v)"
   using assms
   unfolding write_reg_def
@@ -1119,7 +1121,8 @@ begin
 abbreviation invokes_indirect_caps where "invokes_indirect_caps \<equiv> (invoked_indirect_caps \<noteq> {})"
 
 fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool" where
-  "enabled s (E_write_reg r v) =
+  "enabled s (E_write_reg r v) \<longleftrightarrow>
+     (r \<in> write_privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> ex_traces)) \<and>
      (\<forall>c. (c \<in> caps_of_regval ISA v \<and> is_tagged_method CC c)
          \<longrightarrow>
          (c \<in> derivable (accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s) \<or>
@@ -1139,7 +1142,7 @@ fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Righta
                 c' \<in> derivable (accessed_mem_caps s) \<and>
                 ((leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c' \<and> r \<in> PCC ISA) \<or>
                  (leq_cap CC c c' \<and> r \<in> PCC ISA \<union> IDC ISA)))))"
-| "enabled s (E_read_reg r v) = (r \<in> privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> ex_traces))"
+| "enabled s (E_read_reg r v) = (r \<in> read_privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> ex_traces))"
 | "enabled s (E_write_memt _ addr sz bytes tag _) =
      (\<forall>c.  cap_of_mem_bytes_method CC bytes tag = Some c \<and> is_tagged_method CC c \<longrightarrow> c \<in> derivable (accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s))"
 | "enabled s _ = True"
@@ -1211,10 +1214,11 @@ lemma recognises_store_cap_reg_read_reg_axioms:
   shows "store_cap_reg_axiom CC ISA ex_traces use_mem_caps invoked_caps invoked_indirect_caps t"
     and "store_cap_mem_axiom CC ISA use_mem_caps invoked_indirect_caps t"
     and "read_reg_axiom CC ISA ex_traces t"
+    and "write_reg_axiom CC ISA ex_traces t"
 proof -
-  show "read_reg_axiom CC ISA ex_traces t"
+  show "read_reg_axiom CC ISA ex_traces t" and "write_reg_axiom CC ISA ex_traces t"
     using assms (*read_from_KCC_run_take_eq[of "length t" t]*)
-    unfolding accepts_from_iff_all_enabled_final read_reg_axiom_def
+    unfolding accepts_from_iff_all_enabled_final read_reg_axiom_def write_reg_axiom_def
     by (auto elim!: enabled.elims)
   show "store_cap_reg_axiom CC ISA ex_traces use_mem_caps invoked_caps invoked_indirect_caps t"
   proof (unfold store_cap_reg_axiom_def, intro allI impI, goal_cases Idx)
@@ -1279,7 +1283,7 @@ locale Cap_Axiom_Assm_Automaton = Cap_Axiom_Automaton CC ISA enabled use_mem_cap
   fixes ex_traces :: bool
     and ev_assms :: "'regval event \<Rightarrow> bool"
   assumes non_cap_event_enabled: "\<And>e. non_cap_event e \<Longrightarrow> enabled s e"
-    and read_non_special_regs_enabled: "\<And>r v. r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> privileged_regs ISA \<Longrightarrow> enabled s (E_read_reg r v)"
+    and read_non_special_regs_enabled: "\<And>r v. r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> read_privileged_regs ISA \<Longrightarrow> enabled s (E_read_reg r v)"
 begin
 
 definition "trace_assms t \<equiv> \<forall>e \<in> set t. ev_assms e"
@@ -1957,7 +1961,7 @@ locale Cap_Axiom_Inv_Automaton = Cap_Axiom_Automaton CC ISA enabled use_mem_caps
     and invariant :: "'regstate \<Rightarrow> bool" and inv_regs :: "register_name set" +
   fixes ex_traces :: bool
   assumes non_cap_event_enabled: "\<And>e. non_cap_event e \<Longrightarrow> enabled s e"
-    and read_non_special_regs_enabled: "\<And>r v. r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> privileged_regs ISA \<Longrightarrow> enabled s (E_read_reg r v)"
+    and read_non_special_regs_enabled: "\<And>r v. r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> read_privileged_regs ISA \<Longrightarrow> enabled s (E_read_reg r v)"
 begin
 
 definition "isException m \<equiv> ((\<exists>e. m = Exception e) \<or> (\<exists>msg. m = Fail msg)) \<and> ex_traces"
@@ -2341,20 +2345,20 @@ proof
     by (cases e) auto
 next
   fix s r v
-  assume "r \<notin> special_reg_names"
+  assume "r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> read_privileged_regs ISA"
   then show "enabled s (E_read_reg r v)"
     by auto
 qed
 
 lemma read_reg_trace_enabled:
   assumes t: "(read_reg r, t, m') \<in> Traces"
-    and r: "name r \<in> privileged_regs ISA \<longrightarrow> system_reg_access s \<or> ex_traces"
+    and r: "name r \<in> read_privileged_regs ISA \<longrightarrow> system_reg_access s \<or> ex_traces"
   shows "trace_enabled s t"
   by (use t in \<open>auto simp: read_reg_def elim!: Read_reg_TracesE split: option.splits\<close>)
      (use r in \<open>auto\<close>)
 
 lemma traces_enabled_read_reg:
-  assumes "name r \<in> privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> ex_traces)"
+  assumes "name r \<in> read_privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> ex_traces)"
   shows "traces_enabled (read_reg r) s"
   using assms
   unfolding traces_enabled_def
@@ -2434,20 +2438,20 @@ proof
     by (cases e) auto
 next
   fix s r v
-  assume "r \<notin> special_reg_names"
+  assume "r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> read_privileged_regs ISA"
   then show "enabled s (E_read_reg r v)"
     by auto
 qed
 
 lemma read_reg_trace_enabled:
   assumes t: "(read_reg r, t, m') \<in> Traces"
-    and r: "name r \<in> privileged_regs ISA \<longrightarrow> system_reg_access s \<or> ex_traces"
+    and r: "name r \<in> read_privileged_regs ISA \<longrightarrow> system_reg_access s \<or> ex_traces"
   shows "trace_enabled s t"
   by (use t in \<open>auto simp: read_reg_def elim!: Read_reg_TracesE split: option.splits\<close>)
      (use r in \<open>auto\<close>)
 
 lemma traces_enabled_read_reg:
-  assumes "name r \<in> privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> ex_traces)"
+  assumes "name r \<in> read_privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> ex_traces)"
   shows "traces_enabled (read_reg r) s regs"
   using assms
   unfolding traces_enabled_def
@@ -2647,7 +2651,7 @@ proof
     by (cases e) auto
 next
   fix s r v
-  assume "r \<notin> special_reg_names"
+  assume "r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> read_privileged_regs ISA"
   then show "enabled s (E_read_reg r v)"
     by auto
 qed
@@ -2726,7 +2730,7 @@ proof
     by (cases e) auto
 next
   fix s r v
-  assume "r \<notin> special_reg_names"
+  assume "r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> read_privileged_regs ISA"
   then show "enabled s (E_read_reg r v)"
     by auto
 qed

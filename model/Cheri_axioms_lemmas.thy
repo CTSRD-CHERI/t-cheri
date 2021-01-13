@@ -114,7 +114,7 @@ lemma available_reg_capsE:
     and "c \<in> caps_of_regval ISA v" and "is_tagged_method CC c"
     and "j < length t" and "j < i"
     and "r \<in> PCC ISA \<or> r \<in> IDC ISA \<longrightarrow> \<not>cap_reg_written_before_idx CC ISA j r t"
-    and "r \<in> privileged_regs ISA \<longrightarrow> system_access_permitted_before_idx CC ISA j t"
+    and "r \<in> read_privileged_regs ISA \<longrightarrow> system_access_permitted_before_idx CC ISA j t"
   using assms
   by (induction i) (auto split: option.splits if_splits)
 
@@ -133,7 +133,7 @@ lemma available_caps_cases:
     and "c \<in> caps_of_regval ISA v" and "is_tagged_method CC c"
     and "j < length t" and "j < i"
     and "r \<in> PCC ISA \<or> r \<in> IDC ISA \<longrightarrow> \<not>cap_reg_written_before_idx CC ISA j r t"
-    and "r \<in> privileged_regs ISA \<longrightarrow> system_access_permitted_before_idx CC ISA j t"
+    and "r \<in> read_privileged_regs ISA \<longrightarrow> system_access_permitted_before_idx CC ISA j t"
   | (Mem) wk paddr bytes j sz where "t ! j = E_read_memt wk paddr sz (bytes, B1)"
     and "\<not>is_translation_event ISA (t ! j)"
     and "cap_of_mem_bytes_method CC bytes B1 = Some c"
@@ -155,7 +155,7 @@ lemma cap_reg_written_before_idx_Suc_iff[simp]:
 definition accessible_regs_at_idx :: "nat \<Rightarrow> 'regval trace \<Rightarrow> register_name set" where
   "accessible_regs_at_idx i t =
      {r. (r \<in> PCC ISA \<or> r \<in> IDC ISA \<longrightarrow> \<not>cap_reg_written_before_idx CC ISA i r t) \<and>
-         (r \<in> privileged_regs ISA \<longrightarrow> system_access_permitted_before_idx CC ISA i t)}"
+         (r \<in> read_privileged_regs ISA \<longrightarrow> system_access_permitted_before_idx CC ISA i t)}"
 
 fun accessed_reg_caps_of_ev :: "register_name set \<Rightarrow> 'regval event \<Rightarrow> 'cap set" where
   "accessed_reg_caps_of_ev regs (E_read_reg r v) =
@@ -204,14 +204,14 @@ lemma system_access_permitted_before_idx_Suc[simp]:
                 elim!: allows_system_reg_access.elims)
 
 lemma accessible_regs_at_idx_0[simp]:
-  "accessible_regs_at_idx 0 t = (-privileged_regs ISA)"
+  "accessible_regs_at_idx 0 t = (-read_privileged_regs ISA)"
   by (auto simp: accessible_regs_at_idx_def)
 
 lemma accessible_regs_at_idx_Suc:
   "accessible_regs_at_idx (Suc i) t =
      (accessible_regs_at_idx i t \<union>
      (if i < length t \<and> allows_system_reg_access (accessible_regs_at_idx i t) (t ! i)
-      then {r \<in> privileged_regs ISA. r \<in> PCC ISA \<or> r \<in> IDC ISA \<longrightarrow> \<not>cap_reg_written_before_idx CC ISA i r t} else {})) -
+      then {r \<in> read_privileged_regs ISA. r \<in> PCC ISA \<or> r \<in> IDC ISA \<longrightarrow> \<not>cap_reg_written_before_idx CC ISA i r t} else {})) -
      {r \<in> PCC ISA \<union> IDC ISA. \<exists>c v. i < length t \<and> t ! i = E_write_reg r v \<and> c \<in> caps_of_regval ISA v \<and> is_tagged_method CC c}"
   by (auto simp: accessible_regs_at_idx_def)
 

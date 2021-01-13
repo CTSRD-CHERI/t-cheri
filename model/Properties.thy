@@ -87,9 +87,9 @@ lemma s_invariant_run_trace_eq:
      (auto split: option.splits elim: runTraceS_ConsE)
 
 inductive_set reachable_caps :: "'regs sequential_state \<Rightarrow> 'cap set" for s :: "'regs sequential_state" where
-  Reg: "\<lbrakk>c \<in> get_reg_caps r s; r \<notin> privileged_regs ISA; is_tagged_method CC c\<rbrakk> \<Longrightarrow> c \<in> reachable_caps s"
+  Reg: "\<lbrakk>c \<in> get_reg_caps r s; r \<notin> read_privileged_regs ISA; is_tagged_method CC c\<rbrakk> \<Longrightarrow> c \<in> reachable_caps s"
 | SysReg:
-    "\<lbrakk>c \<in> get_reg_caps r s; r \<in> privileged_regs ISA; c' \<in> reachable_caps s;
+    "\<lbrakk>c \<in> get_reg_caps r s; r \<in> read_privileged_regs ISA; c' \<in> reachable_caps s;
       permits_system_access_method CC c'; \<not>is_sealed_method CC c';
       is_tagged_method CC c\<rbrakk>
      \<Longrightarrow> c \<in> reachable_caps s"
@@ -140,9 +140,9 @@ lemma derivable_reachable_caps_idem: "derivable (reachable_caps s) = reachable_c
 inductive_set reachable_caps_plus :: "'cap set \<Rightarrow> 'regs sequential_state \<Rightarrow> 'cap set"
   for C :: "'cap set" and s :: "'regs sequential_state"
 where
-  Reg: "\<lbrakk>c \<in> get_reg_caps r s; r \<notin> privileged_regs ISA; is_tagged_method CC c\<rbrakk> \<Longrightarrow> c \<in> reachable_caps_plus C s"
+  Reg: "\<lbrakk>c \<in> get_reg_caps r s; r \<notin> read_privileged_regs ISA; is_tagged_method CC c\<rbrakk> \<Longrightarrow> c \<in> reachable_caps_plus C s"
 | SysReg:
-    "\<lbrakk>c \<in> get_reg_caps r s; r \<in> privileged_regs ISA; c' \<in> reachable_caps_plus C s;
+    "\<lbrakk>c \<in> get_reg_caps r s; r \<in> read_privileged_regs ISA; c' \<in> reachable_caps_plus C s;
       permits_system_access_method CC c'; \<not>is_sealed_method CC c';
       is_tagged_method CC c\<rbrakk>
      \<Longrightarrow> c \<in> reachable_caps_plus C s"
@@ -360,7 +360,7 @@ qed
 lemma reads_reg_cap_non_privileged_accessible[intro]:
   assumes "c \<in> caps_of_regval ISA v" and "t ! j = E_read_reg r v"
     and "\<not>cap_reg_written_before_idx CC ISA j r t"
-    and "r \<notin> privileged_regs ISA"
+    and "r \<notin> read_privileged_regs ISA"
     and "is_tagged_method CC c"
     and "j < i"
     and "j < length t"
@@ -545,7 +545,7 @@ proof (induction i rule: less_induct)
           case Initial
           show ?thesis
           proof cases
-            assume r: "r \<in> privileged_regs ISA"
+            assume r: "r \<in> read_privileged_regs ISA"
             then obtain c' where c': "c' \<in> reachable_caps s" and "is_tagged_method CC c'"
               and "\<not>is_sealed_method CC c'" and p: "permits_system_access_method CC c'"
               using Reg less.IH[OF \<open>j < i\<close>] derivable_refl[of "available_caps CC ISA (inv_indirect_caps = {} \<and> use_mem_caps) j t"]
@@ -554,7 +554,7 @@ proof (induction i rule: less_induct)
               using Reg
               by (auto intro: reachable_caps.SysReg[OF Initial r c'])
           next
-            assume "r \<notin> privileged_regs ISA"
+            assume "r \<notin> read_privileged_regs ISA"
             then show ?thesis using Initial Reg by (auto intro: reachable_caps.Reg)
           qed
         next
@@ -630,7 +630,7 @@ lemma get_reg_cap_intra_domain_trace_reachable:
     (*and no_exception: "\<not>hasException t (instr_sem ISA instr)"
     and no_ccall: "invoked_caps ISA instr t = {}"*)
     and tag: "is_tagged_method CC c"
-    and priv: "r \<in> privileged_regs ISA \<longrightarrow> system_access_reachable_plus C s"
+    and priv: "r \<in> read_privileged_regs ISA \<longrightarrow> system_access_reachable_plus C s"
   (* TODO: shows "c \<in> reachable_caps s \<or> (r \<in> (PCC ISA \<union> IDC ISA) \<and> c \<in> invoked_caps)" *)
   shows "c \<in> reachable_caps_plus C s"
 proof -
@@ -641,7 +641,7 @@ proof -
     case Init
     show ?thesis
     proof cases
-      assume r: "r \<in> privileged_regs ISA"
+      assume r: "r \<in> read_privileged_regs ISA"
       with priv obtain c' where c': "c' \<in> reachable_caps_plus C s"
         and "permits_system_access_method CC c'" and "\<not>is_sealed_method CC c'"
         using reachable_caps_plus_mono[OF C]
@@ -650,7 +650,7 @@ proof -
         using Init c tag
         by (intro reachable_caps_plus.SysReg[OF _ r c']) auto
     next
-      assume "r \<notin> privileged_regs ISA"
+      assume "r \<notin> read_privileged_regs ISA"
       then have "c \<in> reachable_caps s"
         using Init c tag
         by (intro reachable_caps.Reg) auto
