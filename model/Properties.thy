@@ -89,8 +89,8 @@ lemma s_invariant_run_trace_eq:
 inductive_set reachable_caps :: "'regs sequential_state \<Rightarrow> 'cap set" for s :: "'regs sequential_state" where
   Reg: "\<lbrakk>c \<in> get_reg_caps r s; r \<notin> read_privileged_regs ISA; is_tagged_method CC c\<rbrakk> \<Longrightarrow> c \<in> reachable_caps s"
 | SysReg:
-    "\<lbrakk>c \<in> get_reg_caps r s; r \<in> read_privileged_regs ISA; c' \<in> reachable_caps s;
-      permits_system_access_method CC c'; \<not>is_sealed_method CC c';
+    "\<lbrakk>c \<in> get_reg_caps r s; r \<in> read_privileged_regs ISA;
+      c' \<in> reachable_caps s; permits_system_access_method CC c'; is_tagged_method CC c'; \<not>is_sealed_method CC c';
       is_tagged_method CC c\<rbrakk>
      \<Longrightarrow> c \<in> reachable_caps s"
 | Mem:
@@ -142,8 +142,8 @@ inductive_set reachable_caps_plus :: "'cap set \<Rightarrow> 'regs sequential_st
 where
   Reg: "\<lbrakk>c \<in> get_reg_caps r s; r \<notin> read_privileged_regs ISA; is_tagged_method CC c\<rbrakk> \<Longrightarrow> c \<in> reachable_caps_plus C s"
 | SysReg:
-    "\<lbrakk>c \<in> get_reg_caps r s; r \<in> read_privileged_regs ISA; c' \<in> reachable_caps_plus C s;
-      permits_system_access_method CC c'; \<not>is_sealed_method CC c';
+    "\<lbrakk>c \<in> get_reg_caps r s; r \<in> read_privileged_regs ISA;
+      c' \<in> reachable_caps_plus C s; permits_system_access_method CC c'; is_tagged_method CC c'; \<not>is_sealed_method CC c';
       is_tagged_method CC c\<rbrakk>
      \<Longrightarrow> c \<in> reachable_caps_plus C s"
 | Mem:
@@ -620,7 +620,7 @@ lemma put_regval_get_mem_cap:
 
 definition system_access_reachable_plus :: "'cap set \<Rightarrow> 'regs sequential_state \<Rightarrow> bool" where
   "system_access_reachable_plus C s \<equiv> \<exists>c \<in> reachable_caps_plus C s.
-     permits_system_access_method CC c \<and> \<not>is_sealed_method CC c"
+     permits_system_access_method CC c \<and> is_tagged_method CC c \<and> \<not>is_sealed_method CC c"
 
 lemma get_reg_cap_intra_domain_trace_reachable:
   assumes r: "c \<in> get_reg_caps r s'"
@@ -643,7 +643,8 @@ proof -
     proof cases
       assume r: "r \<in> read_privileged_regs ISA"
       with priv obtain c' where c': "c' \<in> reachable_caps_plus C s"
-        and "permits_system_access_method CC c'" and "\<not>is_sealed_method CC c'"
+        and "permits_system_access_method CC c'"
+        and "is_tagged_method CC c'" and "\<not>is_sealed_method CC c'"
         using reachable_caps_plus_mono[OF C]
         by (auto simp: system_access_reachable_plus_def)
       then show "c \<in> reachable_caps_plus C s"

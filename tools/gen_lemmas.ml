@@ -296,25 +296,37 @@ let traces_enabled_lemma mem isa id =
   let (f, name, call) = get_fun_info ~annot_kids:true isa id in
   let priv_cap_regs_read =
     if ids_overlap isa.system_access_checks f.trans_calls then IdSet.empty else
-    IdSet.inter isa.read_privileged_regs f.trans_regs_read_no_exc
+      IdSet.union
+        (IdSet.inter isa.read_privileged_regs f.trans_regs_read_no_exc)
+        (IdSet.inter (IdSet.diff isa.read_privileged_regs isa.read_exception_regs) f.trans_regs_read)
   in
   let priv_regs_written =
     if ids_overlap isa.system_access_checks f.trans_calls then IdSet.empty else
-    IdSet.inter isa.write_privileged_regs f.trans_regs_written_no_exc
+      IdSet.union
+        (IdSet.inter isa.write_privileged_regs f.trans_regs_written_no_exc)
+        (IdSet.inter (IdSet.diff isa.write_privileged_regs isa.write_exception_regs) f.trans_regs_written)
   in
   let nonpriv_cap_regs_read = IdSet.inter (IdSet.diff (special_regs isa) (privileged_regs isa)) f.trans_regs_read in
   let cap_regs_read = IdSet.union priv_cap_regs_read nonpriv_cap_regs_read in
-  let cap_reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") (IdSet.elements cap_regs_read) in
+  let reg_names_of rs = List.map (fun r -> "''" ^ string_of_id r ^ "''") (IdSet.elements rs) in
+  let cap_reg_names = reg_names_of cap_regs_read in
   let cap_assm =
     if IdSet.subset cap_regs_read isa.read_privileged_regs && not (writes isa.cap_regs f) && not (IdSet.is_empty cap_regs_read) && not mem then
       (* The register read axiom allows reading privileged registers in the exception case (ex_traces), although that is not sufficient
        * to allow use of the read capabilities for general purposes, only for writing the PCC *)
-      ["{" ^ String.concat ", " cap_reg_names ^ "} \\<subseteq> accessible_regs s \\<or> ex_traces"]
+      let ex_regs = reg_names_of (IdSet.inter cap_regs_read isa.read_exception_regs) in
+      let other_regs = reg_names_of (IdSet.diff cap_regs_read isa.read_exception_regs) in
+      (if ex_regs = [] then [] else ["{" ^ String.concat ", " cap_reg_names ^ "} \\<subseteq> accessible_regs s \\<or> ex_traces"]) @
+      (if other_regs = [] then [] else ["{" ^ String.concat ", " cap_reg_names ^ "} \\<subseteq> accessible_regs s"])
     else if ids_overlap cap_regs_read isa.read_privileged_regs || (writes isa.cap_regs f && not (IdSet.is_empty cap_regs_read)) then
       ["{" ^ String.concat ", " cap_reg_names ^ "} \\<subseteq> accessible_regs s"]
     else []
   in
-  let asr_assm = if IdSet.is_empty priv_regs_written || mem then [] else ["system_reg_access s \\<or> ex_traces"] in
+  let asr_assm =
+    if IdSet.is_empty priv_regs_written || mem then [] else
+    if IdSet.subset priv_regs_written isa.write_exception_regs then ["system_reg_access s \\<or> ex_traces"] else
+    ["system_reg_access s"]
+  in
   let cap_arg_assms =
     if has_mem_eff f || writes isa.cap_regs f then
       List.concat (List.mapi (fun i (a, t) -> if is_cap_typ isa t then [mangle_arg_name isa a ^ " \\<in> derivable_caps s"] else []) f.args)
@@ -420,7 +432,12 @@ let write_non_cap_regs_lemma isa : lemma =
 let write_regs_lemma isa =
   let stmt r =
     let (var, cap_assm) = if IdSet.mem r isa.cap_regs then ("c", "c \\<in> derivable_caps s \\<Longrightarrow> ") else ("v", "") in
-    let asr_assm = if IdSet.mem r isa.write_privileged_regs then "system_reg_access s \\<or> ex_traces \\<Longrightarrow> " else "" in
+    let asr_assm =
+      if IdSet.mem r isa.write_privileged_regs then
+        if IdSet.mem r isa.write_exception_regs then "system_reg_access s \\<or> ex_traces \\<Longrightarrow> " else
+        "system_reg_access s \\<Longrightarrow> "
+      else ""
+    in
     "\\<And>" ^ var ^ ". " ^ cap_assm ^ asr_assm ^ "traces_enabled (write_reg " ^ mangle_reg_ref isa r ^ " " ^ var ^ ") s"
   in
   let regs = IdSet.elements (IdSet.union isa.cap_regs isa.write_privileged_regs) in
@@ -431,7 +448,12 @@ let write_regs_lemma isa =
 
 let read_regs_lemma isa =
   let stmt r =
-    let asr_assm = if IdSet.mem r isa.read_privileged_regs then "system_reg_access s \\<or> ex_traces \\<Longrightarrow> " else "" in
+    let asr_assm =
+      if IdSet.mem r isa.read_privileged_regs then
+        if IdSet.mem r isa.read_exception_regs then "system_reg_access s \\<or> ex_traces \\<Longrightarrow> " else
+        "system_reg_access s \\<Longrightarrow> "
+      else ""
+    in
     asr_assm ^ "traces_enabled (read_reg " ^ mangle_reg_ref isa r ^ ") s"
   in
   (*let regs = State.find_registers isa.ast |> List.map snd in*)

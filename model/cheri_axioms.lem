@@ -26,6 +26,8 @@ type isa 'cap 'regval 'instr 'e =
      exception_targets : set 'regval -> set 'cap;
      read_privileged_regs : set register_name;
      write_privileged_regs : set register_name;
+     read_exception_regs : set register_name;
+     write_exception_regs : set register_name;
      is_translation_event : event 'regval -> bool;
      translate_address : nat -> acctype -> trace 'regval -> maybe nat |>
 
@@ -118,7 +120,7 @@ let read_reg_axiom ISA has_ex t =
      (index t i = Just (E_read_reg r v) && r IN ISA.read_privileged_regs)
      -->
      (system_access_permitted_before_idx ISA i t ||
-      (has_ex (*&& r IN ISA.KCC*))))
+      (has_ex && r IN ISA.read_exception_regs)))
 
 val write_reg_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap, Eq 'regval =>
   isa 'cap 'regval 'instr 'e -> bool -> trace 'regval -> bool
@@ -126,7 +128,8 @@ let write_reg_axiom ISA has_ex t =
   (forall i r v.
      (index t i = Just (E_write_reg r v) && r IN ISA.write_privileged_regs)
      -->
-     (system_access_permitted_before_idx ISA i t || has_ex))
+     (system_access_permitted_before_idx ISA i t ||
+      (has_ex && r IN ISA.write_exception_regs)))
 
 val store_cap_mem_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
   isa 'cap 'regval 'instr 'e -> bool -> set 'cap -> trace 'regval -> bool

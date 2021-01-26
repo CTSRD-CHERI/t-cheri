@@ -1122,7 +1122,7 @@ abbreviation invokes_indirect_caps where "invokes_indirect_caps \<equiv> (invoke
 
 fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool" where
   "enabled s (E_write_reg r v) \<longleftrightarrow>
-     (r \<in> write_privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> ex_traces)) \<and>
+     (r \<in> write_privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> r \<in> write_exception_regs ISA \<and> ex_traces)) \<and>
      (\<forall>c. (c \<in> caps_of_regval ISA v \<and> is_tagged_method CC c)
          \<longrightarrow>
          (c \<in> derivable (accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s) \<or>
@@ -1142,7 +1142,7 @@ fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Righta
                 c' \<in> derivable (accessed_mem_caps s) \<and>
                 ((leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c' \<and> r \<in> PCC ISA) \<or>
                  (leq_cap CC c c' \<and> r \<in> PCC ISA \<union> IDC ISA)))))"
-| "enabled s (E_read_reg r v) = (r \<in> read_privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> ex_traces))"
+| "enabled s (E_read_reg r v) = (r \<in> read_privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> r \<in> read_exception_regs ISA \<and> ex_traces))"
 | "enabled s (E_write_memt _ addr sz bytes tag _) =
      (\<forall>c.  cap_of_mem_bytes_method CC bytes tag = Some c \<and> is_tagged_method CC c \<longrightarrow> c \<in> derivable (accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s))"
 | "enabled s _ = True"
@@ -2352,13 +2352,13 @@ qed
 
 lemma read_reg_trace_enabled:
   assumes t: "(read_reg r, t, m') \<in> Traces"
-    and r: "name r \<in> read_privileged_regs ISA \<longrightarrow> system_reg_access s \<or> ex_traces"
+    and r: "name r \<in> read_privileged_regs ISA \<longrightarrow> system_reg_access s \<or> name r \<in> read_exception_regs ISA \<and> ex_traces"
   shows "trace_enabled s t"
   by (use t in \<open>auto simp: read_reg_def elim!: Read_reg_TracesE split: option.splits\<close>)
      (use r in \<open>auto\<close>)
 
 lemma traces_enabled_read_reg:
-  assumes "name r \<in> read_privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> ex_traces)"
+  assumes "name r \<in> read_privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> name r \<in> read_exception_regs ISA \<and> ex_traces)"
   shows "traces_enabled (read_reg r) s"
   using assms
   unfolding traces_enabled_def
@@ -2445,13 +2445,13 @@ qed
 
 lemma read_reg_trace_enabled:
   assumes t: "(read_reg r, t, m') \<in> Traces"
-    and r: "name r \<in> read_privileged_regs ISA \<longrightarrow> system_reg_access s \<or> ex_traces"
+    and r: "name r \<in> read_privileged_regs ISA \<longrightarrow> system_reg_access s \<or> name r \<in> read_exception_regs ISA \<and> ex_traces"
   shows "trace_enabled s t"
   by (use t in \<open>auto simp: read_reg_def elim!: Read_reg_TracesE split: option.splits\<close>)
      (use r in \<open>auto\<close>)
 
 lemma traces_enabled_read_reg:
-  assumes "name r \<in> read_privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> ex_traces)"
+  assumes "name r \<in> read_privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> name r \<in> read_exception_regs ISA \<and> ex_traces)"
   shows "traces_enabled (read_reg r) s regs"
   using assms
   unfolding traces_enabled_def

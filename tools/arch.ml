@@ -13,6 +13,8 @@ type isa =
     cap_regs : IdSet.t;
     read_privileged_regs : IdSet.t;
     write_privileged_regs : IdSet.t;
+    read_exception_regs : IdSet.t;
+    write_exception_regs : IdSet.t;
     system_access_checks : IdSet.t;
     pcc_regs : IdSet.t;
     idc_regs : IdSet.t;
@@ -157,6 +159,8 @@ let load_isa file src_dir =
     cap_regs;
     read_privileged_regs = optional_idset (member "read_privileged_regs" arch);
     write_privileged_regs = optional_idset (member "write_privileged_regs" arch);
+    read_exception_regs = optional_idset (member "read_exception_regs" arch);
+    write_exception_regs = optional_idset (member "write_exception_regs" arch);
     system_access_checks = optional_idset (member "system_access_checks" arch);
     pcc_regs = optional_idset (member "pcc" arch);
     idc_regs = optional_idset (member "idc" arch);
