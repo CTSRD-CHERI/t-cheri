@@ -2,6 +2,101 @@ theory Properties
 imports Cheri_axioms_lemmas Sail.Sail2_state_lemmas
 begin
 
+section \<open>Helper lemmas and definitions\<close>
+
+text \<open>TODO: Add to the Sail library\<close>
+
+fun consumesTrace :: "('regval, 'a, 'e) monad \<Rightarrow> 'regval trace \<Rightarrow> nat option" where
+  "consumesTrace m [] = (if final m then Some 0 else None)"
+| "consumesTrace m (e # t) =
+     (if final m then Some 0 else
+      case emitEvent m e of
+        Some m' \<Rightarrow> (case consumesTrace m' t of Some n \<Rightarrow> Some (Suc n) | None \<Rightarrow> None)
+      | None \<Rightarrow> None)"
+
+lemma hasTrace_iff_runTrace_final:
+  "hasTrace t m \<longleftrightarrow> (\<exists>m'. runTrace t m = Some m' \<and> final m')"
+  by (auto simp: hasTrace_def split: option.splits)
+
+lemma hasTrace_Cons_emitEvent:
+  "hasTrace (e # t) m \<longleftrightarrow> (\<exists>m'. emitEvent m e = Some m' \<and> hasTrace t m')"
+  by (cases "emitEvent m e") (auto simp: hasTrace_def)
+
+lemma final_emitEvent_None:
+  assumes "final m"
+  shows "emitEvent m e = None"
+  using assms
+  by (cases rule: final_cases) (auto simp: emitEvent_def split: event.splits)
+
+lemma final_runTrace_Nil:
+  assumes "final m"
+  shows "runTrace t m = Some m' \<longleftrightarrow> t = [] \<and> m' = m"
+  using assms
+  by (cases t) (auto simp: final_emitEvent_None)
+
+lemma final_hasTrace_Nil:
+  "final m \<Longrightarrow> hasTrace t m \<longleftrightarrow> t = []"
+  by (auto simp: hasTrace_def final_runTrace_Nil split: option.splits)
+
+lemma final_consumesTrace_Nil:
+  "final m \<Longrightarrow> consumesTrace m t = Some 0"
+  by (cases t) auto
+
+lemma hasTrace_consumesTrace:
+  assumes "hasTrace t m"
+  shows "consumesTrace m (t @ t') = Some (length t)"
+  using assms
+  by (induction t m rule: runTrace.induct)
+     (auto simp: hasTrace_iff_runTrace_final final_emitEvent_None final_consumesTrace_Nil
+           simp: bind_eq_Some_conv split: option.splits)
+
+lemma hasTrace_take_consumesTrace:
+  assumes "hasTrace (take n t) m" and "n \<le> length t"
+  shows "consumesTrace m t = Some n"
+  using assms hasTrace_consumesTrace[where t = "take n t" and t' = "drop n t"]
+  by (auto simp: min_absorb2)
+
+lemma consumesTrace_hasTrace:
+  assumes "consumesTrace m t = Some n"
+  shows "hasTrace (take n t) m"
+  using assms
+  by (induction m t arbitrary: n rule: consumesTrace.induct)
+     (auto simp: final_hasTrace_Nil hasTrace_Cons_emitEvent split: if_splits option.splits)
+
+lemma consumesTrace_length:
+  assumes "consumesTrace m t = Some n"
+  shows "n \<le> length t"
+  using assms
+  by (induction m t arbitrary: n rule: consumesTrace.induct) (auto split: if_splits option.splits)
+
+lemma consumesTrace_iff_hasTrace:
+  "consumesTrace m t = Some n \<longleftrightarrow> hasTrace (take n t) m \<and> n \<le> length t"
+  by (auto intro: hasTrace_take_consumesTrace consumesTrace_hasTrace consumesTrace_length)
+
+lemma runTraceS_rev_induct[consumes 1, case_names Init Step]:
+  assumes "runTraceS ra t s = Some s'"
+    and Init: "P [] s"
+    and Step: "\<And>t e s'' s'. runTraceS ra t s = Some s'' \<Longrightarrow> emitEventS ra e s'' = Some s' \<Longrightarrow> P t s'' \<Longrightarrow> P (t @ [e]) s'"
+  shows "P t s'"
+  using assms
+  by (induction t arbitrary: s' rule: rev_induct)
+     (auto elim: runTraceS_appendE runTraceS_ConsE simp: bind_eq_Some_conv)
+
+lemma runTraceS_appendI:
+  assumes "runTraceS ra t s = Some s''" and "runTraceS ra t' s'' = Some s'"
+  shows "runTraceS ra (t @ t') s = Some s'"
+  using assms
+  by (induction t arbitrary: s) (auto simp: bind_eq_Some_conv)
+
+lemma runTraceS_append_iff:
+  "runTraceS ra (t @ t') s = Some s' \<longleftrightarrow> (\<exists>s''. runTraceS ra t s = Some s'' \<and> runTraceS ra t' s'' = Some s')"
+  by (auto intro: runTraceS_appendI elim: runTraceS_appendE)
+
+lemma Run_hasTrace: "Run m t a \<Longrightarrow> hasTrace t m"
+  by (auto simp: hasTrace_iff_Traces_final final_def)
+
+section \<open>Single-instruction monotonicity\<close>
+
 locale CHERI_ISA = Capability_ISA CC ISA
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa" +
   fixes fetch_assms :: "'regval trace \<Rightarrow> bool" and instr_assms :: "'regval trace \<Rightarrow> bool"
@@ -85,6 +180,37 @@ lemma s_invariant_run_trace_eq:
   using assms
   by (induction f t s rule: s_invariant.induct)
      (auto split: option.splits elim: runTraceS_ConsE)
+
+lemma take_s_invariantI:
+  assumes "s_run_trace t s = Some s'"
+    and inv: "\<And>n s''. s_run_trace (take n t) s = Some s'' \<Longrightarrow> n \<le> length t \<Longrightarrow> f s'' = f s"
+  shows "s_invariant f t s"
+proof (use assms in \<open>induction t s' rule: runTraceS_rev_induct\<close>)
+  case Init
+  then show ?case by auto
+next
+  case (Step t e s'' s')
+  moreover have "f s'' = f s" and "f s' = f s"
+    using Step.hyps Step.prems[of "length t"] Step.prems[of "Suc (length t)"]
+    by (auto simp: runTraceS_append_iff)
+  moreover have "s_invariant f t s"
+  proof (rule Step.IH)
+    fix n s''
+    assume "s_run_trace (take n t) s = Some s''" and "n \<le> length t"
+    then show "f s'' = f s"
+      by (intro Step.prems[of n]) auto
+  qed
+  ultimately show ?case
+    by (auto simp: s_invariant_append)
+qed
+
+lemma take_s_invariant_holdsI[consumes 1, case_names Init Inv]:
+  assumes t: "s_run_trace t s = Some s'"
+    and init: "P s"
+    and inv: "\<And>n s''. s_run_trace (take n t) s = Some s'' \<Longrightarrow> n \<le> length t \<Longrightarrow> P s''"
+  shows "s_invariant_holds P t s"
+  using assms
+  by (auto intro: take_s_invariantI)
 
 inductive_set reachable_caps :: "'regs sequential_state \<Rightarrow> 'cap set" for s :: "'regs sequential_state" where
   Reg: "\<lbrakk>c \<in> get_reg_caps r s; r \<notin> read_privileged_regs ISA; is_tagged_method CC c\<rbrakk> \<Longrightarrow> c \<in> reachable_caps s"
@@ -237,49 +363,41 @@ lemma reachable_caps_plus_mono:
   using assms
   by (auto intro: reachable_caps_plus_member_mono)
 
-lemma runTraceS_rev_induct[consumes 1, case_names Init Step]:
-  assumes "s_run_trace t s = Some s'"
-    and Init: "P [] s"
-    and Step: "\<And>t e s'' s'. s_run_trace t s = Some s'' \<Longrightarrow> s_emit_event e s'' = Some s' \<Longrightarrow> P t s'' \<Longrightarrow> P (t @ [e]) s'"
-  shows "P t s'"
-  using assms
-  by (induction t arbitrary: s' rule: rev_induct)
-     (auto elim: runTraceS_appendE runTraceS_ConsE simp: bind_eq_Some_conv)
-
 lemma get_reg_val_s_run_trace_cases:
-  assumes v: "get_reg_val r s' = Some v" and c: "c \<in> caps_of_regval ISA v"
-    and s': "s_run_trace t s = Some s'"
-  obtains (Init) "get_reg_val r s = Some v"
-  | (Update) j v' where "t ! j = E_write_reg r v'" and "c \<in> caps_of_regval ISA v'" and "j < length t"
-proof (use s' v c in \<open>induction rule: runTraceS_rev_induct\<close>)
+  assumes s': "s_run_trace t s = Some s'"
+  obtains (Init) "get_reg_val r s' = get_reg_val r s"
+  | (Update) j v where "get_reg_val r s' = Some v" and "t ! j = E_write_reg r v" and "j < length t"
+proof (use s' in \<open>induction rule: runTraceS_rev_induct\<close>)
   case (Step t e s'' s')
   note Init = Step(4)
   note Update = Step(5)
-  note c = \<open>c \<in> caps_of_regval ISA v\<close>
-  show ?case
+  from \<open>s_emit_event e s'' = Some s'\<close>
+  consider (Nop) "get_reg_val r s' = get_reg_val r s''"
+    | (Write) v where "e = E_write_reg r v" and "get_reg_val r s' = Some v"
+  proof (cases rule: emitEventS_update_cases)
+    case (Write_reg r' v rs')
+    then show ?thesis
+      using that
+      by (cases "r' = r") (auto simp: read_absorb_write read_ignore_write)
+  qed (auto simp: put_mem_bytes_def Let_def)
+  then show ?thesis
   proof cases
-    assume v_s'': "get_reg_val r s'' = Some v"
+    case Nop
     show ?thesis
-    proof (rule Step.IH[OF _ _ v_s'' c])
-      assume "get_reg_val r s = Some v"
-      then show thesis by (intro Init)
+    proof (rule Step.IH)
+      assume "get_reg_val r s'' = get_reg_val r s"
+      with Nop show ?thesis
+        by (intro Init) auto
     next
-      fix j v'
-      assume "t ! j = E_write_reg r v'" and "c \<in> caps_of_regval ISA v'" and "j < length t"
-      then show thesis by (intro Update[of j v']) (auto simp: nth_append_left)
+      fix v j
+      assume "get_reg_val r s'' = Some v" and "t ! j = E_write_reg r v" "j < length t"
+      with Nop show ?thesis
+        by (intro Update[of v j]) (auto simp: nth_append)
     qed
   next
-    assume v_s'': "get_reg_val r s'' \<noteq> Some v"
-    note e = \<open>s_emit_event e s'' = Some s'\<close>
-    note v_s' = \<open>get_reg_val r s' = Some v\<close>
-    from e v_s' v_s'' have "e = E_write_reg r v"
-    proof (cases rule: emitEventS_update_cases)
-      case (Write_reg r' v' rs')
-      then show ?thesis
-        using v_s' v_s''
-        by (cases "r' = r") (auto simp: read_ignore_write read_absorb_write)
-    qed (auto simp: put_mem_bytes_def Let_def)
-    then show thesis using c by (auto intro: Update[of "length t" v])
+    case (Write v)
+    then show ?thesis
+      by (intro Update[of v "length t"]) auto
   qed
 qed auto
 
@@ -367,7 +485,7 @@ lemma reads_reg_cap_non_privileged_accessible[intro]:
   shows "c \<in> available_caps CC ISA use_mem_caps i t"
 proof -
   from assms have c: "c \<in> available_caps CC ISA use_mem_caps (Suc j) t"
-    by (auto simp: bind_eq_Some_conv image_iff available_caps.simps available_reg_caps.simps)
+    by (auto simp: bind_eq_Some_conv image_iff available_caps_def available_reg_caps.simps)
   consider "i = Suc j" | "Suc j < i" using \<open>j < i\<close>
     by (cases "i = Suc j") auto
   then show "c \<in> available_caps CC ISA use_mem_caps i t"
@@ -388,7 +506,7 @@ lemma writes_reg_cap_nth_provenance[consumes 5]:
     and "i < length t"
     and tagged: "is_tagged_method CC c"
   obtains (Accessible) "c \<in> derivable (available_caps CC ISA (inv_indirect_caps = {} \<and> use_mem_caps) i t)"
-  | (Exception) v' r' j where "c \<in> exception_targets ISA {v. \<exists>r j. j < i \<and> j < length t \<and> t ! j = E_read_reg r v \<and> r \<in> KCC ISA}" (* "leq_cap CC c c'"*)
+  | (Exception) v' r' j where "c \<in> exception_targets_at_idx ISA i t" (* "leq_cap CC c c'"*)
     (*and "t ! j = E_read_reg r' v'" and "j < i"*) (*and "c' \<in> caps_of_regval ISA v'"*)
     (*and "r' \<in> KCC ISA"*) and "r \<in> PCC ISA" and "has_ex"
   | (Sentry) cs where "c \<in> inv_caps" and "cs \<in> derivable (available_caps CC ISA (inv_indirect_caps = {} \<and> use_mem_caps) i t)"
@@ -618,9 +736,81 @@ lemma put_regval_get_mem_cap:
   shows "get_mem_cap addr sz s' = get_mem_cap addr sz s"
   using assms by (auto cong: bind_option_cong simp: get_mem_bytes_def)
 
+text \<open>System register and address translation invariants\<close>
+
 definition system_access_reachable_plus :: "'cap set \<Rightarrow> 'regs sequential_state \<Rightarrow> bool" where
   "system_access_reachable_plus C s \<equiv> \<exists>c \<in> reachable_caps_plus C s.
      permits_system_access_method CC c \<and> is_tagged_method CC c \<and> \<not>is_sealed_method CC c"
+
+abbreviation "system_access_reachable s \<equiv> system_access_reachable_plus {} s"
+
+definition priv_regs_invariant :: "bool \<Rightarrow> 'regs sequential_state \<Rightarrow> 'regs sequential_state \<Rightarrow> bool" where
+  "priv_regs_invariant has_ex s0 s \<equiv>
+     (\<forall>r. r \<in> write_privileged_regs ISA \<and> (r \<in> write_exception_regs ISA \<longrightarrow> \<not>has_ex) \<longrightarrow>
+          get_reg_val r s = get_reg_val r s0)"
+
+definition addr_trans_invariant :: "bool \<Rightarrow> 'regs sequential_state \<Rightarrow> 'regs sequential_state \<Rightarrow> bool" where
+  "addr_trans_invariant has_ex s0 s \<equiv>
+     (system_access_reachable s0 \<or> priv_regs_invariant has_ex s0 s) \<longrightarrow>
+     (\<forall>vaddr acctype. s_translate_address vaddr acctype s = s_translate_address vaddr acctype s0)"
+
+lemma addr_trans_invariant_refl[intro, simp]:
+  "addr_trans_invariant has_ex s s"
+  by (auto simp: addr_trans_invariant_def)
+
+lemma system_access_reachable_if_permitted:
+  assumes axioms: "cheri_axioms CC ISA is_fetch has_ex use_mem_caps inv_caps inv_indirect_caps t"
+    and t: "s_run_trace t s = Some s'"
+    and asr: "system_access_permitted_before_idx CC ISA i t"
+  shows "system_access_reachable s"
+proof -
+  from asr obtain c where *: "c \<in> available_caps CC ISA (inv_indirect_caps = {} \<and> use_mem_caps) i t"
+    and c: "permits_system_access_method CC c" "is_tagged_method CC c" "\<not>is_sealed_method CC c"
+    by (auto elim!: system_access_permitted_at_idx_available_caps)
+  then have "c \<in> reachable_caps s"
+    using derivable_available_caps_subseteq_reachable_caps[OF axioms t] derivable_refl
+    by auto
+  then show ?thesis
+    using c
+    by (auto simp: system_access_reachable_plus_def)
+qed
+
+lemma no_asr_priv_reg_invariant:
+  assumes axioms: "cheri_axioms CC ISA is_fetch has_ex use_mem_caps inv_caps inv_indirect_caps t"
+    and t: "s_run_trace t s = Some s'"
+    and no_asr: "\<not>system_access_reachable s"
+    and r: "r \<in> write_privileged_regs ISA \<and> (r \<in> write_exception_regs ISA \<longrightarrow> \<not>has_ex)"
+  shows "get_reg_val r s = get_reg_val r s'"
+proof (use t in \<open>cases rule: get_reg_val_s_run_trace_cases[where r = r]\<close>)
+  case Init
+  then show ?thesis ..
+next
+  case (Update j v)
+  then have "system_access_permitted_before_idx CC ISA j t"
+    using t axioms r
+    unfolding cheri_axioms_def write_reg_axiom_def
+    by fastforce
+  from system_access_reachable_if_permitted[OF axioms t this] no_asr
+  have "False"
+    by auto
+  then show ?thesis ..
+qed
+
+lemma no_asr_no_ex_priv_regs_invariant:
+  assumes axioms: "cheri_axioms CC ISA is_fetch has_ex use_mem_caps inv_caps inv_indirect_caps t"
+    and t: "s_run_trace t s = Some s'"
+    and no_asr: "\<not>system_access_reachable s"
+  shows "s_invariant_holds (priv_regs_invariant has_ex s) t s"
+proof (use t in \<open>induction rule: take_s_invariant_holdsI\<close>)
+  case Init
+  then show ?case
+    by (auto simp: priv_regs_invariant_def)
+next
+  case (Inv n s'')
+  then show ?case
+    using no_asr_priv_reg_invariant[OF cheri_axioms_take[where n = n, OF axioms]] no_asr
+    by (auto simp: priv_regs_invariant_def)
+qed
 
 lemma get_reg_cap_intra_domain_trace_reachable:
   assumes r: "c \<in> get_reg_caps r s'"
@@ -636,8 +826,8 @@ lemma get_reg_cap_intra_domain_trace_reachable:
 proof -
   from r obtain v where v: "get_reg_val r s' = Some v" and c: "c \<in> caps_of_regval ISA v"
     by (auto simp: bind_eq_Some_conv split: option.splits)
-  from v c s' show "c \<in> reachable_caps_plus C s"
-  proof (cases rule: get_reg_val_s_run_trace_cases)
+  from s' show "c \<in> reachable_caps_plus C s"
+  proof (cases rule: get_reg_val_s_run_trace_cases[where r = r])
     case Init
     show ?thesis
     proof cases
@@ -648,19 +838,19 @@ proof -
         using reachable_caps_plus_mono[OF C]
         by (auto simp: system_access_reachable_plus_def)
       then show "c \<in> reachable_caps_plus C s"
-        using Init c tag
+        using Init c tag v
         by (intro reachable_caps_plus.SysReg[OF _ r c']) auto
     next
       assume "r \<notin> read_privileged_regs ISA"
       then have "c \<in> reachable_caps s"
-        using Init c tag
+        using Init c tag v
         by (intro reachable_caps.Reg) auto
       then show ?thesis
         using reachable_caps_subset_plus
         by blast
     qed
   next
-    case (Update j v')
+    case (Update j)
     show ?thesis
     proof cases
       assume "c \<in> invoked_caps \<union> invoked_indirect_caps"
@@ -668,12 +858,13 @@ proof -
         using C
         by (intro reachable_caps_plus.Plus) auto
     next
-      assume c: "c \<notin> invoked_caps \<union> invoked_indirect_caps"
+      assume c_not_inv: "c \<notin> invoked_caps \<union> invoked_indirect_caps"
       from Update have "c \<in> writes_reg_caps CC (caps_of_regval ISA) (t ! j)"
         and "writes_to_reg (t ! j) = Some r"
-        using tag by auto
+        using tag c v
+        by auto
       then have "c \<in> derivable (available_caps CC ISA (invoked_indirect_caps = {} \<and> use_mem_caps) j t)"
-        using axioms tag \<open>j < length t\<close> c
+        using axioms tag \<open>j < length t\<close> c_not_inv
         unfolding cheri_axioms_def
         by (auto elim!: store_cap_reg_axiomE simp: cap_derivable_iff_derivable)
       moreover have "derivable (available_caps CC ISA (invoked_indirect_caps = {} \<and> use_mem_caps) j t) \<subseteq> reachable_caps s"
@@ -689,7 +880,7 @@ qed
 lemma reachable_caps_trace_intradomain_monotonicity:
   assumes axioms: "cheri_axioms CC ISA is_fetch False use_mem_caps invoked_caps invoked_indirect_caps t"
     and s': "s_run_trace t s = Some s'"
-    and addr_trans_inv: "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t s"
+    and addr_trans_inv: "s_invariant_holds (addr_trans_invariant False s) t s"
   shows "reachable_caps_plus C s' \<subseteq> reachable_caps_plus (C \<union> invoked_caps \<union> invoked_indirect_caps) s"
 proof
   fix c
@@ -701,7 +892,7 @@ proof
       using axioms s'
       by (intro get_reg_cap_intra_domain_trace_reachable) auto
   next
-    case (SysReg r c c')
+    case (SysReg c r c')
     then show ?case
       using axioms s'
       by (intro get_reg_cap_intra_domain_trace_reachable) (auto simp: system_access_reachable_plus_def)
@@ -717,8 +908,16 @@ proof
     proof (cases rule: get_mem_cap_run_trace_cases)
       case Initial
       have "s_translate_address vaddr Load s' = s_translate_address vaddr Load s"
-        using s_invariant_run_trace_eq[OF addr_trans_inv s']
-        by meson
+      proof -
+        have "addr_trans_invariant False s s'"
+          using addr_trans_inv
+          by (auto dest: s_invariant_run_trace_eq[OF _ s'])
+        moreover have "priv_regs_invariant False s s'" if "\<not>system_access_reachable s"
+          using no_asr_no_ex_priv_regs_invariant[OF axioms s' that]
+          by (auto dest: s_invariant_run_trace_eq[OF _ s'])
+        ultimately show ?thesis
+          by (auto simp: addr_trans_invariant_def)
+      qed
       then show ?thesis
         using Initial Mem
         by (intro reachable_caps_plus.Mem[of addr s c vaddr c']) (auto split: if_splits)
@@ -743,7 +942,7 @@ lemma reachable_caps_plus_instr_trace_intradomain_monotonicity:
     and ta: "instr_assms t"
     and s': "s_run_trace t s = Some s'"
     and no_exception: "\<not>instr_raises_ex ISA instr t"
-    and addr_trans_inv: "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t s"
+    and addr_trans_inv: "s_invariant_holds (addr_trans_invariant False s) t s"
   shows "reachable_caps_plus C s' \<subseteq> reachable_caps_plus (C \<union> invokes_caps ISA instr t \<union> invokes_indirect_caps ISA instr t) s"
   using assms instr_cheri_axioms[OF t ta]
   by (intro reachable_caps_trace_intradomain_monotonicity) auto
@@ -754,7 +953,7 @@ lemma reachable_caps_instr_trace_intradomain_monotonicity:
     and s': "s_run_trace t s = Some s'"
     and no_exception: "\<not>instr_raises_ex ISA instr t"
     and invoked_caps_reachable: "invokes_caps ISA instr t \<union> invokes_indirect_caps ISA instr t \<subseteq> reachable_caps s"
-    and addr_trans_inv: "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t s"
+    and addr_trans_inv: "s_invariant_holds (addr_trans_invariant False s) t s"
   shows "reachable_caps s' \<subseteq> reachable_caps s"
 proof -
   have "reachable_caps_plus {} s' \<subseteq> reachable_caps_plus ({} \<union> invokes_caps ISA instr t \<union> invokes_indirect_caps ISA instr t) s"
@@ -770,7 +969,7 @@ lemma reachable_caps_plus_fetch_trace_intradomain_monotonicity:
     and ta: "fetch_assms t"
     and s': "s_run_trace t s = Some s'"
     and no_exception: "\<not>fetch_raises_ex ISA t"
-    and addr_trans_inv: "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t s"
+    and addr_trans_inv: "s_invariant_holds (addr_trans_invariant False s) t s"
   shows "reachable_caps_plus C s' \<subseteq> reachable_caps_plus C s"
 proof -
   have "reachable_caps_plus C s' \<subseteq> reachable_caps_plus (C \<union> {} \<union> {}) s"
@@ -785,74 +984,7 @@ lemmas reachable_caps_fetch_trace_intradomain_monotonicity =
 
 end
 
-text \<open>TODO: Add to the Sail library\<close>
-
-fun consumesTrace :: "('regval, 'a, 'e) monad \<Rightarrow> 'regval trace \<Rightarrow> nat option" where
-  "consumesTrace m [] = (if final m then Some 0 else None)"
-| "consumesTrace m (e # t) =
-     (if final m then Some 0 else
-      case emitEvent m e of
-        Some m' \<Rightarrow> (case consumesTrace m' t of Some n \<Rightarrow> Some (Suc n) | None \<Rightarrow> None)
-      | None \<Rightarrow> None)"
-
-lemma hasTrace_iff_runTrace_final:
-  "hasTrace t m \<longleftrightarrow> (\<exists>m'. runTrace t m = Some m' \<and> final m')"
-  by (auto simp: hasTrace_def split: option.splits)
-
-lemma hasTrace_Cons_emitEvent:
-  "hasTrace (e # t) m \<longleftrightarrow> (\<exists>m'. emitEvent m e = Some m' \<and> hasTrace t m')"
-  by (cases "emitEvent m e") (auto simp: hasTrace_def)
-
-lemma final_emitEvent_None:
-  assumes "final m"
-  shows "emitEvent m e = None"
-  using assms
-  by (cases rule: final_cases) (auto simp: emitEvent_def split: event.splits)
-
-lemma final_runTrace_Nil:
-  assumes "final m"
-  shows "runTrace t m = Some m' \<longleftrightarrow> t = [] \<and> m' = m"
-  using assms
-  by (cases t) (auto simp: final_emitEvent_None)
-
-lemma final_hasTrace_Nil:
-  "final m \<Longrightarrow> hasTrace t m \<longleftrightarrow> t = []"
-  by (auto simp: hasTrace_def final_runTrace_Nil split: option.splits)
-
-lemma final_consumesTrace_Nil:
-  "final m \<Longrightarrow> consumesTrace m t = Some 0"
-  by (cases t) auto
-
-lemma hasTrace_consumesTrace:
-  assumes "hasTrace t m"
-  shows "consumesTrace m (t @ t') = Some (length t)"
-  using assms
-  by (induction t m rule: runTrace.induct)
-     (auto simp: hasTrace_iff_runTrace_final final_emitEvent_None final_consumesTrace_Nil
-           simp: bind_eq_Some_conv split: option.splits)
-
-lemma hasTrace_take_consumesTrace:
-  assumes "hasTrace (take n t) m" and "n \<le> length t"
-  shows "consumesTrace m t = Some n"
-  using assms hasTrace_consumesTrace[where t = "take n t" and t' = "drop n t"]
-  by (auto simp: min_absorb2)
-
-lemma consumesTrace_hasTrace:
-  assumes "consumesTrace m t = Some n"
-  shows "hasTrace (take n t) m"
-  using assms
-  by (induction m t arbitrary: n rule: consumesTrace.induct)
-     (auto simp: final_hasTrace_Nil hasTrace_Cons_emitEvent split: if_splits option.splits)
-
-lemma consumesTrace_length:
-  assumes "consumesTrace m t = Some n"
-  shows "n \<le> length t"
-  using assms
-  by (induction m t arbitrary: n rule: consumesTrace.induct) (auto split: if_splits option.splits)
-
-lemma consumesTrace_iff_hasTrace:
-  "consumesTrace m t = Some n \<longleftrightarrow> hasTrace (take n t) m \<and> n \<le> length t"
-  by (auto intro: hasTrace_take_consumesTrace consumesTrace_hasTrace consumesTrace_length)
+section \<open>Multi-instruction monotonicity\<close>
 
 text \<open>Multi-instruction sequences\<close>
 
@@ -880,9 +1012,6 @@ fun instrs_invoke_caps :: "('cap, 'regval, 'instr, 'e) isa \<Rightarrow> nat \<R
              (c \<in> invokes_caps ISA instr (take ni (drop nf t)) \<or>
               c \<in> instrs_invoke_caps ISA bound (drop ni (drop nf t)))))}"
 | "instrs_invoke_caps ISA 0 t = {}"
-
-lemma Run_hasTrace: "Run m t a \<Longrightarrow> hasTrace t m"
-  by (auto simp: hasTrace_iff_Traces_final final_def)
 
 lemma instrs_invoke_caps_Suc:
   assumes tf: "Run (instr_fetch ISA) tf instr" and ti: "hasTrace ti (instr_sem ISA instr)"
@@ -962,7 +1091,7 @@ lemma reachable_caps_plus_instrs_trace_intradomain_monotonicity:
     and ta: "fetch_assms t"
     and s': "s_run_trace t s = Some s'"
     and no_exception: "\<not>instrs_raise_ex ISA n t"
-    and addr_trans_inv: "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t s"
+    and addr_trans_inv: "s_invariant_holds (addr_trans_invariant False s) t s"
   shows "reachable_caps s' \<subseteq> reachable_caps_plus (instrs_invoke_caps ISA n t \<union> instrs_invoke_indirect_caps ISA n t) s"
 proof (use assms in \<open>induction n arbitrary: s t\<close>)
   case 0
@@ -994,9 +1123,11 @@ next
       using Bind
       by (auto simp: hasTrace_iff_Traces_final final_def)
     have invs':
-      "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t' s''"
+      "s_invariant_holds (addr_trans_invariant False s'') t' s''"
       using tf s'' Bind Suc.prems
-      by (auto simp: s_invariant_append)
+      apply (auto simp: s_invariant_append runTraceS_append_iff)
+      thm s_invariant_run_trace_eq[of "addr_trans_invariant False s" tf s s'']
+      sorry
     have ta': "fetch_assms tf" "instr_assms t'"
       using Bind Suc.prems fetch_assms_appendE
       by auto
@@ -1027,7 +1158,7 @@ next
         using Bind
         by (auto simp: hasTrace_iff_Traces_final final_def)
       have invs'':
-        "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t'' s'''"
+      "s_invariant_holds (addr_trans_invariant False s''') t'' s'''"
         using invs' s''' Bind
         by (auto simp: s_invariant_append)
       have ta'': "instr_assms ti" "fetch_assms t''"
@@ -1066,7 +1197,7 @@ lemma reachable_caps_instrs_trace_intradomain_monotonicity:
     and s': "s_run_trace t s = Some s'"
     and no_exception: "\<not>instrs_raise_ex ISA n t"
     and invoked_caps_reachable: "instrs_invoke_caps ISA n t \<union> instrs_invoke_indirect_caps ISA n t \<subseteq> reachable_caps s"
-    and addr_trans_inv: "s_invariant (\<lambda>s' addr load. s_translate_address addr load s') t s"
+    and addr_trans_inv: "s_invariant_holds (addr_trans_invariant False s) t s"
   shows "reachable_caps s' \<subseteq> reachable_caps s"
 proof -
   from assms have "reachable_caps s' \<subseteq> reachable_caps_plus (instrs_invoke_caps ISA n t \<union> instrs_invoke_indirect_caps ISA n t) s"

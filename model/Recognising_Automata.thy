@@ -340,7 +340,7 @@ lemma available_mem_caps_accessed_reg_caps[simp]:
 
 lemma accessed_caps_run_take_eq[simp]:
   "available_caps CC ISA use_mem_caps i t = accessed_caps use_mem_caps (run initial (take i t))"
-  by (cases i) (auto simp: available_caps.simps accessed_caps_def)
+  by (cases i) (auto simp: available_caps_def accessed_caps_def)
 
 lemma read_from_KCC_run_take_eq:
   "read_from_KCC (run initial (take i t)) = {v. \<exists>r j. j < i \<and> j < length t \<and> t ! j = E_read_reg r v \<and> r \<in> KCC ISA}"
@@ -994,12 +994,18 @@ named_theorems derivable_caps_runI
 
 declare derivable_caps_run_imp[derivable_caps_runI]
 
+lemma system_reg_access_runI[derivable_caps_runI]:
+  assumes "system_reg_access s"
+  shows "system_reg_access (run s t)"
+  using assms
+  unfolding system_reg_access_run_iff
+  by auto
+
 lemma system_reg_access_run_or_exI[derivable_caps_runI]:
   assumes "system_reg_access s \<or> ex_traces"
   shows "system_reg_access (run s t) \<or> ex_traces"
   using assms
-  unfolding system_reg_access_run_iff
-  by auto
+  by (auto intro: system_reg_access_runI)
 
 named_theorems derivable_caps_combinators
 
@@ -1247,7 +1253,7 @@ proof -
           by (auto simp: read_from_KCC_run_take_eq)*)
         show ?thesis
           using (*j i v'[symmetric] r'*) KCC
-          unfolding index_eq_some'
+          unfolding index_eq_some' exception_targets_at_idx_def
           by (auto simp: cap_derivable_iff_derivable read_from_KCC_run_take_eq)
       next
         case (Sentry cs)

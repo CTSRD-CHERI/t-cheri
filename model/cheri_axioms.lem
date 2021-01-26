@@ -43,6 +43,7 @@ let translation_event_at_idx ISA i t = match (index t i) with
   | Just e -> ISA.is_translation_event e
   | Nothing -> false
 end
+let exception_targets_at_idx ISA i t = ISA.exception_targets {v' | exists r' j. j < i && index t j = Just (E_read_reg r' v') && r' IN ISA.KCC}
 
 val address_tag_aligned : forall 'cap 'regval 'instr 'e.
   isa 'cap 'regval 'instr 'e -> nat -> bool
@@ -110,7 +111,7 @@ declare termination_argument available_reg_caps = automatic
 
 val available_caps : forall 'cap 'regval 'instr 'e. Capability 'cap, Eq 'cap, SetType 'cap =>
   isa 'cap 'regval 'instr 'e -> bool -> nat -> trace 'regval -> set 'cap
-let rec available_caps ISA use_mem_caps i t =
+let available_caps ISA use_mem_caps i t =
   (available_reg_caps ISA i t) union (if use_mem_caps then available_mem_caps ISA i t else Set.empty)
 
 val read_reg_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap, Eq 'regval =>
@@ -151,7 +152,7 @@ let store_cap_reg_axiom ISA has_ex use_mem_caps invoked_caps invoked_indirect_ca
       ((*exists r' v' j.
          j < i &&
          index t j = Just (E_read_reg r' v') &&*)
-         c IN ISA.exception_targets {v' | exists r' j. j < i && index t j = Just (E_read_reg r' v') && r' IN ISA.KCC} &&
+         c IN exception_targets_at_idx ISA i t &&
          (*reads_from_reg_at_idx j t = Just r' &&
          c' IN (reads_reg_caps_at_idx ISA j t) &&
          leq_cap c c' &&

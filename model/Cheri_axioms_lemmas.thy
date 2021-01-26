@@ -66,6 +66,11 @@ lemma member_writes_reg_capsE[elim!]:
   using assms
   by (cases e) auto
 
+lemma member_writes_reg_caps_iff:
+  "c \<in> writes_reg_caps CC c_of_v e \<longleftrightarrow>
+   (\<exists>r v. e = E_write_reg r v \<and> c \<in> c_of_v v \<and> is_tagged_method CC c)"
+  by (cases e) auto
+
 lemma writes_mem_cap_at_idx_Some_iff[simp]:
   "writes_mem_cap_at_idx CC i t = Some (addr, sz, c) \<longleftrightarrow>
    writes_mem_cap CC (t ! i) = Some (addr, sz, c) \<and> i < length t"
@@ -140,6 +145,7 @@ lemma available_caps_cases:
     and "j < i" and "j < length t" and "is_tagged_method CC c"
     and "use_mem_caps"
   using assms
+  unfolding available_caps_def
   by (fastforce split: if_splits elim: available_reg_capsE available_mem_capsE)
 
 lemma cap_reg_written_before_idx_0_False[simp]:
@@ -221,7 +227,6 @@ lemma reads_from_reg_None_reads_reg_caps_empty[simp]:
 
 declare available_reg_caps.simps[simp del]
 declare available_mem_caps.simps[simp del]
-declare available_caps.simps[simp del]
 
 lemma available_reg_caps_0[simp]: "available_reg_caps CC ISA 0 t = {}"
   by (auto simp: available_reg_caps.simps)
@@ -230,7 +235,7 @@ lemma available_mem_caps_0[simp]: "available_mem_caps CC ISA 0 t = {}"
   by (auto simp: available_mem_caps.simps)
 
 lemma available_caps_0[simp]: "available_caps CC ISA use_mem_caps 0 t = {}"
-  by (auto simp: available_caps.simps)
+  by (auto simp: available_caps_def)
 
 lemma available_reg_caps_Suc:
   "available_reg_caps CC ISA (Suc i) t =
@@ -250,7 +255,77 @@ lemma available_caps_Suc:
    available_caps CC ISA use_mem_caps i t \<union>
    (if i < length t then accessed_reg_caps_of_ev (accessible_regs_at_idx i t) (t ! i) else {}) \<union>
    (if i < length t \<and> use_mem_caps then accessed_mem_caps_of_ev (t ! i) else {})"
-  by (auto simp: available_caps.simps available_reg_caps_Suc available_mem_caps_Suc)
+  by (auto simp: available_caps_def available_reg_caps_Suc available_mem_caps_Suc)
+
+lemma writes_reg_caps_at_idx_take[simp]:
+  assumes "i < n"
+  shows "writes_reg_caps_at_idx CC ISA i (take n t) = writes_reg_caps_at_idx CC ISA i t"
+    and "cap_reg_written_before_idx CC ISA i r (take n t) = cap_reg_written_before_idx CC ISA i r t"
+  using assms
+  unfolding cap_reg_written_before_idx_def writes_reg_caps_at_idx_def
+  by (auto simp: not_le split: option.splits)
+
+lemma accessible_regs_at_idx_take[simp]:
+  "i < n \<Longrightarrow> accessible_regs_at_idx i (take n t) = accessible_regs_at_idx i t"
+  by (induction i) (auto simp: accessible_regs_at_idx_Suc)
+
+lemma system_access_permitted_before_idx_take[simp]:
+  "i < n \<Longrightarrow> system_access_permitted_before_idx CC ISA i (take n t) = system_access_permitted_before_idx CC ISA i t"
+  by (induction i) auto
+
+lemma available_reg_caps_take[simp]:
+  "i < n \<Longrightarrow> available_reg_caps CC ISA i (take n t) = available_reg_caps CC ISA i t"
+  by (induction i) (auto simp: available_reg_caps_Suc)
+
+lemma available_mem_caps_take[simp]:
+  "i < n \<Longrightarrow> available_mem_caps CC ISA i (take n t) = available_mem_caps CC ISA i t"
+  by (induction i) (auto simp: available_mem_caps_Suc)
+
+lemma available_caps_take[simp]:
+  "i < n \<Longrightarrow> available_caps CC ISA use_mem_caps i (take n t) = available_caps CC ISA use_mem_caps i t"
+  by (induction i) (auto simp: available_caps_Suc)
+
+lemma exception_targets_at_idx_take[simp]:
+  "i < n \<Longrightarrow> exception_targets_at_idx ISA i (take n t) = exception_targets_at_idx ISA i t"
+  unfolding exception_targets_at_idx_def
+  by (rule arg_cong2[where f = exception_targets]; fastforce)
+
+lemma store_cap_reg_axiom_take:
+  assumes "store_cap_reg_axiom CC ISA has_ex use_mem_caps inv_caps inv_indirect_caps t"
+  shows "store_cap_reg_axiom CC ISA has_ex use_mem_caps inv_caps inv_indirect_caps (take n t)"
+proof (use assms in \<open>unfold store_cap_reg_axiom_def, intro allI, goal_cases Goal\<close>)
+  case (Goal i c r)
+  then show ?case
+    by (elim allE[where x = i] allE[where x = c] allE[where x = r])
+       (auto simp: member_writes_reg_caps_iff)
+qed
+
+lemma load_mem_axiom_take:
+  assumes "load_mem_axiom CC ISA is_fetch use_mem_caps inv_indirect_caps t"
+  shows "load_mem_axiom CC ISA is_fetch use_mem_caps inv_indirect_caps (take n t)"
+  using assms
+  unfolding load_mem_axiom_def
+  by (auto simp: reads_mem_val_at_idx_def bind_eq_Some_conv translation_event_at_idx_def min_absorb1)
+
+lemma store_mem_axiom_take:
+  assumes "store_mem_axiom CC ISA use_mem_caps inv_indirect_caps t"
+  shows "store_mem_axiom CC ISA use_mem_caps inv_indirect_caps (take n t)"
+  using assms
+  unfolding store_mem_axiom_def
+  by (auto simp: writes_mem_val_at_idx_def bind_eq_Some_conv translation_event_at_idx_def min_absorb1)
+
+lemma writes_mem_val_at_idx_eq_Some_iff[simp]:
+  "writes_mem_val_at_idx i t = Some (addr, sz, v, tag) \<longleftrightarrow>
+   i < length t \<and> writes_mem_val (t ! i) = Some (addr, sz, v, tag)"
+  by (auto simp: writes_mem_val_at_idx_def bind_eq_Some_conv)
+
+lemma cheri_axioms_take:
+  assumes "cheri_axioms CC ISA is_fetch has_ex use_mem_caps inv_caps inv_indirect_caps t"
+  shows "cheri_axioms CC ISA is_fetch has_ex use_mem_caps inv_caps inv_indirect_caps (take n t)"
+  using assms
+  unfolding cheri_axioms_def store_cap_mem_axiom_def read_reg_axiom_def write_reg_axiom_def store_tag_axiom_def
+  by (fastforce simp add: writes_mem_cap_Some_iff intro: store_cap_reg_axiom_take load_mem_axiom_take store_mem_axiom_take)
+
 
 abbreviation instr_sem_ISA ("\<lbrakk>_\<rbrakk>") where "\<lbrakk>instr\<rbrakk> \<equiv> instr_sem ISA instr"
 
@@ -279,7 +354,7 @@ lemma store_cap_reg_axiomE:
     and "c \<in> writes_reg_caps_at_idx CC ISA i t"
   obtains (Derivable) "cap_derivable CC (available_caps CC ISA (invoked_indirect_caps = {} \<and> use_mem_caps) i t) c"
   | (Ex) has_ex and "r \<in> PCC ISA"
-    and "c \<in>  exception_targets ISA {v'. \<exists>r' j. j < i \<and> index t j = Some (E_read_reg r' v') \<and> r' \<in> KCC ISA}"
+    and "c \<in>  exception_targets_at_idx ISA i t"
   | (Sentry) cs where "c \<in> invoked_caps"
     and "cap_derivable CC (available_caps CC ISA (invoked_indirect_caps = {} \<and> use_mem_caps) i t) cs"
     and "is_sentry_method CC cs" and "is_sealed_method CC cs"
