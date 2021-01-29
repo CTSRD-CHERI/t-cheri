@@ -326,6 +326,11 @@ lemma cheri_axioms_take:
   unfolding cheri_axioms_def store_cap_mem_axiom_def read_reg_axiom_def write_reg_axiom_def store_tag_axiom_def
   by (fastforce simp add: writes_mem_cap_Some_iff intro: store_cap_reg_axiom_take load_mem_axiom_take store_mem_axiom_take)
 
+lemma cheri_axioms_appendE:
+  assumes "cheri_axioms CC ISA is_fetch has_ex use_mem_caps inv_caps inv_indirect_caps (t1 @ t2)"
+  shows "cheri_axioms CC ISA is_fetch has_ex use_mem_caps inv_caps inv_indirect_caps t1"
+  using cheri_axioms_take[OF assms, where n = "length t1"]
+  by simp
 
 abbreviation instr_sem_ISA ("\<lbrakk>_\<rbrakk>") where "\<lbrakk>instr\<rbrakk> \<equiv> instr_sem ISA instr"
 
