@@ -746,8 +746,8 @@ lemmas non_cap_exp_combinators =
   non_cap_exp_foreachM non_cap_exp_try_catch non_cap_exp_catch_early_return non_cap_exp_liftR
 
 method non_cap_expI_base uses intro =
-  (intro intro non_cap_expI non_cap_exp_split[THEN iffD2] non_cap_exp_combinators
-         non_cap_exp_read_non_cap_reg non_cap_exp_write_non_cap_reg allI impI conjI)
+  (rule intro non_cap_expI non_cap_exp_split[THEN iffD2] non_cap_exp_combinators
+        non_cap_exp_read_non_cap_reg non_cap_exp_write_non_cap_reg allI impI conjI)+
 
 method non_cap_expI uses simp intro = (non_cap_expI_base intro: intro; simp add: simp)
 
