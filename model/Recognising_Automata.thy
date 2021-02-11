@@ -1368,7 +1368,7 @@ lemma traces_enabled_bind[traces_enabledI]:
   shows "traces_enabled (m \<bind> f) s"
   using assms
   by (auto simp: traces_enabled_def trace_enabled_append_iff
-      elim!: bind_Traces_cases dest!: finished_bind_left;
+           elim!: bind_Traces_cases dest!: finished_bind_left;
       fastforce)
 
 lemma non_cap_trace_enabledI:

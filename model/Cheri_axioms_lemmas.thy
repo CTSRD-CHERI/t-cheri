@@ -148,6 +148,12 @@ lemma available_caps_cases:
   unfolding available_caps_def
   by (fastforce split: if_splits elim: available_reg_capsE available_mem_capsE)
 
+lemma available_caps_tagged:
+  assumes "c \<in> available_caps CC ISA use_mem_caps i t"
+  shows "is_tagged_method CC c"
+  using assms
+  by (elim available_caps_cases) auto
+
 lemma cap_reg_written_before_idx_0_False[simp]:
   "cap_reg_written_before_idx CC ISA 0 r t \<longleftrightarrow> False"
   by (auto simp: cap_reg_written_before_idx_def)
@@ -265,28 +271,32 @@ lemma writes_reg_caps_at_idx_take[simp]:
   unfolding cap_reg_written_before_idx_def writes_reg_caps_at_idx_def
   by (auto simp: not_le split: option.splits)
 
+abbreviation "instr_cheri_axioms instr t n \<equiv> cheri_axioms CC ISA False (instr_raises_ex ISA instr t) (uses_mem_caps ISA instr t) (invokes_caps ISA instr t) (invokes_indirect_caps ISA instr t) (take n t)"
+
+abbreviation "fetch_cheri_axioms t n \<equiv> cheri_axioms CC ISA True (fetch_raises_ex ISA t) True {} {} (take n t)"
+
 lemma accessible_regs_at_idx_take[simp]:
-  "i < n \<Longrightarrow> accessible_regs_at_idx i (take n t) = accessible_regs_at_idx i t"
+  "i \<le> n \<Longrightarrow> accessible_regs_at_idx i (take n t) = accessible_regs_at_idx i t"
   by (induction i) (auto simp: accessible_regs_at_idx_Suc)
 
 lemma system_access_permitted_before_idx_take[simp]:
-  "i < n \<Longrightarrow> system_access_permitted_before_idx CC ISA i (take n t) = system_access_permitted_before_idx CC ISA i t"
+  "i \<le> n \<Longrightarrow> system_access_permitted_before_idx CC ISA i (take n t) = system_access_permitted_before_idx CC ISA i t"
   by (induction i) auto
 
 lemma available_reg_caps_take[simp]:
-  "i < n \<Longrightarrow> available_reg_caps CC ISA i (take n t) = available_reg_caps CC ISA i t"
+  "i \<le> n \<Longrightarrow> available_reg_caps CC ISA i (take n t) = available_reg_caps CC ISA i t"
   by (induction i) (auto simp: available_reg_caps_Suc)
 
 lemma available_mem_caps_take[simp]:
-  "i < n \<Longrightarrow> available_mem_caps CC ISA i (take n t) = available_mem_caps CC ISA i t"
+  "i \<le> n \<Longrightarrow> available_mem_caps CC ISA i (take n t) = available_mem_caps CC ISA i t"
   by (induction i) (auto simp: available_mem_caps_Suc)
 
 lemma available_caps_take[simp]:
-  "i < n \<Longrightarrow> available_caps CC ISA use_mem_caps i (take n t) = available_caps CC ISA use_mem_caps i t"
+  "i \<le> n \<Longrightarrow> available_caps CC ISA use_mem_caps i (take n t) = available_caps CC ISA use_mem_caps i t"
   by (induction i) (auto simp: available_caps_Suc)
 
 lemma exception_targets_at_idx_take[simp]:
-  "i < n \<Longrightarrow> exception_targets_at_idx ISA i (take n t) = exception_targets_at_idx ISA i t"
+  "i \<le> n \<Longrightarrow> exception_targets_at_idx ISA i (take n t) = exception_targets_at_idx ISA i t"
   unfolding exception_targets_at_idx_def
   by (rule arg_cong2[where f = exception_targets]; fastforce)
 
@@ -389,5 +399,38 @@ lemma store_cap_reg_axiomE:
   using assms
   unfolding store_cap_reg_axiom_def
   by blast*)
+
+locale Capability_Invariant_ISA = Capability_ISA CC ISA + Capabilities_Invariant CC cap_invariant
+  for CC :: "'cap Capability_class"
+  and ISA :: "('cap, 'regval, 'instr, 'e) isa"
+  and cap_invariant :: "'cap \<Rightarrow> bool"
+begin
+
+fun cap_inv_ev :: "'regval event \<Rightarrow> bool" where
+  "cap_inv_ev (E_read_reg r v) =
+     (\<forall>c \<in> caps_of_regval ISA v. is_tagged_method CC c \<longrightarrow> cap_invariant c)"
+| "cap_inv_ev (E_read_memt rk addr sz (v, t)) =
+     (case cap_of_mem_bytes_method CC v t of
+        Some c \<Rightarrow> (is_tagged_method CC c \<longrightarrow> cap_invariant c)
+      | None \<Rightarrow> True)"
+| "cap_inv_ev _ = True"
+
+abbreviation "cap_inv_trace t \<equiv> (\<forall>e \<in> set t. cap_inv_ev e)"
+
+definition available_caps_invariant :: "bool \<Rightarrow> 'regval event list \<Rightarrow> nat \<Rightarrow> bool" where
+  "available_caps_invariant use_mem_caps t n \<equiv>
+   (\<forall>i < n. \<forall>c \<in> available_caps CC ISA use_mem_caps i t. cap_invariant c)"
+
+abbreviation
+  "instr_available_caps instr n t \<equiv>
+   available_caps CC ISA (invokes_indirect_caps ISA instr t = {} \<and> uses_mem_caps ISA instr t) n t"
+
+abbreviation
+  "instr_available_caps_invariant instr t n \<equiv>
+   available_caps_invariant (invokes_indirect_caps ISA instr t = {} \<and> uses_mem_caps ISA instr t) t n"
+
+abbreviation "fetch_available_caps_invariant t n \<equiv> available_caps_invariant True t n"
+
+end
 
 end

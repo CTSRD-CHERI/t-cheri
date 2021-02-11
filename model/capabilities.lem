@@ -15,7 +15,6 @@ class (Capability 'c)
   val get_perms : 'c -> perms
   val get_cursor : 'c -> nat
   val is_global : 'c -> bool
-  val set_tag : 'c -> bool -> 'c
   val seal : 'c -> nat -> 'c
   val unseal : 'c -> 'c
   val clear_global : 'c -> 'c
