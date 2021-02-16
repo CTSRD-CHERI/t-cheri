@@ -36,6 +36,10 @@ lemma accepts_from_append_iff: "accepts_from s (t @ t') \<longleftrightarrow> tr
 lemma accepts_from_Cons[simp]: "accepts_from s (e # t) \<longleftrightarrow> enabled s e \<and> accepts_from (step s e) t"
   by (auto simp: accepts_from_def)
 
+lemma trace_enabled_take:
+  "trace_enabled s (take n t)" if "trace_enabled s t"
+  by (use that in \<open>induction t arbitrary: s n; auto simp: take_Cons split: nat.splits\<close>)
+
 lemma accepts_from_id_take_nth_drop:
   assumes "i < length t"
   shows "accepts_from s t = accepts_from s (take i t @ t ! i # drop (Suc i) t)"
@@ -1282,8 +1286,10 @@ qed
 
 end
 
-locale Cap_Axiom_Assm_Automaton = Cap_Axiom_Automaton CC ISA enabled use_mem_caps
+locale Cap_Axiom_Assm_Automaton =
+  Capability_Invariant_ISA CC ISA cap_invariant + Cap_Axiom_Automaton CC ISA enabled use_mem_caps
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
+    and cap_invariant :: "'cap \<Rightarrow> bool"
     and enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool"
     and use_mem_caps :: bool +
   fixes ex_traces :: bool
@@ -1302,6 +1308,107 @@ lemma trace_assms_Nil[simp, intro]: "trace_assms []"
 
 lemma trace_assms_Cons[iff]: "trace_assms (e # t) \<longleftrightarrow> ev_assms e \<and> trace_assms t"
   by (auto simp: trace_assms_def)
+
+definition accessed_caps_invariant :: "('cap, 'regval) axiom_state \<Rightarrow> bool" where
+  "accessed_caps_invariant s \<equiv> (\<forall>c \<in> accessed_caps use_mem_caps s. is_tagged_method CC c \<longrightarrow> cap_invariant c)"
+
+definition accessed_caps_trace_invariant :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event list \<Rightarrow> bool" where
+  "accessed_caps_trace_invariant s t \<equiv> (\<forall>i \<le> length t. accessed_caps_invariant (run s (take i t)))"
+
+definition pre_inv_trace_assms :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event list \<Rightarrow> bool" where
+  "pre_inv_trace_assms s t \<equiv> accessed_caps_trace_invariant s (butlast t) \<and> trace_assms t"
+
+definition inv_trace_assms :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event list \<Rightarrow> bool" where
+  "inv_trace_assms s t \<equiv> accessed_caps_trace_invariant s t \<and> trace_assms t"
+
+lemma inv_trace_assms_iff:
+  "inv_trace_assms s t \<longleftrightarrow> pre_inv_trace_assms s t \<and> accessed_caps_invariant (run s t)"
+  apply (auto simp: inv_trace_assms_def pre_inv_trace_assms_def accessed_caps_trace_invariant_def butlast_conv_take min_absorb1 accessed_caps_invariant_def)
+  using diff_le_self le_trans apply blast
+  by (metis diff_Suc_Suc diff_zero le_Suc_eq old.nat.exhaust take_all zero_diff)
+
+lemma pre_inv_trace_assms_initialI:
+  assumes "available_caps_invariant use_mem_caps t n" and "trace_assms (take n t)"
+    and "n \<le> length t"
+  shows "pre_inv_trace_assms initial (take n t)"
+  using assms
+  unfolding available_caps_invariant_def pre_inv_trace_assms_def accessed_caps_trace_invariant_def accessed_caps_invariant_def
+  by (cases n) (auto simp: min_absorb1 butlast_take less_Suc_eq_le accessed_caps_def)
+
+lemma accessed_caps_trace_invariant_append_iff:
+  "accessed_caps_trace_invariant s (t @ t') \<longleftrightarrow> accessed_caps_trace_invariant s t \<and> accessed_caps_trace_invariant (run s t) t'"
+  apply (auto simp: accessed_caps_trace_invariant_def accessed_caps_invariant_def)
+  subgoal for i c
+    apply (erule allE[where x = i])
+    apply auto
+    done
+  subgoal for i c
+    apply (erule allE[where x = "length t + i"])
+    apply auto
+    done
+  subgoal for i c
+    apply (cases "i \<le> length t")
+    apply (elim allE[where x = i]; auto)
+    apply (elim allE[where x = "i - length t"]; auto)
+    done
+  done
+
+lemma pre_inv_trace_assms_append_cases:
+  assumes "pre_inv_trace_assms s (t @ t')"
+  obtains (Left) "pre_inv_trace_assms s t" and "t' = []"
+  | (Bind) "inv_trace_assms s t" and "pre_inv_trace_assms (run s t) t'"
+  using assms
+  unfolding pre_inv_trace_assms_def inv_trace_assms_def
+  by (cases t') (auto simp: butlast_append accessed_caps_trace_invariant_append_iff)
+
+lemma accessed_caps_trace_invariant_Nil[simp]:
+  "accessed_caps_trace_invariant s [] \<longleftrightarrow> accessed_caps_invariant s"
+  by (auto simp: accessed_caps_trace_invariant_def)
+
+lemma accessed_caps_trace_invariant_Cons[simp]:
+  "accessed_caps_trace_invariant s (e # t) \<longleftrightarrow> accessed_caps_invariant s \<and> accessed_caps_trace_invariant (axiom_step s e) t"
+  by (auto simp: accessed_caps_trace_invariant_def take_Cons split: nat.splits)
+
+lemma accessed_caps_trace_invariant_take:
+  assumes "accessed_caps_trace_invariant s t"
+  shows "accessed_caps_trace_invariant s (take n t)"
+  using assms
+  by (auto simp: accessed_caps_trace_invariant_def)
+
+lemma pre_inv_trace_assms_Nil[simp]:
+  "pre_inv_trace_assms s [] \<longleftrightarrow> accessed_caps_invariant s"
+  by (auto simp: pre_inv_trace_assms_def accessed_caps_trace_invariant_def)
+
+lemma pre_inv_trace_assms_Cons:
+  "pre_inv_trace_assms s (e # t) \<longleftrightarrow>
+   accessed_caps_invariant s \<and> ev_assms e \<and> (t = [] \<or> pre_inv_trace_assms (axiom_step s e) t)"
+  by (auto simp: pre_inv_trace_assms_def)
+
+lemma inv_trace_assms_Nil[simp]:
+  "inv_trace_assms s [] \<longleftrightarrow> accessed_caps_invariant s"
+  by (auto simp: inv_trace_assms_iff)
+
+lemma pre_inv_trace_assms_append_iff:
+  "pre_inv_trace_assms s (t @ t') \<longleftrightarrow>
+   pre_inv_trace_assms s t \<and> (t' = [] \<or> pre_inv_trace_assms (run s t) t' \<and> accessed_caps_invariant (run s t))"
+  by (induction t arbitrary: s; cases t'; fastforce simp: pre_inv_trace_assms_Cons)
+
+lemma inv_trace_assms_append_iff[simp]:
+  "inv_trace_assms s (t @ t') \<longleftrightarrow> inv_trace_assms s t \<and> inv_trace_assms (run s t) t'"
+  by (auto simp: inv_trace_assms_iff pre_inv_trace_assms_append_iff)
+
+lemma pre_inv_trace_assms_accessed_caps_invariant:
+  assumes "pre_inv_trace_assms s t"
+  shows "accessed_caps_invariant s"
+  using assms
+  unfolding pre_inv_trace_assms_def accessed_caps_trace_invariant_def
+  by (elim conjE allE[where x = 0]) auto
+
+lemma inv_trace_assms_accessed_caps_invariant:
+  assumes "inv_trace_assms s t"
+  shows "accessed_caps_invariant s" and "accessed_caps_invariant (run s t)"
+  using assms
+  by (auto simp: inv_trace_assms_iff intro: pre_inv_trace_assms_accessed_caps_invariant)
 
 definition "isException m \<equiv> ((\<exists>e. m = Exception e) \<or> (\<exists>msg. m = Fail msg)) \<and> ex_traces"
 
@@ -1348,28 +1455,74 @@ lemma finished_bind_left:
 
 definition
   "traces_enabled m s \<equiv>
-     \<forall>t m'. (m, t, m') \<in> Traces \<and> finished m' \<and> trace_assms t \<longrightarrow> trace_enabled s t"
+     (\<forall>t m'. (m, t, m') \<in> Traces \<and> finished m' \<longrightarrow>
+      (\<forall>n \<le> length t. pre_inv_trace_assms s (take n t) \<longrightarrow> trace_enabled s (take n t)))"
 
-lemma traces_enabled_accepts_fromI:
+lemma traces_enabled_accepts_from_takeI:
   assumes "hasTrace t m" and "traces_enabled m s" and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
-    and "trace_assms t"
-  shows "accepts_from s t"
+    and "pre_inv_trace_assms s (take n t)" and "n \<le> length t"
+  shows "accepts_from s (take n t)"
   using assms
   unfolding traces_enabled_def finished_def isException_def
   unfolding hasTrace_iff_Traces_final hasException_iff_Traces_Exception hasFailure_iff_Traces_Fail
   unfolding runTrace_iff_Traces[symmetric]
   by (intro trace_enabled_acceptI) (auto elim!: final_cases)
 
+lemma traces_enabled_acceptsI:
+  assumes "hasTrace t m" and "traces_enabled m initial" and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
+    and "available_caps_invariant use_mem_caps t n" and "trace_assms (take n t)" and "n \<le> length t"
+  shows "accepts (take n t)"
+  using assms
+  by (intro traces_enabled_accepts_from_takeI pre_inv_trace_assms_initialI)
+
+lemma traces_enabled_accepts_fromI:
+  assumes "hasTrace t m" and "traces_enabled m s" and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
+    and "pre_inv_trace_assms s t"
+  shows "accepts_from s t"
+  using assms traces_enabled_accepts_from_takeI[OF assms(1-3), where n = "length t"]
+  by auto
+
+text \<open>@{term traces_enabled} only provides guarantees if the starting state satisfies the
+ capability invariants.\<close>
+
+lemma not_accessed_caps_invariant_traces_enabled:
+  assumes "\<not>accessed_caps_invariant s"
+  shows "traces_enabled m s"
+  using assms pre_inv_trace_assms_accessed_caps_invariant
+  by (auto simp: traces_enabled_def)
+
 named_theorems traces_enabledI
 
 lemma traces_enabled_bind[traces_enabledI]:
   assumes "traces_enabled m s"
-    and "\<And>t a. Run m t a \<Longrightarrow> trace_assms t \<Longrightarrow> traces_enabled (f a) (run s t)"
+    and "\<And>t a. Run m t a \<Longrightarrow> inv_trace_assms s t \<Longrightarrow> traces_enabled (f a) (run s t)"
   shows "traces_enabled (m \<bind> f) s"
   using assms
-  by (auto simp: traces_enabled_def trace_enabled_append_iff
+  (*by (auto simp: traces_enabled_def trace_enabled_append_iff
            elim!: bind_Traces_cases dest!: finished_bind_left;
-      fastforce)
+      fastforce)*)
+  apply (auto simp: traces_enabled_def elim!: bind_Traces_cases dest!: finished_bind_left)
+  apply (elim pre_inv_trace_assms_append_cases)
+   apply auto
+    apply fastforce
+  apply fastforce
+  apply (auto simp: trace_enabled_append_iff inv_trace_assms_iff)
+  subgoal for m' n tm am tf
+    apply (cases "n \<le> length tm")
+     apply fastforce
+    apply (erule allE[where x = tm])
+    apply (erule impE)
+     apply blast
+    apply (erule allE[where x = "length tm"])
+    apply auto
+    done
+  subgoal for m' n tm am tf
+    apply (cases "n \<le> length tm")
+     apply auto[]
+    apply simp
+    apply fastforce
+    done
+  done
 
 lemma non_cap_trace_enabledI:
   assumes "non_cap_trace t"
@@ -1384,11 +1537,24 @@ lemma non_cap_exp_trace_enabledI:
   by (cases rule: non_cap_exp_Traces_cases[OF m t])
      (auto intro: non_cap_trace_enabledI read_non_special_regs_enabled simp: trace_enabled_append_iff)
 
+lemma Traces_appendE:
+  assumes "(m, t @ t', m') \<in> Traces"
+  obtains m'' where "(m, t, m'') \<in> Traces" and "(m'', t', m') \<in> Traces"
+  using assms
+  by (induction t arbitrary: m; fastforce)
+
 lemma non_cap_exp_traces_enabledI:
   assumes "non_cap_exp m"
   shows "traces_enabled m s"
   using assms
-  by (auto simp: traces_enabled_def intro: non_cap_exp_trace_enabledI)
+  (* by (auto simp: traces_enabled_def intro: non_cap_exp_trace_enabledI) *)
+  unfolding traces_enabled_def
+  apply (intro allI impI)
+  subgoal for t m' n
+    apply (elim conjE Traces_appendE[where t = "take n t" and t' = "drop n t", simplified])
+    apply (auto intro: non_cap_exp_trace_enabledI)
+    done
+  done
 
 lemma exp_fails_traces_enabled:
   assumes "exp_fails m"
@@ -1440,12 +1606,12 @@ lemma traces_enabled_foreachM_index_list_inv:
   assumes "\<And>idx vars t.
               Inv idx vars (run s t) \<Longrightarrow>
               min from to \<le> idx \<Longrightarrow> idx \<le> max from to \<Longrightarrow>
-              trace_assms t \<Longrightarrow>
+              inv_trace_assms s t \<Longrightarrow>
               traces_enabled (body idx vars) (run s t)"
     and "\<And>idx vars t t' vars'.
               Inv idx vars (run s t) \<Longrightarrow>
               min from to \<le> min idx (idx + step) \<Longrightarrow> max idx (idx + step) \<le> max from to \<Longrightarrow>
-              Run (body idx vars) t' vars' \<Longrightarrow> trace_assms t \<Longrightarrow> trace_assms t' \<Longrightarrow>
+              Run (body idx vars) t' vars' \<Longrightarrow> inv_trace_assms s t \<Longrightarrow> inv_trace_assms (run s t) t' \<Longrightarrow>
               Inv (idx + step) vars' (run (run s t) t')"
     and "(step > 0 \<and> from \<le> to) \<or> (step < 0 \<and> from \<ge> to) \<Longrightarrow> Inv from vars s"
   shows "traces_enabled (foreachM (index_list from to step) vars body) s"
@@ -1459,17 +1625,34 @@ proof (use assms in \<open>induction "from" to step arbitrary: vars s rule: inde
   proof (rule traces_enabled_bind)
     show "traces_enabled (body from vars) s"
       using body[of "from" vars "[]"] Inv_base[OF that]
-      by auto
+      by (cases "accessed_caps_invariant s")
+         (auto simp: inv_trace_assms_iff intro: not_accessed_caps_invariant_traces_enabled)
   next
     fix t vars'
-    assume t: "Run (body from vars) t vars'" "trace_assms t"
+    assume t: "Run (body from vars) t vars'" "inv_trace_assms s t"
     note body' = body[of _ _ "t @ t'" for t', simplified]
     note Inv_step' = Inv_step[of _ _ "t @ t'" t'' for t' t'', simplified]
     note Inv_base' = Inv_step[of "from" vars "[]" t vars', simplified]
     have "traces_enabled (foreachM (index_list (from + step) to step) vars' body) (run s t)"
       if "0 < step \<and> from + step \<le> to \<or> step < 0 \<and> to \<le> from + step"
       using that Inv_base t
-      by (intro Step.IH) (auto intro: body' Inv_step' Inv_base')
+      (* by (intro Step.IH) (auto intro: body' Inv_step' Inv_base') *)
+      apply (intro Step.IH)
+         apply fastforce
+        apply (rule body')
+           apply fastforce
+          apply fastforce
+         apply fastforce
+        apply (simp add: inv_trace_assms_def accessed_caps_trace_invariant_append_iff)
+       apply (rule Inv_step')
+            apply blast
+           apply fastforce
+          apply fastforce
+         apply blast
+        apply (simp add: inv_trace_assms_def accessed_caps_trace_invariant_append_iff)
+       apply blast
+      apply (rule Inv_base'; auto simp: inv_trace_assms_iff intro: pre_inv_trace_assms_accessed_caps_invariant)
+      done
     then show "traces_enabled (foreachM (index_list (from + step) to step) vars' body) (run s t)"
       unfolding index_list.simps[of "from + step" to step]
       by (auto intro: non_cap_exp_return[THEN non_cap_exp_traces_enabledI])
@@ -1483,12 +1666,13 @@ lemma traces_enabled_foreachM_index_list_inv2:
   assumes "\<And>idx var_a var_b t.
               Inv idx var_a var_b (run s t) \<Longrightarrow>
               min from to \<le> idx \<Longrightarrow> idx \<le> max from to \<Longrightarrow>
-              trace_assms t \<Longrightarrow>
+              inv_trace_assms s t \<Longrightarrow>
               traces_enabled (body idx (var_a, var_b)) (run s t)"
     and "\<And>idx var_a var_b t t' var_a' var_b'.
               Inv idx var_a var_b (run s t) \<Longrightarrow>
               min from to \<le> min idx (idx + step) \<Longrightarrow> max idx (idx + step) \<le> max from to \<Longrightarrow>
-              Run (body idx (var_a, var_b)) t' (var_a', var_b') \<Longrightarrow> trace_assms t \<Longrightarrow> trace_assms t' \<Longrightarrow>
+              Run (body idx (var_a, var_b)) t' (var_a', var_b') \<Longrightarrow>
+              inv_trace_assms s t \<Longrightarrow> inv_trace_assms (run s t) t' \<Longrightarrow>
               Inv (idx + step) var_a' var_b' (run (run s t) t')"
     and "(step > 0 \<and> from \<le> to) \<or> (step < 0 \<and> from \<ge> to) \<Longrightarrow> Inv from var_a var_b s"
   shows "traces_enabled (foreachM (index_list from to step) (var_a, var_b) body) s"
@@ -1499,12 +1683,13 @@ lemma traces_enabled_foreachM_index_list_inv3:
   assumes "\<And>idx var_a var_b var_c t.
               Inv idx var_a var_b var_c (run s t) \<Longrightarrow>
               min from to \<le> idx \<Longrightarrow> idx \<le> max from to \<Longrightarrow>
-              trace_assms t \<Longrightarrow>
+              inv_trace_assms s t \<Longrightarrow>
               traces_enabled (body idx (var_a, var_b, var_c)) (run s t)"
     and "\<And>idx var_a var_b var_c t t' var_a' var_b' var_c'.
               Inv idx var_a var_b var_c (run s t) \<Longrightarrow>
               min from to \<le> min idx (idx + step) \<Longrightarrow> max idx (idx + step) \<le> max from to \<Longrightarrow>
-              Run (body idx (var_a, var_b, var_c)) t' (var_a', var_b', var_c') \<Longrightarrow> trace_assms t \<Longrightarrow> trace_assms t' \<Longrightarrow>
+              Run (body idx (var_a, var_b, var_c)) t' (var_a', var_b', var_c') \<Longrightarrow>
+              inv_trace_assms s t \<Longrightarrow> inv_trace_assms (run s t) t' \<Longrightarrow>
               Inv (idx + step) var_a' var_b' var_c' (run (run s t) t')"
     and "(step > 0 \<and> from \<le> to) \<or> (step < 0 \<and> from \<ge> to) \<Longrightarrow> Inv from var_a var_b var_c s"
   shows "traces_enabled (foreachM (index_list from to step) (var_a, var_b, var_c) body) s"
@@ -1517,11 +1702,11 @@ lemma mult_add_eq_add1_mult:
   by (auto simp: algebra_simps)
 
 lemma foreachM_index_list_inv_post:
-  assumes "Run (foreachM (index_list from to step) vars body) t vars'" and "trace_assms t"
+  assumes "Run (foreachM (index_list from to step) vars body) t vars'" and "inv_trace_assms s t"
     and "\<And>idx vars t t' vars'.
               Inv idx vars (run s t) \<Longrightarrow>
               min from to \<le> idx \<Longrightarrow> idx \<le> max from to \<Longrightarrow>
-              Run (body idx vars) t' vars' \<Longrightarrow> trace_assms t \<Longrightarrow> trace_assms t' \<Longrightarrow>
+              Run (body idx vars) t' vars' \<Longrightarrow> inv_trace_assms s t \<Longrightarrow> inv_trace_assms (run s t) t' \<Longrightarrow>
               Inv (idx + step) vars' (run (run s t) t')"
     and "Inv from vars s"
     and "((step > 0 \<and> from \<le> to) \<or> (step < 0 \<and> from \<ge> to)) \<and> step dvd (to - from)"
@@ -1537,14 +1722,15 @@ proof (use assms in \<open>induction "from" to step arbitrary: vars s t rule: in
   then have k_from: "from = step * k_from + k0" and k_to: "to = step * k_to + k0"
     by (auto simp: k0_def k_from_def k_to_def)
   from Step obtain tb tf vars''
-    where tb: "Run (body from vars) tb vars'' \<and> trace_assms tb"
-      and tf: "Run (foreachM (index_list (from + step) to step) vars'' body) tf vars' \<and> trace_assms tf"
+    where tb: "Run (body from vars) tb vars'' \<and> inv_trace_assms s tb"
+      and tf: "Run (foreachM (index_list (from + step) to step) vars'' body) tf vars' \<and> inv_trace_assms (run s tb) tf"
       and t: "t = tb @ tf"
     unfolding index_list.simps[of "from" to step]
     by (auto elim!: Run_bindE)
   have Inv': "Inv (from + step) vars'' (run s tb)"
     using tb Step.prems(4,5)
-    by (intro Step.prems(3)[of "from" vars "[]" tb vars'', simplified]) auto
+    by (intro Step.prems(3)[of "from" vars "[]" tb vars'', simplified])
+       (auto intro: inv_trace_assms_accessed_caps_invariant)
   show ?case
   proof (cases "(step > 0 \<and> from + step \<le> to) \<or> (step < 0 \<and> from + step \<ge> to)")
     case True
@@ -1570,23 +1756,24 @@ lemma traces_enabled_double_foreachM_index_list_invs:
               Inv_b idx_a idx_b vars (run s t) \<Longrightarrow>
               min from_a to_a \<le> idx_a \<Longrightarrow> idx_a \<le> max from_a to_a \<Longrightarrow>
               min (from_b idx_a) (to_b idx_a) \<le> idx_b \<Longrightarrow> idx_b \<le> max (from_b idx_a) (to_b idx_a) \<Longrightarrow>
-              trace_assms t \<Longrightarrow>
+              inv_trace_assms s t \<Longrightarrow>
               traces_enabled (body idx_a idx_b vars) (run s t)"
     and Inv_ab: "\<And>idx_a vars t.
               Inv_a idx_a (from_b idx_a) vars (run s t) \<Longrightarrow>
               min from_a to_a \<le> idx_a \<Longrightarrow> idx_a \<le> max from_a to_a \<Longrightarrow>
-              trace_assms t \<Longrightarrow>
+              inv_trace_assms s t \<Longrightarrow>
               Inv_b idx_a (from_b idx_a) (f idx_a vars) (run s t)"
     and Step: "\<And>idx_a idx_b vars t t' vars'.
               Inv_b idx_a idx_b vars (run s t) \<Longrightarrow>
               min from_a to_a \<le> idx_a \<Longrightarrow> idx_a \<le> max from_a to_a \<Longrightarrow>
               min (from_b idx_a) (to_b idx_a) \<le> idx_b \<Longrightarrow> idx_b \<le> max (from_b idx_a) (to_b idx_a) \<Longrightarrow>
-              Run (body idx_a idx_b vars) t' vars' \<Longrightarrow> trace_assms t \<Longrightarrow> trace_assms t' \<Longrightarrow>
+              Run (body idx_a idx_b vars) t' vars' \<Longrightarrow>
+              inv_trace_assms s t \<Longrightarrow> inv_trace_assms (run s t) t' \<Longrightarrow>
               Inv_b idx_a (idx_b + step_b idx_a) vars' (run (run s t) t')"
     and Inv_ba: "\<And>idx_a vars t.
               Inv_b idx_a (to_b idx_a + step_b idx_a) vars (run s t) \<Longrightarrow>
               min from_a to_a \<le> min idx_a (idx_a + step_a) \<Longrightarrow> max idx_a (idx_a + step_a) \<le> max from_a to_a \<Longrightarrow>
-              trace_assms t \<Longrightarrow>
+              inv_trace_assms s t \<Longrightarrow>
               Inv_a (idx_a + step_a) (from_b (idx_a + step_a)) vars (run s t)"
     and Init: "(step_a > 0 \<and> from_a \<le> to_a) \<or> (step_a < 0 \<and> from_a \<ge> to_a) \<Longrightarrow> Inv_a from_a (from_b from_a) vars s"
     and Idx_b: "\<And>idx_a. ((step_b idx_a > 0 \<and> from_b idx_a \<le> to_b idx_a) \<or> (step_b idx_a < 0 \<and> from_b idx_a \<ge> to_b idx_a)) \<and> step_b idx_a dvd to_b idx_a - from_b idx_a"
@@ -1617,36 +1804,37 @@ lemma traces_enabled_triple_foreachM_index_list_invs:
               min from_a to_a \<le> idx_a \<Longrightarrow> idx_a \<le> max from_a to_a \<Longrightarrow>
               min (from_b idx_a) (to_b idx_a) \<le> idx_b \<Longrightarrow> idx_b \<le> max (from_b idx_a) (to_b idx_a) \<Longrightarrow>
               min (from_c idx_a idx_b) (to_c idx_a idx_b) \<le> idx_c \<Longrightarrow> idx_c \<le> max (from_c idx_a idx_b) (to_c idx_a idx_b) \<Longrightarrow>
-              trace_assms t \<Longrightarrow>
+              inv_trace_assms s t \<Longrightarrow>
               traces_enabled (body idx_a idx_b idx_c vars) (run s t)"
     and Inv_ab: "\<And>idx_a vars t.
               Inv_a idx_a (from_b idx_a) (from_c idx_a (from_b idx_a)) vars (run s t) \<Longrightarrow>
               min from_a to_a \<le> idx_a \<Longrightarrow> idx_a \<le> max from_a to_a \<Longrightarrow>
-              trace_assms t \<Longrightarrow>
+              inv_trace_assms s t \<Longrightarrow>
               Inv_b idx_a (from_b idx_a) (from_c idx_a (from_b idx_a)) (f idx_a vars) (run s t)"
     and Inv_bc: "\<And>idx_a idx_b vars t.
               Inv_b idx_a idx_b (from_c idx_a idx_b) vars (run s t) \<Longrightarrow>
               min from_a to_a \<le> idx_a \<Longrightarrow> idx_a \<le> max from_a to_a \<Longrightarrow>
               min (from_b idx_a) (to_b idx_a) \<le> idx_b \<Longrightarrow> idx_b \<le> max (from_b idx_a) (to_b idx_a) \<Longrightarrow>
-              trace_assms t \<Longrightarrow>
+              inv_trace_assms s t \<Longrightarrow>
               Inv_c idx_a idx_b (from_c idx_a idx_b) (g idx_a idx_b vars) (run s t)"
     and Step: "\<And>idx_a idx_b idx_c vars t t' vars'.
               Inv_c idx_a idx_b idx_c vars (run s t) \<Longrightarrow>
               min from_a to_a \<le> idx_a \<Longrightarrow> idx_a \<le> max from_a to_a \<Longrightarrow>
               min (from_b idx_a) (to_b idx_a) \<le> idx_b \<Longrightarrow> idx_b \<le> max (from_b idx_a) (to_b idx_a) \<Longrightarrow>
               min (from_c idx_a idx_b) (to_c idx_a idx_b) \<le> idx_c \<Longrightarrow> idx_c \<le> max (from_c idx_a idx_b) (to_c idx_a idx_b) \<Longrightarrow>
-              Run (body idx_a idx_b idx_c vars) t' vars' \<Longrightarrow> trace_assms t \<Longrightarrow> trace_assms t' \<Longrightarrow>
+              Run (body idx_a idx_b idx_c vars) t' vars' \<Longrightarrow>
+              inv_trace_assms s t \<Longrightarrow> inv_trace_assms (run s t) t' \<Longrightarrow>
               Inv_c idx_a idx_b (idx_c + step_c idx_a idx_b) vars' (run (run s t) t')"
     and Inv_cb: "\<And>idx_a idx_b vars t t'.
               Inv_c idx_a idx_b (to_c idx_a idx_b + step_c idx_a idx_b) vars (run (run s t) t') \<Longrightarrow>
               min from_a to_a \<le> idx_a \<Longrightarrow> idx_a \<le> max from_a to_a \<Longrightarrow>
               min (from_b idx_a) (to_b idx_a) \<le> idx_b \<Longrightarrow> idx_b \<le> max (from_b idx_a) (to_b idx_a) \<Longrightarrow>
-              trace_assms t \<Longrightarrow> trace_assms t' \<Longrightarrow>
+              inv_trace_assms s t \<Longrightarrow> inv_trace_assms (run s t) t' \<Longrightarrow>
               Inv_b idx_a (idx_b + step_b idx_a) (from_c idx_a (idx_b + step_b idx_a)) vars (run (run s t) t')"
     and Inv_ba: "\<And>idx_a vars t.
               Inv_b idx_a (to_b idx_a + step_b idx_a) (from_c idx_a (to_b idx_a + step_b idx_a)) vars (run s t) \<Longrightarrow>
               min from_a to_a \<le> min idx_a (idx_a + step_a) \<Longrightarrow> max idx_a (idx_a + step_a) \<le> max from_a to_a \<Longrightarrow>
-              trace_assms t \<Longrightarrow>
+              inv_trace_assms s t \<Longrightarrow>
               Inv_a (idx_a + step_a) (from_b (idx_a + step_a)) (from_c (idx_a + step_a) (from_b (idx_a + step_a))) vars (run s t)"
     and Base_a: "(step_a > 0 \<and> from_a \<le> to_a) \<or> (step_a < 0 \<and> from_a \<ge> to_a) \<Longrightarrow> Inv_a from_a (from_b from_a) (from_c from_a (from_b from_a)) vars s"
     and Bounds_b: "\<And>idx_a. ((step_b idx_a > 0 \<and> from_b idx_a \<le> to_b idx_a) \<or> (step_b idx_a < 0 \<and> from_b idx_a \<ge> to_b idx_a)) \<and> step_b idx_a dvd to_b idx_a - from_b idx_a"
@@ -1683,8 +1871,8 @@ lemmas traces_enabled_triple_foreachM_index_list_inv =
 
 lemma traces_enabled_foreachM_inv:
   assumes "\<And>x vars t. Inv vars (run s t) \<Longrightarrow> x \<in> set xs \<Longrightarrow> traces_enabled (body x vars) (run s t)"
-    and "\<And>x vars t t' vars'. Inv vars (run s t) \<Longrightarrow> x \<in> set xs \<Longrightarrow> Run (body x vars) t' vars' \<Longrightarrow> trace_assms t' \<Longrightarrow> Inv vars' (run (run s t) t')"
-    and "Inv vars s"
+    and "\<And>x vars t t' vars'. Inv vars (run s t) \<Longrightarrow> x \<in> set xs \<Longrightarrow> Run (body x vars) t' vars' \<Longrightarrow> inv_trace_assms (run s t) t' \<Longrightarrow> Inv vars' (run (run s t) t')"
+    and "accessed_caps_invariant s \<Longrightarrow> Inv vars s"
   shows "traces_enabled (foreachM xs vars body) s"
 proof (use assms in \<open>induction xs arbitrary: vars s\<close>)
   case (Cons x xs vars s)
@@ -1695,15 +1883,17 @@ proof (use assms in \<open>induction xs arbitrary: vars s\<close>)
   proof (rule traces_enabled_bind)
     show "traces_enabled (body x vars) s"
       using body[of vars "[]" x] Inv_base
-      by auto
+      by (cases "accessed_caps_invariant s") (auto intro: not_accessed_caps_invariant_traces_enabled)
   next
     fix t vars'
-    assume t: "Run (body x vars) t vars'" "trace_assms t"
+    assume t: "Run (body x vars) t vars'" "inv_trace_assms s t"
+    then have s: "accessed_caps_invariant s"
+      by (auto intro: inv_trace_assms_accessed_caps_invariant)
     note body' = body[of _ "t @ t'" for t', simplified]
     note Inv_step' = Inv_step[of _ "t @ t'" for t', simplified]
     note Inv_base' = Inv_step[of vars "[]" x t vars', simplified]
     show "traces_enabled (foreachM xs vars' body) (run s t)"
-      using t Inv_base
+      using t s Inv_base
       by (intro Cons.IH) (auto intro: body' Inv_step' Inv_base')
   qed
   then show "traces_enabled (foreachM (x # xs) vars body) s"
@@ -1724,44 +1914,49 @@ proof (intro traces_enabled_foreachM_inv[where Inv = "\<lambda>vars s. Rs \<subs
 qed (use assms in auto)
 
 lemma traces_enabled_foreachM:
-  assumes "\<And>x vars t. x \<in> set xs \<Longrightarrow> trace_assms t \<Longrightarrow> traces_enabled (body x vars) (run s t)"
+  assumes "\<And>x vars t. x \<in> set xs \<Longrightarrow> inv_trace_assms s t \<Longrightarrow> traces_enabled (body x vars) (run s t)"
   shows "traces_enabled (foreachM xs vars body) s"
-proof (intro traces_enabled_foreachM_inv[where Inv = "\<lambda>vars s'. \<exists>t. s' = run s t \<and> trace_assms t"])
+proof (intro traces_enabled_foreachM_inv[where Inv = "\<lambda>vars s'. \<exists>t. s' = run s t \<and> inv_trace_assms s t"])
   fix x vars s'
-  assume "\<exists>t. s' = run s t \<and> trace_assms t" and "x \<in> set xs"
+  assume "\<exists>t. s' = run s t \<and> inv_trace_assms s t" and "x \<in> set xs"
   then show "traces_enabled (body x vars) s'"
     using assms
     by auto
 next
-  fix x vars s' t vars'
-  assume P: "\<exists>t. s' = run s t \<and> trace_assms t" and x: "x \<in> set xs"
-    and t: "Run (body x vars) t vars'" "trace_assms t"
-  from P obtain t' where "s' = run s t'" and "trace_assms t'"
+  fix x vars t t' vars'
+  assume P: "\<exists>t'. run s t = run s t' \<and> inv_trace_assms s t'" and x: "x \<in> set xs"
+    and t: "Run (body x vars) t' vars'" "inv_trace_assms (run s t) t'"
+  from P obtain t'' where "run s t = run s t''" and "inv_trace_assms s t''"
     by auto
-  then have "run s' t = run s (t' @ t)" and "trace_assms (t' @ t)"
+  then have "run (run s t) t' = run s (t'' @ t')" and "inv_trace_assms s (t'' @ t')"
     using t
     by auto
-  then show "\<exists>t'. run s' t = run s t' \<and> trace_assms t'"
+  then show "\<exists>t''. run (run s t) t' = run s t'' \<and> inv_trace_assms s t''"
     by blast
 next
-  have "s = run s []" and "trace_assms []"
+  assume "accessed_caps_invariant s"
+  then have "s = run s []" and "inv_trace_assms s []"
     by auto
-  then show "\<exists>t. s = run s t \<and> trace_assms t"
+  then show "\<exists>t. s = run s t \<and> inv_trace_assms s t"
     by blast
 qed
 
 lemma traces_enabled_try_catch:
   assumes "traces_enabled m s"
-    and "\<And>tm e th m'.
-           \<lbrakk>(m, tm, Exception e) \<in> Traces; (h e, th, m') \<in> Traces; finished m'; trace_assms tm\<rbrakk> \<Longrightarrow>
-           trace_enabled s (tm @ th)"
+    and "\<And>tm e th m' n.
+           \<lbrakk>(m, tm, Exception e) \<in> Traces; (h e, th, m') \<in> Traces; finished m'; n \<le> length (tm @ th);
+            pre_inv_trace_assms s (take n tm);
+            take (n - length tm) th = [] \<or> pre_inv_trace_assms (run s (take n tm)) (take (n - length tm) th)\<rbrakk> \<Longrightarrow>
+           trace_enabled s (take n (tm @ th))"
   shows "traces_enabled (try_catch m h) s"
 proof -
   have *: "finished (try_catch m h) \<longleftrightarrow> (\<exists>a. m = Done a) \<or> (\<exists>msg. m = Fail msg \<and> finished m) \<or> (\<exists>e. m = Exception e \<and> (h e, [], h e) \<in> Traces \<and> finished (h e))" for m
     by (cases m) (auto simp: finished_def isException_def)
   show ?thesis
     using assms
-    by (fastforce simp: traces_enabled_def trace_enabled_append_iff * elim!: try_catch_Traces_cases)
+    unfolding traces_enabled_def
+    by (fastforce simp: trace_enabled_append_iff pre_inv_trace_assms_append_iff *
+                  elim!: try_catch_Traces_cases)
 qed
 
 lemma traces_enabled_liftR[traces_enabledI]:
@@ -1774,7 +1969,8 @@ lemma traces_enabled_liftR[traces_enabledI]:
 definition
   "early_returns_enabled m s \<equiv>
      traces_enabled m s \<and>
-     (\<forall>t a. (m, t, Exception (Inl a)) \<in> Traces \<and> trace_assms t \<longrightarrow> trace_enabled s t)"
+     (\<forall>t a. (m, t, Exception (Inl a)) \<in> Traces \<longrightarrow>
+       (\<forall>n \<le> length t. pre_inv_trace_assms s (take n t) \<longrightarrow> trace_enabled s (take n t)))"
 
 lemma traces_enabled_catch_early_return[traces_enabledI]:
   assumes "early_returns_enabled m s"
@@ -1800,29 +1996,48 @@ lemma early_returns_enabled_return[traces_enabledI]:
 
 lemma early_returns_enabled_bind[traces_enabledI]:
   assumes m: "early_returns_enabled m s"
-    and f: "\<And>t a. Run m t a \<Longrightarrow> trace_assms t \<Longrightarrow> early_returns_enabled (f a) (run s t)"
+    and f: "\<And>t a. Run m t a \<Longrightarrow> inv_trace_assms s t \<Longrightarrow> early_returns_enabled (f a) (run s t)"
   shows "early_returns_enabled (m \<bind> f) s"
 proof -
-  { fix t a
-    assume "(m \<bind> f, t, Exception (Inl a)) \<in> Traces" and t: "trace_assms t"
-    then have "trace_enabled s t"
+  { fix t a n
+    assume "(m \<bind> f, t, Exception (Inl a)) \<in> Traces" and t: "pre_inv_trace_assms s (take n t)"
+      and n: "n \<le> length t"
+    then have "trace_enabled s (take n t)"
     proof (cases rule: bind_Traces_cases)
       case (Left m'')
       then consider "m'' = Exception (Inl a)" | a' where "m'' = Done a'" and "f a' = Exception (Inl a)"
         by (cases m'') auto
       then show ?thesis
-        using Left m t
+        using Left m t n
         by cases (auto simp: early_returns_enabled_def traces_enabled_def)
     next
       case (Bind tm am tf)
-      then show ?thesis
-        using Bind m f[of tm am] t
-        by (auto simp: trace_enabled_append_iff early_returns_enabled_def traces_enabled_def)
+      show ?thesis
+      proof cases
+        assume "n \<le> length tm"
+        then show ?thesis
+          using Bind m t
+          by (auto simp: trace_enabled_append_iff early_returns_enabled_def traces_enabled_def)
+      next
+        assume n': "\<not>n \<le> length tm"
+        then have "trace_enabled s (take n tm)"
+          using Bind m t
+          unfolding early_returns_enabled_def traces_enabled_def
+          by (elim conjE allE[where x = tm] allE[where x = "Done am"] allE[where x = "length tm"] impE)
+             (auto simp: pre_inv_trace_assms_append_iff)
+        moreover have "trace_enabled (run s (take n tm)) (take (n - length tm) tf)"
+          using Bind f[of tm am] t n n'
+          unfolding early_returns_enabled_def
+          by (fastforce simp: pre_inv_trace_assms_append_iff inv_trace_assms_iff)
+        ultimately show ?thesis
+          using Bind
+          by (auto simp: trace_enabled_append_iff)
+      qed
     qed
   }
   then show ?thesis
     using assms
-    by (auto intro: traces_enabled_bind simp: early_returns_enabled_def)
+    by (auto intro!: traces_enabled_bind simp: early_returns_enabled_def)
 qed
 
 lemma early_returns_enabled_early_return[traces_enabledI]:
@@ -2114,14 +2329,6 @@ lemma traces_enabled_try_catch:
            trace_enabled s (tm @ th)"
   shows "traces_enabled (try_catch m h) s regs"
 proof -
-  (* have *: "isException (try_catch m h) \<longleftrightarrow> (\<exists>em eh. m = Exception em \<and> h em = Exception eh \<and> finished (Exception eh :: ('regval, 'a, 'c) monad))" for m *)
-  (*have *: "isException (try_catch m h) \<longleftrightarrow> (\<exists>msg. m = Fail msg \<and> finished (Fail msg :: ('regval, 'a, 'b) monad)) \<or> (\<exists>em eh. m = Exception em \<and> isException (h em))" for m
-    unfolding isException_def finished_def
-    by (cases m) auto
-  have **: "try_catch m h = Done a \<longleftrightarrow> m = Done a \<or> (\<exists>e. m = Exception e \<and> h e = Done a)" for a m
-    by (cases m) auto
-  have ***: "try_catch m h = Fail msg \<longleftrightarrow> m = Fail msg \<or> (\<exists>e. m = Exception e \<and> h e = Fail msg)" for msg m
-    by (cases m) auto*)
   have *: "finished (try_catch m h) \<longleftrightarrow> (\<exists>a. m = Done a) \<or> (\<exists>msg. m = Fail msg \<and> finished m) \<or> (\<exists>e. m = Exception e \<and> (h e, [], h e) \<in> Traces \<and> finished (h e))" for m
     by (cases m) (auto simp: finished_def isException_def)
   show ?thesis
@@ -2336,8 +2543,10 @@ lemma if_derivable_capsI[derivable_capsI]:
 end
 
 locale Write_Cap_Assm_Automaton =
+  Capability_Invariant_ISA CC ISA cap_invariant +
   Write_Cap_Automaton CC ISA ex_traces use_mem_caps invoked_caps invoked_indirect_caps
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
+  and cap_invariant :: "'cap \<Rightarrow> bool"
   and ex_traces :: bool and use_mem_caps :: bool
   and invoked_caps :: "'cap set" and invoked_indirect_caps :: "'cap set" +
   fixes ev_assms :: "'regval event \<Rightarrow> bool"
@@ -2368,7 +2577,7 @@ lemma traces_enabled_read_reg:
   shows "traces_enabled (read_reg r) s"
   using assms
   unfolding traces_enabled_def
-  by (blast intro: read_reg_trace_enabled)
+  by (blast intro: read_reg_trace_enabled trace_enabled_take)
 
 lemma write_reg_trace_enabled:
   assumes "(write_reg r v, t, m') \<in> Traces"
@@ -2382,22 +2591,22 @@ lemma traces_enabled_write_reg:
   shows "traces_enabled (write_reg r v) s"
   using assms
   unfolding traces_enabled_def
-  by (blast intro: write_reg_trace_enabled)
+  by (blast intro: write_reg_trace_enabled trace_enabled_take)
 
 lemma traces_enabled_read_mem[traces_enabledI]:
   shows "traces_enabled (read_mem BCa BCb rk addr_sz addr sz) s"
   unfolding read_mem_def read_mem_bytes_def maybe_fail_def
-  by (auto split: option.splits simp: traces_enabled_def elim: Traces_cases)
+  by (auto split: option.splits simp: traces_enabled_def elim: Traces_cases intro!: trace_enabled_take)
 
 lemma traces_enabled_read_memt[traces_enabledI]:
   shows "traces_enabled (read_memt BCa BCb rk addr sz) s"
   unfolding read_memt_def read_memt_bytes_def maybe_fail_def
-  by (auto split: option.splits simp: traces_enabled_def elim: Traces_cases)
+  by (auto split: option.splits simp: traces_enabled_def elim: Traces_cases intro!: trace_enabled_take)
 
 lemma traces_enabled_write_mem[traces_enabledI]:
   shows "traces_enabled (write_mem BCa BCb wk addr_sz addr sz data) s"
   unfolding write_mem_def maybe_fail_def
-  by (auto split: option.splits simp: traces_enabled_def elim: Traces_cases)
+  by (auto split: option.splits simp: traces_enabled_def elim: Traces_cases intro!: trace_enabled_take)
 
 lemma traces_enabled_write_memt[traces_enabledI]:
   assumes "\<forall>addr' bytes c r.
@@ -2409,11 +2618,12 @@ lemma traces_enabled_write_memt[traces_enabledI]:
   shows "traces_enabled (write_memt BCa BCb wk addr sz data tag) s"
   using assms
   unfolding write_memt_def maybe_fail_def derivable_caps_def
-  by (fastforce split: option.splits simp: traces_enabled_def elim: Traces_cases)
+  by (fastforce simp: traces_enabled_def pre_inv_trace_assms_def take_Cons
+                split: option.splits nat.splits elim: Traces_cases)
 
 lemma traces_enabled_reg_axioms:
   assumes "traces_enabled m initial" and "hasTrace t m"
-    and "trace_assms t"
+    and "pre_inv_trace_assms initial t"
     and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
   shows "store_cap_reg_axiom CC ISA ex_traces use_mem_caps invoked_caps invoked_indirect_caps t"
     and "store_cap_mem_axiom CC ISA use_mem_caps invoked_indirect_caps t"
@@ -2638,8 +2848,10 @@ lemma non_mem_trace_enabledI:
 end
 
 locale Mem_Assm_Automaton =
+  Capability_Invariant_ISA CC ISA cap_invariant +
   Mem_Automaton translation_assms CC ISA is_fetch use_mem_caps invoked_indirect_caps
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
+    and cap_invariant :: "'cap \<Rightarrow> bool"
     and translation_assms :: "'regval event \<Rightarrow> bool"
     and is_fetch :: bool and ex_traces :: bool and use_mem_caps :: bool
     and invoked_indirect_caps :: "'cap set" +
@@ -2670,11 +2882,11 @@ lemma non_mem_exp_trace_enabledI:
 lemma non_mem_exp_traces_enabledI:
   "traces_enabled m s" if "non_mem_exp m"
   using that
-  by (auto simp: traces_enabled_def intro: non_mem_exp_trace_enabledI)
+  by (auto simp: traces_enabled_def intro: non_mem_exp_trace_enabledI trace_enabled_take)
 
 lemma traces_enabled_mem_axioms:
   assumes "traces_enabled m initial" and "hasTrace t m"
-    and "trace_assms t"
+    and "pre_inv_trace_assms initial t"
     and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
   shows "store_mem_axiom CC ISA use_mem_caps invoked_indirect_caps t"
     and "store_tag_axiom CC ISA t"
@@ -2682,14 +2894,15 @@ lemma traces_enabled_mem_axioms:
   using assms
   by (intro accepts_store_mem_axiom accepts_store_tag_axiom accepts_load_mem_axiom
             traces_enabled_accepts_fromI;
-      auto simp: trace_assms_def ev_assms_def)+
+      auto simp: pre_inv_trace_assms_def trace_assms_def ev_assms_def)+
 
 lemma traces_enabled_Read_mem:
   assumes "\<And>v. traces_enabled (m v) (axiom_step s (E_read_mem rk paddr sz v))"
     and "\<And>v. enabled s (E_read_mem rk paddr sz v)"
   shows "traces_enabled (Read_mem rk paddr sz m) s"
   using assms
-  by (fastforce simp: traces_enabled_def elim!: Traces_cases[where m = "Read_mem rk paddr sz m"])
+  by (fastforce simp: traces_enabled_def take_Cons pre_inv_trace_assms_Cons split: nat.splits
+                elim!: Traces_cases[where m = "Read_mem rk paddr sz m"])
 
 lemma traces_enabled_read_mem:
   assumes "\<And>paddr v. nat_of_bv BC_addr addr = Some paddr \<Longrightarrow> enabled s (E_read_mem rk paddr (nat sz) v)"
@@ -2704,7 +2917,8 @@ lemma traces_enabled_Read_memt:
     and "\<And>v tag. enabled s (E_read_memt rk paddr sz (v, tag))"
   shows "traces_enabled (Read_memt rk paddr sz m) s"
   using assms
-  by (fastforce simp: traces_enabled_def elim!: Traces_cases[where m = "Read_memt rk paddr sz m"])
+  by (fastforce simp: traces_enabled_def take_Cons pre_inv_trace_assms_Cons split: nat.splits
+                elim!: Traces_cases[where m = "Read_memt rk paddr sz m"])
 
 lemma traces_enabled_read_memt:
   assumes "\<And>paddr v tag. nat_of_bv BC_addr addr = Some paddr \<Longrightarrow> enabled s (E_read_memt rk paddr (nat sz) (v, tag))"
