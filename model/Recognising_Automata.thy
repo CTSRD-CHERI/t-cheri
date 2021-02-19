@@ -2095,6 +2095,20 @@ lemma non_cap_exp_Run_inv_early_returns_enabled_runE:
   using assms
   by (auto simp: non_cap_exp_Run_run_invI)
 
+text \<open>If a proof step splits a trace into subtraces (e.g. \<open>derivable_caps_combinators\<close>), make sure
+  that the trace assumption predicate is split accordingly so that it can be picked up by methods
+  working on goals for the subtraces (instead of falling through to @{method auto}).\<close>
+
+lemma inv_trace_assms_appendE:
+  assumes "inv_trace_assms s t" and "t = t' @ t''"
+  obtains "inv_trace_assms s t'" and "inv_trace_assms (run s t') t''"
+  using assms
+  by auto
+
+method split_inv_trace_assms_append =
+  (match premises in s[thin]: \<open>inv_trace_assms s t\<close> and t: \<open>t = t' @ t''\<close> for s t t' t'' \<Rightarrow>
+     \<open>rule inv_trace_assms_appendE[OF s t]\<close>)
+
 method try_simp_traces_enabled =
   ((match conclusion in \<open>traces_enabled m2 (run s t)\<close> for m2 s t \<Rightarrow>
      \<open>match premises in m1: \<open>Run m1 t a\<close> for m1 a \<Rightarrow>
@@ -2149,6 +2163,7 @@ method traces_enabledI_with methods solve uses intro elim =
 
 method traces_enabledI uses simp intro elim assms =
   (((traces_enabled_step simp: simp intro: intro elim: elim assms: assms)+; traces_enabledI simp: simp intro: intro elim: elim assms: assms)
+    | (split_inv_trace_assms_append; traces_enabledI simp: simp intro: intro elim: elim assms: assms)
     | (accessible_regs_step simp: simp assms: assms; solves \<open>traces_enabledI simp: simp intro: intro elim: elim assms: assms\<close>)
     | (derivable_caps_step; solves \<open>traces_enabledI simp: simp intro: intro elim: elim assms: assms\<close>)
     | (solves \<open>no_reg_writes_toI simp: simp\<close>)
