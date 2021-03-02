@@ -133,20 +133,20 @@ let write_reg_axiom ISA has_ex t =
       (has_ex && r IN ISA.write_exception_regs)))
 
 val store_cap_mem_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
-  isa 'cap 'regval 'instr 'e -> bool -> set 'cap -> trace 'regval -> bool
-let store_cap_mem_axiom ISA use_mem_caps invoked_indirect_caps t =
+  isa 'cap 'regval 'instr 'e -> set 'cap -> bool -> set 'cap -> trace 'regval -> bool
+let store_cap_mem_axiom ISA initial_caps use_mem_caps invoked_indirect_caps t =
   (forall i c addr sz.
      (writes_mem_cap_at_idx i t = Just (addr, sz, c))
      -->
-     (cap_derivable (available_caps ISA (invoked_indirect_caps = {} && use_mem_caps) i t) c))
+     (cap_derivable (initial_caps union available_caps ISA (invoked_indirect_caps = {} && use_mem_caps) i t) c))
 
 val store_cap_reg_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, SetType 'regval, Eq 'cap, Eq 'regval =>
-  isa 'cap 'regval 'instr 'e -> bool -> bool -> set 'cap -> set 'cap -> trace 'regval -> bool
-let store_cap_reg_axiom ISA has_ex use_mem_caps invoked_caps invoked_indirect_caps t =
+  isa 'cap 'regval 'instr 'e -> bool -> set 'cap -> bool -> set 'cap -> set 'cap -> trace 'regval -> bool
+let store_cap_reg_axiom ISA has_ex initial_caps use_mem_caps invoked_caps invoked_indirect_caps t =
   (forall i c r.
      (writes_to_reg_at_idx i t = Just r && c IN (writes_reg_caps_at_idx ISA i t))
      -->
-     (cap_derivable (available_caps ISA (invoked_indirect_caps = {} && use_mem_caps) i t) c ||
+     (cap_derivable (initial_caps union available_caps ISA (invoked_indirect_caps = {} && use_mem_caps) i t) c ||
      (* Exception *)
      (has_ex &&
       ((*exists r' v' j.
@@ -161,15 +161,15 @@ let store_cap_reg_axiom ISA has_ex use_mem_caps invoked_caps invoked_indirect_ca
      (* Capability pair invocation *)
      (exists cc cd.
         c IN invoked_caps &&
-        cap_derivable (available_caps ISA (invoked_indirect_caps = {} && use_mem_caps) i t) cc &&
-        cap_derivable (available_caps ISA (invoked_indirect_caps = {} && use_mem_caps) i t) cd &&
+        cap_derivable (initial_caps union available_caps ISA (invoked_indirect_caps = {} && use_mem_caps) i t) cc &&
+        cap_derivable (initial_caps union available_caps ISA (invoked_indirect_caps = {} && use_mem_caps) i t) cd &&
         invokable cc cd &&
         ((leq_cap c (unseal cc) && r IN ISA.PCC) ||
          (leq_cap c (unseal cd) && r IN ISA.IDC))) ||
      (* Direct sentry invocation *)
      (exists cs.
         c IN invoked_caps &&
-        cap_derivable (available_caps ISA (invoked_indirect_caps = {} && use_mem_caps) i t) cs &&
+        cap_derivable (initial_caps union available_caps ISA (invoked_indirect_caps = {} && use_mem_caps) i t) cs &&
         is_sentry cs &&
         is_sealed cs &&
         leq_cap c (unseal cs) &&
@@ -177,7 +177,7 @@ let store_cap_reg_axiom ISA has_ex use_mem_caps invoked_caps invoked_indirect_ca
      (* Indirect sentry invocation (writing the unsealed sentry to IDC) *)
      (exists cs.
         c IN invoked_indirect_caps &&
-        cap_derivable (available_reg_caps ISA i t) cs &&
+        cap_derivable (initial_caps union available_reg_caps ISA i t) cs &&
         is_indirect_sentry cs &&
         is_sealed cs &&
         leq_cap c (unseal cs) &&
@@ -185,7 +185,7 @@ let store_cap_reg_axiom ISA has_ex use_mem_caps invoked_caps invoked_indirect_ca
      (* Indirect capability (pair) invocation (writing the loaded capability/capabilities to PCC/IDC) *)
      (exists c'.
         c IN invoked_caps &&
-        cap_derivable (available_mem_caps ISA i t) c' &&
+        cap_derivable (initial_caps union available_mem_caps ISA i t) c' &&
         ((leq_cap c (unseal c') && is_sealed c' && is_sentry c' && r IN ISA.PCC) ||
          (leq_cap c c' && r IN (ISA.PCC union ISA.IDC))))))
 
@@ -194,14 +194,14 @@ let store_cap_reg_axiom ISA has_ex use_mem_caps invoked_caps invoked_indirect_ca
    only PCC or both PCC and IDC. *)
 
 val load_mem_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
-  isa 'cap 'regval 'instr 'e -> bool -> bool -> set 'cap -> trace 'regval -> bool
-let load_mem_axiom ISA is_fetch use_mem_caps invoked_indirect_caps t =
+  isa 'cap 'regval 'instr 'e -> bool -> set 'cap -> bool -> set 'cap -> trace 'regval -> bool
+let load_mem_axiom ISA is_fetch initial_caps use_mem_caps invoked_indirect_caps t =
   (forall i paddr sz v tag.
      (reads_mem_val_at_idx i t = Just (paddr, sz, v, tag) &&
       not (translation_event_at_idx ISA i t))
      -->
      (exists c' vaddr.
-        cap_derivable (available_caps ISA (invoked_indirect_caps = {} && use_mem_caps) i t) c' && is_tagged c' &&
+        cap_derivable (initial_caps union available_caps ISA (invoked_indirect_caps = {} && use_mem_caps) i t) c' && is_tagged c' &&
         (is_sealed c' --> is_indirect_sentry c' && unseal c' IN invoked_indirect_caps) &&
         ISA.translate_address vaddr (if is_fetch then Fetch else Load) (take i t) = Just paddr &&
         Set.fromList (address_range vaddr sz) subset (get_mem_region c') &&
@@ -228,14 +228,14 @@ let store_tag_axiom ISA t =
       (tag = B1 --> address_tag_aligned ISA paddr && sz = ISA.tag_granule)))
 
 val store_mem_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
-  isa 'cap 'regval 'instr 'e -> bool -> set 'cap -> trace 'regval -> bool
-let store_mem_axiom ISA use_mem_caps invoked_indirect_caps t =
+  isa 'cap 'regval 'instr 'e -> set 'cap -> bool -> set 'cap -> trace 'regval -> bool
+let store_mem_axiom ISA initial_caps use_mem_caps invoked_indirect_caps t =
   (forall i paddr sz v tag.
      (writes_mem_val_at_idx i t = Just (paddr, sz, v, tag) &&
       not (translation_event_at_idx ISA i t))
      -->
      (exists c' vaddr.
-        cap_derivable (available_caps ISA (invoked_indirect_caps = {} && use_mem_caps) i t) c' && is_tagged c' && not (is_sealed c') &&
+        cap_derivable (initial_caps union available_caps ISA (invoked_indirect_caps = {} && use_mem_caps) i t) c' && is_tagged c' && not (is_sealed c') &&
         ISA.translate_address vaddr Store (take i t) = Just paddr &&
         Set.fromList (address_range vaddr sz) subset (get_mem_region c') &&
         permits_store c' &&
@@ -243,12 +243,12 @@ let store_mem_axiom ISA use_mem_caps invoked_indirect_caps t =
         (mem_val_is_local_cap ISA v tag && tag = B1 --> permits_store_local_cap c')))
 
 val cheri_axioms : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, SetType 'regval, Eq 'cap, Eq 'regval =>
-  isa 'cap 'regval 'instr 'e -> bool -> bool -> bool -> set 'cap -> set 'cap -> trace 'regval -> bool
-let cheri_axioms ISA is_fetch has_ex use_mem_caps invoked_caps invoked_indirect_caps t =
-  store_cap_mem_axiom ISA use_mem_caps invoked_indirect_caps t &&
-  store_cap_reg_axiom ISA has_ex use_mem_caps invoked_caps invoked_indirect_caps t &&
+  isa 'cap 'regval 'instr 'e -> bool -> bool -> set 'cap -> bool -> set 'cap -> set 'cap -> trace 'regval -> bool
+let cheri_axioms ISA is_fetch has_ex initial_caps use_mem_caps invoked_caps invoked_indirect_caps t =
+  store_cap_mem_axiom ISA initial_caps use_mem_caps invoked_indirect_caps t &&
+  store_cap_reg_axiom ISA has_ex initial_caps use_mem_caps invoked_caps invoked_indirect_caps t &&
   read_reg_axiom ISA has_ex t &&
   write_reg_axiom ISA has_ex t &&
-  load_mem_axiom ISA is_fetch use_mem_caps invoked_indirect_caps t &&
+  load_mem_axiom ISA is_fetch initial_caps use_mem_caps invoked_indirect_caps t &&
   store_tag_axiom ISA t &&
-  store_mem_axiom ISA use_mem_caps invoked_indirect_caps t
+  store_mem_axiom ISA initial_caps use_mem_caps invoked_indirect_caps t

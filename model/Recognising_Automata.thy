@@ -33,6 +33,9 @@ lemma trace_enabled_append_iff: "trace_enabled s (t @ t') \<longleftrightarrow> 
 lemma accepts_from_append_iff: "accepts_from s (t @ t') \<longleftrightarrow> trace_enabled s t \<and> accepts_from (run s t) t'"
   by (auto simp: accepts_from_def trace_enabled_append_iff)
 
+lemma accepts_from_Nil[simp]: "accepts_from s [] \<longleftrightarrow> final s"
+  by (auto simp: accepts_from_def)
+
 lemma accepts_from_Cons[simp]: "accepts_from s (e # t) \<longleftrightarrow> enabled s e \<and> accepts_from (step s e) t"
   by (auto simp: accepts_from_def)
 
@@ -272,8 +275,11 @@ record ('cap, 'regval) axiom_state =
 definition accessed_caps where
   "accessed_caps use_mem_caps s \<equiv> accessed_reg_caps s \<union> (if use_mem_caps then accessed_mem_caps s else {})"
 
-locale Cap_Axiom_Automaton = Capability_ISA CC ISA
-  for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa" +
+abbreviation (in Capability_ISA) "tagged_initial_caps \<equiv> {c \<in> initial_caps. is_tagged_method CC c}"
+
+locale Cap_Axiom_Automaton = Capability_ISA CC ISA initial_caps
+  for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
+    and initial_caps :: "'cap set" +
   fixes enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool"
     and use_mem_caps :: bool
 begin
@@ -607,16 +613,33 @@ lemma non_mem_exp_foreachM:
   using assms
   by (induction xs vars body rule: foreachM.induct) (auto intro: non_cap_expI[THEN non_cap_exp_non_mem_exp])
 
-lemma non_cap_exp_choose_bool[non_cap_expI]:
-  "non_cap_exp (choose_bool desc)"
-  by (auto simp: choose_bool_def non_cap_exp_def elim: Traces_cases)
+lemma non_cap_exp_choose_regval[non_cap_expI]:
+  "non_cap_exp (choose_regval desc)"
+  by (auto simp: choose_regval_def non_cap_exp_def elim: Traces_cases)
 
-lemma non_cap_exp_undefined_bool[non_cap_expI]:
-  "non_cap_exp (undefined_bool ())"
-  by (auto simp: undefined_bool_def intro: non_cap_expI)
+lemma non_cap_exp_undefined_value[non_cap_expI]:
+  "non_cap_exp (choose_convert of_rv descr)"
+  unfolding choose_convert_def maybe_fail_def
+  by (auto simp: non_cap_exp_def elim: Traces_cases split: option.splits)
+
+lemma non_cap_exp_choose_bool[non_cap_expI]:
+  "non_cap_exp (choose_bool RV desc)"
+  by (auto simp: choose_bool_def intro: non_cap_expI)
+
+lemma non_cap_exp_choose_int[non_cap_expI]:
+  "non_cap_exp (choose_int RV msg)"
+  by (auto simp: choose_int_def intro: non_cap_expI)
+
+lemma non_cap_exp_choose_real[non_cap_expI]:
+  "non_cap_exp (choose_real RV msg)"
+  by (auto simp: choose_real_def intro: non_cap_expI)
+
+lemma non_cap_exp_choose_string[non_cap_expI]:
+  "non_cap_exp (choose_string RV msg)"
+  by (auto simp: choose_string_def intro: non_cap_expI)
 
 lemma non_cap_exp_bool_of_bitU_nondet[non_cap_expI]:
-  "non_cap_exp (bool_of_bitU_nondet b)"
+  "non_cap_exp (bool_of_bitU_nondet RV b)"
   unfolding bool_of_bitU_nondet_def
   by (cases b) (auto intro: non_cap_expI)
 
@@ -634,11 +657,11 @@ lemma non_cap_exp_bool_of_bitU_fail[non_cap_expI]:
   by (cases b) (auto intro: non_cap_expI)
 
 lemma non_cap_exp_bools_of_bits_nondet[non_cap_expI]:
-  "non_cap_exp (bools_of_bits_nondet bits)"
+  "non_cap_exp (bools_of_bits_nondet RV bits)"
   by (auto simp: bools_of_bits_nondet_def intro: non_cap_expI)
 
 lemma non_cap_exp_of_bits_nondet[non_cap_expI]:
-  "non_cap_exp (of_bits_nondet BC bits)"
+  "non_cap_exp (of_bits_nondet BC RV bits)"
   by (auto simp: of_bits_nondet_def intro: non_cap_expI)
 
 lemma non_cap_exp_of_bits_fail[non_cap_expI]:
@@ -646,7 +669,7 @@ lemma non_cap_exp_of_bits_fail[non_cap_expI]:
   by (auto simp: of_bits_fail_def intro: non_cap_expI)
 
 lemma non_cap_exp_mword_nondet[non_cap_expI]:
-  "non_cap_exp (mword_nondet ())"
+  "non_cap_exp (mword_nondet RV ())"
   by (auto simp add: mword_nondet_def intro: non_cap_expI simp del: repeat.simps)
 
 lemma non_cap_exp_genlistM:
@@ -656,7 +679,7 @@ lemma non_cap_exp_genlistM:
   by (auto simp: genlistM_def intro!: non_cap_expI)
 
 lemma non_cap_exp_choose_bools[non_cap_expI]:
-  "non_cap_exp (choose_bools desc n)"
+  "non_cap_exp (choose_bools RV desc n)"
   by (auto simp: choose_bools_def intro: non_cap_expI non_cap_exp_genlistM)
 
 lemma non_cap_exp_exit[non_cap_expI]:
@@ -665,12 +688,8 @@ lemma non_cap_exp_exit[non_cap_expI]:
   by (rule non_cap_exp_Fail)
 
 lemma non_cap_exp_chooseM[non_cap_expI]:
-  "non_cap_exp (chooseM desc xs)"
-  by (auto simp: chooseM_def intro!: non_cap_expI split: option.splits)
-
-lemma non_cap_exp_internal_pick[non_cap_expI]:
-  "non_cap_exp (internal_pick xs)"
-  by (auto simp: internal_pick_def intro!: non_cap_expI)
+  "non_cap_exp (choose_from_list RV desc xs)"
+  by (auto simp: choose_from_list_def intro!: non_cap_expI split: option.splits)
 
 lemma non_cap_exp_and_boolM[intro!]:
   "non_cap_exp (and_boolM m1 m2)" if "non_cap_exp m1" and "non_cap_exp m2"
@@ -905,10 +924,11 @@ method accessible_regsI uses simp assms =
      simp: simp assms: assms)
 
 definition derivable_caps :: "('cap, 'regval) axiom_state \<Rightarrow> 'cap set" where
-  "derivable_caps s \<equiv> {c. is_tagged_method CC c \<longrightarrow> c \<in> derivable (accessed_caps use_mem_caps s)}"
+  "derivable_caps s \<equiv>
+     {c. is_tagged_method CC c \<longrightarrow> c \<in> derivable (initial_caps \<union> accessed_caps use_mem_caps s)}"
 
 definition derivable_mem_caps where
-  "derivable_mem_caps s = {c. is_tagged_method CC c \<longrightarrow> c \<in> derivable (accessed_mem_caps s)}"
+  "derivable_mem_caps s = {c. is_tagged_method CC c \<longrightarrow> c \<in> derivable (initial_caps \<union> accessed_mem_caps s)}"
 
 definition accessed_mem_caps_of_trace where
   "accessed_mem_caps_of_trace t = (\<Union>e \<in> set t. accessed_mem_caps_of_ev e)"
@@ -963,9 +983,15 @@ lemma derivable_mem_caps_derivable_caps:
   assumes "c \<in> derivable_mem_caps s"
     and "use_mem_caps"
   shows "c \<in> derivable_caps s"
-  using assms(1)
-  using derivable_mono[of "accessed_mem_caps s" "accessed_reg_caps s \<union> accessed_mem_caps s"]
-  by (auto simp: derivable_mem_caps_def derivable_caps_def accessed_caps_def intro: assms(2))
+proof -
+  have "initial_caps \<union> accessed_mem_caps s \<subseteq> initial_caps \<union> accessed_caps use_mem_caps s"
+    using assms(2)
+    by (auto simp: accessed_caps_def)
+  from derivable_mono[OF this]
+  show ?thesis
+    using assms(1)
+    by (auto simp: derivable_mem_caps_def derivable_caps_def)
+qed
 
 named_theorems derivable_capsE
 named_theorems derivable_capsI
@@ -986,7 +1012,7 @@ lemma accessed_caps_run_mono:
 
 lemma derivable_caps_run_mono:
   "derivable_caps s \<subseteq> derivable_caps (run s t)"
-  using derivable_mono[OF accessed_caps_run_mono]
+  using derivable_mono[OF accessed_caps_run_mono[THEN Un_mono[OF subset_refl]]]
   by (auto simp: derivable_caps_def)
 
 lemma derivable_caps_run_imp:
@@ -1122,8 +1148,9 @@ lemma recognises_store_cap_mem_axiom:
 
 end*)
 
-locale Write_Cap_Automaton = Capability_ISA CC ISA
-  for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa" +
+locale Write_Cap_Automaton = Capability_ISA CC ISA initial_caps
+  for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
+    and initial_caps :: "'cap set" +
   fixes ex_traces :: bool and use_mem_caps :: bool
     and invoked_caps :: "'cap set" and invoked_indirect_caps :: "'cap set"
 begin
@@ -1135,54 +1162,54 @@ fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Righta
      (r \<in> write_privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> r \<in> write_exception_regs ISA \<and> ex_traces)) \<and>
      (\<forall>c. (c \<in> caps_of_regval ISA v \<and> is_tagged_method CC c)
          \<longrightarrow>
-         (c \<in> derivable (accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s) \<or>
+         (c \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s) \<or>
           (c \<in> exception_targets ISA (read_from_KCC s) \<and> ex_traces \<and> r \<in> PCC ISA) \<or>
-          (\<exists>cs. c \<in> invoked_caps \<and> cs \<in> derivable (accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s) \<and>
+          (\<exists>cs. c \<in> invoked_caps \<and> cs \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s) \<and>
                 is_sentry_method CC cs \<and> is_sealed_method CC cs \<and>
                 leq_cap CC c (unseal_method CC cs) \<and> r \<in> PCC ISA) \<or>
-          (\<exists>cs. c \<in> invoked_indirect_caps \<and> cs \<in> derivable (accessed_reg_caps s) \<and>
+          (\<exists>cs. c \<in> invoked_indirect_caps \<and> cs \<in> derivable (initial_caps \<union> accessed_reg_caps s) \<and>
                 is_indirect_sentry_method CC cs \<and> is_sealed_method CC cs \<and>
                 leq_cap CC c (unseal_method CC cs) \<and> r \<in> IDC ISA) \<or>
           (\<exists>cc cd. c \<in> invoked_caps \<and> invokable CC cc cd \<and>
-                   cc \<in> derivable (accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s) \<and>
-                   cd \<in> derivable (accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s) \<and>
+                   cc \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s) \<and>
+                   cd \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s) \<and>
                    (r \<in> PCC ISA \<and> leq_cap CC c (unseal_method CC cc) \<or>
                     r \<in> IDC ISA \<and> leq_cap CC c (unseal_method CC cd))) \<or>
           (\<exists>c'. c \<in> invoked_caps \<and>
-                c' \<in> derivable (accessed_mem_caps s) \<and>
+                c' \<in> derivable (initial_caps \<union> accessed_mem_caps s) \<and>
                 ((leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c' \<and> r \<in> PCC ISA) \<or>
                  (leq_cap CC c c' \<and> r \<in> PCC ISA \<union> IDC ISA)))))"
 | "enabled s (E_read_reg r v) = (r \<in> read_privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> r \<in> read_exception_regs ISA \<and> ex_traces))"
 | "enabled s (E_write_memt _ addr sz bytes tag _) =
-     (\<forall>c.  cap_of_mem_bytes_method CC bytes tag = Some c \<and> is_tagged_method CC c \<longrightarrow> c \<in> derivable (accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s))"
+     (\<forall>c.  cap_of_mem_bytes_method CC bytes tag = Some c \<and> is_tagged_method CC c \<longrightarrow> c \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s))"
 | "enabled s _ = True"
 
 lemma enabled_E_write_reg_cases:
   assumes "enabled s (E_write_reg r v)"
     and "c \<in> caps_of_regval ISA v"
     and "is_tagged_method CC c"
-  obtains (Derivable) "c \<in> derivable (accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)"
+  obtains (Derivable) "c \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)"
   | (KCC) "c \<in> exception_targets ISA (read_from_KCC s)" and "ex_traces" and
-      "r \<in> PCC ISA" and "c \<notin> derivable (accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)"
-  | (Sentry) cs where "c \<in> invoked_caps" and "cs \<in> derivable (accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)" and
+      "r \<in> PCC ISA" and "c \<notin> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)"
+  | (Sentry) cs where "c \<in> invoked_caps" and "cs \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)" and
       "is_sentry_method CC cs" and "is_sealed_method CC cs" and
       "leq_cap CC c (unseal_method CC cs)" and "r \<in> PCC ISA"
-  | (SentryIndirect) cs where "c \<in> invoked_indirect_caps" and "cs \<in> derivable (accessed_reg_caps s)" and
+  | (SentryIndirect) cs where "c \<in> invoked_indirect_caps" and "cs \<in> derivable (initial_caps \<union> accessed_reg_caps s)" and
       "is_indirect_sentry_method CC cs" and "is_sealed_method CC cs" and
       "leq_cap CC c (unseal_method CC cs)" and "r \<in> IDC ISA"
   | (CCall) cc cd where "c \<in> invoked_caps" and "invokable CC cc cd" and
-      "cc \<in> derivable (accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)" and
-      "cd \<in> derivable (accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)" and
+      "cc \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)" and
+      "cd \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)" and
       "r \<in> PCC ISA \<and> leq_cap CC c (unseal_method CC cc) \<or> r \<in> IDC ISA \<and> leq_cap CC c (unseal_method CC cd)" and
-      "c \<notin> derivable (accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)"
+      "c \<notin> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)"
   | (Indirect) c' where "c \<in> invoked_caps" and
-      "c' \<in> derivable (accessed_mem_caps s)"
+      "c' \<in> derivable (initial_caps \<union> accessed_mem_caps s)"
       "(leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c' \<and> r \<in> PCC ISA) \<or>
        (leq_cap CC c c' \<and> r \<in> PCC ISA \<union> IDC ISA)"
   using assms
-  by (cases "c \<in> derivable (accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)"; auto; fastforce)
+  by (cases "c \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)"; auto; fastforce)
 
-sublocale Cap_Axiom_Automaton CC ISA enabled "invoked_indirect_caps = {} \<and> use_mem_caps" ..
+sublocale Cap_Axiom_Automaton CC ISA initial_caps enabled "invoked_indirect_caps = {} \<and> use_mem_caps" ..
 
 lemma non_cap_event_enabledI:
   assumes "non_cap_event e"
@@ -1221,8 +1248,8 @@ lemma index_eq_some': "(index l n = Some x) = (n < length l \<and> l ! n = x)"
 
 lemma recognises_store_cap_reg_read_reg_axioms:
   assumes t: "accepts t"
-  shows "store_cap_reg_axiom CC ISA ex_traces use_mem_caps invoked_caps invoked_indirect_caps t"
-    and "store_cap_mem_axiom CC ISA use_mem_caps invoked_indirect_caps t"
+  shows "store_cap_reg_axiom CC ISA ex_traces initial_caps use_mem_caps invoked_caps invoked_indirect_caps t"
+    and "store_cap_mem_axiom CC ISA initial_caps use_mem_caps invoked_indirect_caps t"
     and "read_reg_axiom CC ISA ex_traces t"
     and "write_reg_axiom CC ISA ex_traces t"
 proof -
@@ -1230,7 +1257,7 @@ proof -
     using assms (*read_from_KCC_run_take_eq[of "length t" t]*)
     unfolding accepts_from_iff_all_enabled_final read_reg_axiom_def write_reg_axiom_def
     by (auto elim!: enabled.elims)
-  show "store_cap_reg_axiom CC ISA ex_traces use_mem_caps invoked_caps invoked_indirect_caps t"
+  show "store_cap_reg_axiom CC ISA ex_traces initial_caps use_mem_caps invoked_caps invoked_indirect_caps t"
   proof (unfold store_cap_reg_axiom_def, intro allI impI, goal_cases Idx)
     case (Idx i c r)
     then show ?case
@@ -1278,7 +1305,7 @@ proof -
       qed
     qed auto
   qed
-  show "store_cap_mem_axiom CC ISA use_mem_caps invoked_indirect_caps t"
+  show "store_cap_mem_axiom CC ISA initial_caps use_mem_caps invoked_indirect_caps t"
     using assms
     unfolding accepts_from_iff_all_enabled_final store_cap_mem_axiom_def
     by (auto simp: cap_derivable_iff_derivable writes_mem_cap_Some_iff)
@@ -1287,8 +1314,10 @@ qed
 end
 
 locale Cap_Axiom_Assm_Automaton =
-  Capability_Invariant_ISA CC ISA cap_invariant + Cap_Axiom_Automaton CC ISA enabled use_mem_caps
+  Capability_Invariant_ISA CC ISA initial_caps cap_invariant +
+  Cap_Axiom_Automaton CC ISA initial_caps enabled use_mem_caps
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
+    and initial_caps :: "'cap set"
     and cap_invariant :: "'cap \<Rightarrow> bool"
     and enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool"
     and use_mem_caps :: bool +
@@ -1310,7 +1339,8 @@ lemma trace_assms_Cons[iff]: "trace_assms (e # t) \<longleftrightarrow> ev_assms
   by (auto simp: trace_assms_def)
 
 definition accessed_caps_invariant :: "('cap, 'regval) axiom_state \<Rightarrow> bool" where
-  "accessed_caps_invariant s \<equiv> (\<forall>c \<in> accessed_caps use_mem_caps s. is_tagged_method CC c \<longrightarrow> cap_invariant c)"
+  "accessed_caps_invariant s \<equiv>
+     (\<forall>c \<in> initial_caps \<union> accessed_caps use_mem_caps s. is_tagged_method CC c \<longrightarrow> cap_invariant c)"
 
 definition accessed_caps_trace_invariant :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event list \<Rightarrow> bool" where
   "accessed_caps_trace_invariant s t \<equiv> (\<forall>i \<le> length t. accessed_caps_invariant (run s (take i t)))"
@@ -1387,6 +1417,7 @@ lemma pre_inv_trace_assms_append_cases:
 lemma pre_inv_trace_assms_initialI:
   assumes "available_caps_invariant use_mem_caps t n" and "trace_assms (take n t)"
     and "n \<le> length t"
+    and "n = 0 \<longrightarrow> (\<forall>c \<in> initial_caps. is_tagged_method CC c \<longrightarrow> cap_invariant c)"
   shows "pre_inv_trace_assms initial (take n t)"
   using assms
   unfolding available_caps_invariant_def pre_inv_trace_assms_def accessed_caps_trace_invariant_def accessed_caps_invariant_def
@@ -1474,7 +1505,7 @@ lemma traces_enabled_acceptsI:
     and "available_caps_invariant use_mem_caps t n" and "trace_assms (take n t)" and "n \<le> length t"
   shows "accepts (take n t)"
   using assms
-  by (intro traces_enabled_accepts_from_takeI pre_inv_trace_assms_initialI)
+  by (cases n; auto intro: traces_enabled_accepts_from_takeI pre_inv_trace_assms_initialI)
 
 lemma traces_enabled_accepts_fromI:
   assumes "hasTrace t m" and "traces_enabled m s" and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
@@ -2179,9 +2210,11 @@ lemma if_derivable_capsI[derivable_capsI]:
 
 end
 
-locale Cap_Axiom_Inv_Automaton = Cap_Axiom_Automaton CC ISA enabled use_mem_caps +
+locale Cap_Axiom_Inv_Automaton =
+  Cap_Axiom_Automaton CC ISA initial_caps enabled use_mem_caps +
   State_Invariant get_regval set_regval invariant inv_regs
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
+    and initial_caps :: "'cap set"
     and enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool"
     and use_mem_caps :: bool
     and get_regval :: "string \<Rightarrow> 'regstate \<Rightarrow> 'regval option"
@@ -2550,9 +2583,10 @@ lemma if_derivable_capsI[derivable_capsI]:
 end
 
 locale Write_Cap_Assm_Automaton =
-  Capability_Invariant_ISA CC ISA cap_invariant +
-  Write_Cap_Automaton CC ISA ex_traces use_mem_caps invoked_caps invoked_indirect_caps
+  Capability_Invariant_ISA CC ISA initial_caps cap_invariant +
+  Write_Cap_Automaton CC ISA initial_caps ex_traces use_mem_caps invoked_caps invoked_indirect_caps
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
+  and initial_caps :: "'cap set"
   and cap_invariant :: "'cap \<Rightarrow> bool"
   and ex_traces :: bool and use_mem_caps :: bool
   and invoked_caps :: "'cap set" and invoked_indirect_caps :: "'cap set" +
@@ -2632,8 +2666,8 @@ lemma traces_enabled_reg_axioms:
   assumes "traces_enabled m initial" and "hasTrace t m"
     and "pre_inv_trace_assms initial t"
     and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
-  shows "store_cap_reg_axiom CC ISA ex_traces use_mem_caps invoked_caps invoked_indirect_caps t"
-    and "store_cap_mem_axiom CC ISA use_mem_caps invoked_indirect_caps t"
+  shows "store_cap_reg_axiom CC ISA ex_traces initial_caps use_mem_caps invoked_caps invoked_indirect_caps t"
+    and "store_cap_mem_axiom CC ISA initial_caps use_mem_caps invoked_indirect_caps t"
     and "read_reg_axiom CC ISA ex_traces t"
   using assms
   by (intro recognises_store_cap_reg_read_reg_axioms;
@@ -2643,9 +2677,10 @@ lemma traces_enabled_reg_axioms:
 end
 
 locale Write_Cap_Inv_Automaton =
-  Write_Cap_Automaton CC ISA ex_traces use_mem_caps invoked_caps invoked_indirect_caps +
+  Write_Cap_Automaton CC ISA initial_caps ex_traces use_mem_caps invoked_caps invoked_indirect_caps +
   State_Invariant get_regval set_regval invariant inv_regs
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
+    and initial_caps :: "'cap set"
     and ex_traces :: bool and use_mem_caps :: bool
     and invoked_caps :: "'cap set" and invoked_indirect_caps :: "'cap set"
     and get_regval :: "string \<Rightarrow> 'regstate \<Rightarrow> 'regval option"
@@ -2698,8 +2733,8 @@ lemma traces_enabled_reg_axioms:
   assumes "traces_enabled m initial regs" and "hasTrace t m"
     and "reads_regs_from inv_regs t regs" and "invariant regs"
     and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
-  shows "store_cap_reg_axiom CC ISA ex_traces use_mem_caps invoked_caps invoked_indirect_caps t"
-    and "store_cap_mem_axiom CC ISA use_mem_caps invoked_indirect_caps t"
+  shows "store_cap_reg_axiom CC ISA ex_traces initial_caps use_mem_caps invoked_caps invoked_indirect_caps t"
+    and "store_cap_mem_axiom CC ISA initial_caps use_mem_caps invoked_indirect_caps t"
     and "read_reg_axiom CC ISA ex_traces t"
   using assms
   by (intro recognises_store_cap_reg_read_reg_axioms;
@@ -2708,8 +2743,9 @@ lemma traces_enabled_reg_axioms:
 
 end
 
-locale Capability_ISA_Fixed_Translation = Capability_ISA CC ISA
-  for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa" +
+locale Capability_ISA_Fixed_Translation = Capability_ISA CC ISA initial_caps
+  for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
+    and initial_caps :: "'cap set" +
   fixes translation_assms :: "'regval event \<Rightarrow> bool"
   assumes fixed_translation: "\<And>i t addr load. \<forall>e \<in> set t. translation_assms e \<Longrightarrow> translate_address ISA addr load (take i t) = translate_address ISA addr load []"
 begin
@@ -2728,26 +2764,28 @@ abbreviation non_store_trace :: "'regval trace \<Rightarrow> bool" where
 
 lemma (in Cap_Axiom_Automaton) non_mem_trace_mem_axiomsI:
   assumes "non_mem_trace t"
-  shows "store_mem_axiom CC ISA use_mem_caps invoked_indirect_caps t"
+  shows "store_mem_axiom CC ISA initial_caps use_mem_caps invoked_indirect_caps t"
     and "store_tag_axiom CC ISA t"
-    and "load_mem_axiom CC ISA is_fetch use_mem_caps invoked_indirect_caps t"
+    and "load_mem_axiom CC ISA is_fetch initial_caps use_mem_caps invoked_indirect_caps t"
 proof -
   have i: "non_mem_event (t ! i)" if "i < length t" for i
     using assms that
     by (auto simp: non_mem_trace_def)
-  show "store_mem_axiom CC ISA use_mem_caps invoked_indirect_caps t"
+  show "store_mem_axiom CC ISA initial_caps use_mem_caps invoked_indirect_caps t"
     using i
     by (fastforce simp: store_mem_axiom_def writes_mem_val_at_idx_def bind_eq_Some_conv elim!: writes_mem_val.elims)
   show "store_tag_axiom CC ISA t"
     using i
     by (fastforce simp: store_tag_axiom_def writes_mem_val_at_idx_def bind_eq_Some_conv elim!: writes_mem_val.elims)
-  show "load_mem_axiom CC ISA is_fetch use_mem_caps invoked_indirect_caps t"
+  show "load_mem_axiom CC ISA is_fetch initial_caps use_mem_caps invoked_indirect_caps t"
     using i
     by (fastforce simp: load_mem_axiom_def reads_mem_val_at_idx_def bind_eq_Some_conv elim!: reads_mem_val.elims)
 qed
 
-locale Mem_Automaton = Capability_ISA_Fixed_Translation where CC = CC and ISA = ISA
-  for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa" +
+locale Mem_Automaton = Capability_ISA_Fixed_Translation CC ISA initial_caps translation_assms
+  for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
+    and initial_caps :: "'cap set"
+    and translation_assms :: "'regval event \<Rightarrow> bool" +
   fixes is_fetch :: bool and use_mem_caps :: bool
     and invoked_indirect_caps :: "'cap set"
 begin
@@ -2782,7 +2820,7 @@ definition access_enabled :: "('cap, 'regval) axiom_state \<Rightarrow> acctype 
      ((tag \<noteq> B0 \<longrightarrow> address_tag_aligned ISA paddr \<and> sz = tag_granule ISA) \<and>
       (acctype = Fetch \<longrightarrow> tag = B0) \<and>
       (acctype = PTW \<or>
-       (\<exists>c' \<in> derivable (accessed_caps (invoked_indirect_caps = {} \<and> use_mem_caps) s).
+       (\<exists>c' \<in> derivable (initial_caps \<union> accessed_caps (invoked_indirect_caps = {} \<and> use_mem_caps) s).
           let is_cap = tag \<noteq> B0 in
           let is_local_cap = mem_val_is_local_cap CC ISA v tag \<and> tag = B1 in
           authorises_access c' acctype is_cap is_local_cap vaddr paddr sz)))"
@@ -2817,7 +2855,7 @@ sublocale Cap_Axiom_Automaton where enabled = enabled and use_mem_caps = "invoke
 
 lemma accepts_store_mem_axiom:
   assumes *: "translation_assms_trace t" and  **: "accepts t"
-  shows "store_mem_axiom CC ISA use_mem_caps invoked_indirect_caps t"
+  shows "store_mem_axiom CC ISA initial_caps use_mem_caps invoked_indirect_caps t"
   using accepts_from_nth_enabledI[OF **]
   unfolding store_mem_axiom_def
   unfolding writes_mem_val_at_idx_def cap_derivable_iff_derivable
@@ -2834,7 +2872,7 @@ lemma accepts_store_tag_axiom:
 
 lemma accepts_load_mem_axiom:
   assumes *: "translation_assms_trace t" and  **: "accepts t"
-  shows "load_mem_axiom CC ISA is_fetch use_mem_caps invoked_indirect_caps t"
+  shows "load_mem_axiom CC ISA is_fetch initial_caps use_mem_caps invoked_indirect_caps t"
   unfolding load_mem_axiom_def
   unfolding reads_mem_val_at_idx_def cap_derivable_iff_derivable
   unfolding translation_event_at_idx_def
@@ -2855,9 +2893,10 @@ lemma non_mem_trace_enabledI:
 end
 
 locale Mem_Assm_Automaton =
-  Capability_Invariant_ISA CC ISA cap_invariant +
-  Mem_Automaton translation_assms CC ISA is_fetch use_mem_caps invoked_indirect_caps
+  Capability_Invariant_ISA CC ISA initial_caps cap_invariant +
+  Mem_Automaton CC ISA initial_caps translation_assms is_fetch use_mem_caps invoked_indirect_caps
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
+    and initial_caps :: "'cap set"
     and cap_invariant :: "'cap \<Rightarrow> bool"
     and translation_assms :: "'regval event \<Rightarrow> bool"
     and is_fetch :: bool and ex_traces :: bool and use_mem_caps :: bool
@@ -2895,9 +2934,9 @@ lemma traces_enabled_mem_axioms:
   assumes "traces_enabled m initial" and "hasTrace t m"
     and "pre_inv_trace_assms initial t"
     and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
-  shows "store_mem_axiom CC ISA use_mem_caps invoked_indirect_caps t"
+  shows "store_mem_axiom CC ISA initial_caps use_mem_caps invoked_indirect_caps t"
     and "store_tag_axiom CC ISA t"
-    and "load_mem_axiom CC ISA is_fetch use_mem_caps invoked_indirect_caps t"
+    and "load_mem_axiom CC ISA is_fetch initial_caps use_mem_caps invoked_indirect_caps t"
   using assms
   by (intro accepts_store_mem_axiom accepts_store_tag_axiom accepts_load_mem_axiom
             traces_enabled_accepts_fromI;
@@ -2938,9 +2977,10 @@ lemma traces_enabled_read_memt:
 end
 
 locale Mem_Inv_Automaton =
-  Mem_Automaton translation_assms CC ISA is_fetch use_mem_caps invoked_indirect_caps +
+  Mem_Automaton CC ISA initial_caps translation_assms is_fetch use_mem_caps invoked_indirect_caps +
   State_Invariant get_regval set_regval invariant inv_regs
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
+    and initial_caps :: "'cap set"
     and translation_assms :: "'regval event \<Rightarrow> bool"
     and is_fetch :: bool and ex_traces :: bool and use_mem_caps :: bool
     and invoked_indirect_caps :: "'cap set"
@@ -2977,9 +3017,9 @@ lemma traces_enabled_mem_axioms:
     and "reads_regs_from inv_regs t regs" and "invariant regs"
     and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
     and "translation_assms_trace t"
-  shows "store_mem_axiom CC ISA use_mem_caps invoked_indirect_caps t"
+  shows "store_mem_axiom CC ISA initial_caps use_mem_caps invoked_indirect_caps t"
     and "store_tag_axiom CC ISA t"
-    and "load_mem_axiom CC ISA is_fetch use_mem_caps invoked_indirect_caps t"
+    and "load_mem_axiom CC ISA is_fetch initial_caps use_mem_caps invoked_indirect_caps t"
   using assms
   by (intro accepts_store_mem_axiom accepts_store_tag_axiom accepts_load_mem_axiom
             traces_enabled_accepts_fromI[where m = m and regs = regs];
