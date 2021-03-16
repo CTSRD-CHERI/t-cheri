@@ -1,4 +1,5 @@
 open Ast
+open Ast_defs
 open Ast_util
 open Lemma
 open Yojson.Basic.Util
@@ -8,7 +9,7 @@ module StringMap = Map.Make(String)
 
 type isa =
   { name : string;
-    ast : Type_check.tannot def list;
+    ast : Type_check.tannot ast;
     type_env : Type_check.Env.t;
     cap_regs : IdSet.t;
     read_privileged_regs : IdSet.t;
@@ -85,8 +86,8 @@ let load_isa file src_dir =
     |> List.map (Filename.concat src_dir)
   in
   let mutrecs = optional_idset (member "mutrecs" arch) in
-  let (Defs ast, type_env) = Analyse_sail.load_files ~mutrecs files in
-  let (Defs ast) = match to_option to_assoc (member "slice" arch) with
+  let (ast, type_env) = Analyse_sail.load_files ~mutrecs files in
+  let ast = match to_option to_assoc (member "slice" arch) with
     | Some assoc ->
        let module NodeSet = Set.Make(Slice.Node) in
        let module G = Graph.Make(Slice.Node) in
@@ -97,11 +98,11 @@ let load_isa file src_dir =
        in
        let roots = to_nodeset (List.assoc_opt "roots" assoc) in
        let cuts = to_nodeset (List.assoc_opt "cuts" assoc) in
-       let g = G.prune roots cuts (Slice.graph_of_ast (Defs ast)) in
-       Slice.filter_ast cuts g (Defs ast)
-    | None -> Defs ast
+       let g = G.prune roots cuts (Slice.graph_of_ast ast) in
+       Slice.filter_ast cuts g ast
+    | None -> ast
   in
-  let fun_infos = Analyse_sail.fun_infos_of_defs type_env ast in
+  let fun_infos = Analyse_sail.fun_infos_of_ast type_env ast in
   let cap_types =
     convert_each to_typ (member "cap_typs" arch)
     |> List.map (Type_check.Env.expand_synonyms type_env)
@@ -110,7 +111,7 @@ let load_isa file src_dir =
     | DEF_reg_dec (DEC_aux (DEC_config (id, _, _), _)) -> IdSet.add id rs
     | _ -> rs
   in
-  let conf_regs = List.fold_left add_conf_reg IdSet.empty ast in
+  let conf_regs = List.fold_left add_conf_reg IdSet.empty ast.defs in
   let cap_regs = match to_option to_idset (member "cap_regs" arch) with
     | Some cap_regs -> cap_regs
     | None ->
@@ -118,7 +119,7 @@ let load_isa file src_dir =
          let typ = Type_check.Env.expand_synonyms type_env typ in
          List.exists (Type_check.alpha_equivalent type_env typ) cap_types
        in
-       State.find_registers ast |> List.filter is_cap_reg |> List.map snd |> IdSet.of_list
+       State.find_registers ast.defs |> List.filter is_cap_reg |> List.map snd |> IdSet.of_list
   in
   let add_overrides (fun_renames, lemma_overrides) (f, overrides) =
     let (renames, overrides) = List.partition (fun (name, _) -> name = "name") (to_assoc overrides) in

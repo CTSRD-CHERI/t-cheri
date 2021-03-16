@@ -222,12 +222,12 @@ let add_needed_footprints isa needed_funs = function
   | _ -> needed_funs
 
 let needed_footprints isa =
-  let ids = List.fold_left (add_needed_footprints isa) isa.needed_footprints isa.ast in
+  let ids = List.fold_left (add_needed_footprints isa) isa.needed_footprints isa.ast.defs in
   (* Add dependencies *)
   let nodes = List.map (fun id -> Slice.Function id) (IdSet.elements ids) in
   let module NodeSet = Set.Make(Slice.Node) in
   let module G = Graph.Make(Slice.Node) in
-  let g = Slice.graph_of_ast (Ast.Defs isa.ast) in
+  let g = Slice.graph_of_ast isa.ast in
   let nodes' = G.reachable (NodeSet.of_list nodes) NodeSet.empty g in
   let ids_of_node = function | Slice.Function id -> [id] | _ -> [] in
   let ids' = List.concat (List.map ids_of_node (NodeSet.elements nodes')) in
@@ -406,7 +406,7 @@ let regs_used =
   StringSet.diff (List.fold_left add_used_regs StringSet.empty fun_infos) conf_regs *)
 
 let non_cap_regs_lemma isa : lemma =
-  let regs = State.find_registers isa.ast |> List.map snd |> IdSet.of_list in
+  let regs = State.find_registers isa.ast.defs |> List.map snd |> IdSet.of_list in
   let non_cap_regs = IdSet.elements (IdSet.diff regs isa.cap_regs) in
   let stmts = List.map (fun r -> "non_cap_reg " ^ mangle_reg_ref isa r) non_cap_regs in
   { name = "non_cap_regsI"; attrs = "[intro, simp]";
@@ -414,7 +414,7 @@ let non_cap_regs_lemma isa : lemma =
     proof = "(auto simp: non_cap_reg_def register_defs)" }
 
 let read_non_cap_regs_lemma isa : lemma =
-  let regs = State.find_registers isa.ast |> List.map snd |> IdSet.of_list in
+  let regs = State.find_registers isa.ast.defs |> List.map snd |> IdSet.of_list in
   let non_cap_regs = IdSet.elements (IdSet.diff regs (IdSet.union isa.cap_regs isa.read_privileged_regs)) in
   let stmts = List.map (fun r -> "non_cap_exp (read_reg " ^ mangle_reg_ref isa r ^ ")") non_cap_regs in
   { name = "non_cap_exp_read_non_cap_regs"; attrs = "[non_cap_expI]";
@@ -422,7 +422,7 @@ let read_non_cap_regs_lemma isa : lemma =
     proof = "(intro non_cap_exp_read_non_cap_reg non_cap_regsI; auto simp: register_defs)+" }
 
 let write_non_cap_regs_lemma isa : lemma =
-  let regs = State.find_registers isa.ast |> List.map snd |> IdSet.of_list in
+  let regs = State.find_registers isa.ast.defs |> List.map snd |> IdSet.of_list in
   let non_cap_regs = IdSet.elements (IdSet.diff regs (IdSet.union isa.cap_regs isa.write_privileged_regs)) in
   let stmts = List.map (fun r -> "\\<And>v. non_cap_exp (write_reg " ^ mangle_reg_ref isa r ^ " v)") non_cap_regs in
   { name = "non_cap_exp_write_non_cap_regs"; attrs = "[non_cap_expI]";

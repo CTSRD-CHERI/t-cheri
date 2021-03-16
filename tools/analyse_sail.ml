@@ -1,4 +1,5 @@
 open Ast
+open Ast_defs
 open Ast_util
 open Rewriter
 
@@ -90,7 +91,7 @@ let add_exception_fun exception_funs = function
      if List.for_all funcl_fails funcls then IdSet.add id exception_funs else exception_funs
   | _ -> exception_funs
 
-let exception_funs defs = List.fold_left add_exception_fun IdSet.empty defs
+let exception_funs ast = List.fold_left add_exception_fun IdSet.empty ast.defs
 
 let add_fun_infos_of_def env exception_funs fun_infos = function
   | DEF_fundef (FD_aux (FD_function (_, _, _, funcls), _) as fd) ->
@@ -165,11 +166,11 @@ let add_fun_infos_of_def env exception_funs fun_infos = function
      raise (Reporting.err_todo Parse_ast.Unknown "Analysis of mutually recursive functions not implemented")
   | _ -> fun_infos
 
-let fun_ids defs = List.concat (List.map (function DEF_fundef fd -> [id_of_fundef fd] | _ -> []) defs)
+let fun_ids ast = List.concat (List.map (function DEF_fundef fd -> [id_of_fundef fd] | _ -> []) ast.defs)
 
-let fun_infos_of_defs env defs =
-  let exc_funs = exception_funs defs in
-  List.fold_left (add_fun_infos_of_def env exc_funs) Bindings.empty defs
+let fun_infos_of_ast env ast =
+  let exc_funs = exception_funs ast in
+  List.fold_left (add_fun_infos_of_def env exc_funs) Bindings.empty ast.defs
 
 let load_files ?mutrecs:(mutrecs=IdSet.empty) files =
   let open Process_file in
