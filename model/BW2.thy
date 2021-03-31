@@ -514,8 +514,7 @@ named_theorems to_smt_word
 
 lemmas to_smt_word_init[to_smt_word] = test_bit_is_slice_check 
     word_set_bit_to_smt
-    to_smt_shift max_word_def
-    mask_def
+    max_word_def mask_def
     slice_up_is_ucast[unfolded word_size] cast_down_is_slice
 
 named_theorems to_smt_word_del
