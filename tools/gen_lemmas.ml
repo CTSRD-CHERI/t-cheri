@@ -141,6 +141,19 @@ let no_reg_writes_to_lemma no_exc isa id =
     proof = "(unfold " ^ name ^ "_def bind_assoc, no_reg_writes_toI)" }
   |> apply_lemma_override isa id (exc_prefix ^ "no_reg_writes_to")
 
+let non_failure_lemma isa id =
+  let (f, name, call) = get_fun_info isa id in
+  let uses_regs = not (IdSet.is_empty f.trans_regs_written && IdSet.is_empty f.trans_regs_read) in
+  let assm = if uses_regs then "regs_ok registers tr \\<Longrightarrow> " else "" in
+  let cond = "False" in
+  { name = "non_failure_" ^ name;
+    attrs = "[failureD]"; assms = [];
+    stmts = ["Failed (" ^ call ^ ") tr msg \\<Longrightarrow> " ^ assm ^ cond];
+    unfolding = []; using = [];
+    proof = "(unfold " ^ name ^ "_def; non_failure; simp_all add: register_defs)" }
+  |> apply_lemma_override isa id ("non_failure")
+
+
 (* We (currently) only need register write footprints of functions that have
    some capability effects and are called in a block before reads of specific
    registers *)
