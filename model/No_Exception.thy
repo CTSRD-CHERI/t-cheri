@@ -380,19 +380,16 @@ end
 \<close>
 
 lemma choose_bool_monad_no_exception[monad_no_exception]:
-  "monad_no_exception {} (choose_bool s)"
-  apply (simp add: choose_bool_def)
-  apply (rule monad_no_exception_Choose_return)
-  done
+  "monad_no_exception {} (choose_bool dict s)"
+  by (simp add: choose_bool_def choose_convert_def
+    monad_no_exception_Choose monad_no_exception_maybe_fail)
 
 lemma bool_of_bitU_nondet_monad_no_exception[monad_no_exception]:
-  "monad_no_exception {} (bool_of_bitU_nondet bitU)"
+  "monad_no_exception {} (bool_of_bitU_nondet dict bitU)"
   by (cases bitU, simp_all add: bool_of_bitU_nondet_def, monad_no_exceptionI)
 
 setup \<open>Monad_No_Exception_Exploration.install_recs
   ["Sail2_prompt_monad", "Sail2_prompt"]
-  @{thms exit0_def assert_exp_def
-    undefined_bool_def internal_pick_def
-    of_bits_nondet_def}\<close>
+  @{thms exit0_def assert_exp_def of_bits_nondet_def}\<close>
 
 end
