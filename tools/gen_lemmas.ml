@@ -130,13 +130,13 @@ let no_reg_writes_to_lemma no_exc isa id =
   let reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") regs in
   (* let get_arg_assm i r = if (is_ref_typ r && not (is_cap_typ isa (base_typ_of isa r))) then ["name arg" ^ string_of_int i ^ " \\<notin> Rs"] else [] in *)
   let assm =
-    "Rs \\<subseteq> {" ^ String.concat ", " reg_names ^ "}"
+    if IdSet.is_empty regs_written then "" else ("Rs \\<subseteq> {" ^ String.concat ", " reg_names ^ "} \\<Longrightarrow> ")
     (* @ List.concat (List.mapi get_arg_assm f.arg_typs) *)
   in
   let exc_prefix = if no_exc then "runs_" else "" in
   { name = exc_prefix ^ "no_reg_writes_to_" ^ name;
     attrs = "[" ^ exc_prefix ^ "no_reg_writes_toI, simp]"; assms = [];
-    stmts = [assm ^ " \\<Longrightarrow> " ^ exc_prefix ^ "no_reg_writes_to Rs (" ^ call ^ ")"];
+    stmts = [assm ^ exc_prefix ^ "no_reg_writes_to Rs (" ^ call ^ ")"];
     unfolding = []; using = [];
     proof = "(unfold " ^ name ^ "_def bind_assoc, no_reg_writes_toI)" }
   |> apply_lemma_override isa id (exc_prefix ^ "no_reg_writes_to")
@@ -538,7 +538,8 @@ let output_cap_lemmas chan (isa : isa) =
   let output_runs_no_reg_writes_to id f =
     let non_written_regs = IdSet.diff (write_checked_regs isa) f.trans_regs_written in
     let non_written_regs_no_exc = IdSet.diff (write_checked_regs isa) f.trans_regs_written_no_exc in
-    not (IdSet.is_empty non_written_regs_no_exc || IdSet.equal non_written_regs non_written_regs_no_exc) && IdSet.mem id needed_fps
+    let no_writes_no_exc = IdSet.is_empty f.trans_regs_written_no_exc && not (IdSet.is_empty f.trans_regs_written) in
+    (no_writes_no_exc || (not (IdSet.is_empty non_written_regs_no_exc || IdSet.equal non_written_regs non_written_regs_no_exc))) && IdSet.mem id needed_fps
   in
   filter_funs_for_lemma "runs_no_reg_writes_to" isa output_runs_no_reg_writes_to
     |> List.map (no_reg_writes_to_lemma true isa)
