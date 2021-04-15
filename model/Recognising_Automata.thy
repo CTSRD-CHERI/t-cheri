@@ -1153,7 +1153,13 @@ locale Write_Cap_Automaton = Capability_ISA CC ISA initial_caps
     and initial_caps :: "'cap set" +
   fixes ex_traces :: bool and use_mem_caps :: bool
     and invoked_caps :: "'cap set" and invoked_indirect_caps :: "'cap set"
+  assumes no_invoked_indirect_caps_if_use_mem_caps: "use_mem_caps \<longrightarrow> invoked_indirect_caps = {}"
 begin
+
+lemma no_indirect_caps_and_use_mem_caps[simp]:
+  "invoked_indirect_caps = {} \<and> use_mem_caps \<longleftrightarrow> use_mem_caps"
+  using no_invoked_indirect_caps_if_use_mem_caps
+  by auto
 
 abbreviation invokes_indirect_caps where "invokes_indirect_caps \<equiv> (invoked_indirect_caps \<noteq> {})"
 
@@ -1162,17 +1168,17 @@ fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Righta
      (r \<in> write_privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> r \<in> write_exception_regs ISA \<and> ex_traces)) \<and>
      (\<forall>c. (c \<in> caps_of_regval ISA v \<and> is_tagged_method CC c)
          \<longrightarrow>
-         (c \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s) \<or>
+         (c \<in> derivable (initial_caps \<union> accessed_caps use_mem_caps s) \<or>
           (c \<in> exception_targets ISA (read_from_KCC s) \<and> ex_traces \<and> r \<in> PCC ISA) \<or>
-          (\<exists>cs. c \<in> invoked_caps \<and> cs \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s) \<and>
+          (\<exists>cs. c \<in> invoked_caps \<and> cs \<in> derivable (initial_caps \<union> accessed_caps use_mem_caps s) \<and>
                 is_sentry_method CC cs \<and> is_sealed_method CC cs \<and>
                 leq_cap CC c (unseal_method CC cs) \<and> r \<in> PCC ISA) \<or>
           (\<exists>cs. c \<in> invoked_indirect_caps \<and> cs \<in> derivable (initial_caps \<union> accessed_reg_caps s) \<and>
                 is_indirect_sentry_method CC cs \<and> is_sealed_method CC cs \<and>
                 leq_cap CC c (unseal_method CC cs) \<and> r \<in> IDC ISA) \<or>
           (\<exists>cc cd. c \<in> invoked_caps \<and> invokable CC cc cd \<and>
-                   cc \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s) \<and>
-                   cd \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s) \<and>
+                   cc \<in> derivable (initial_caps \<union> accessed_caps use_mem_caps s) \<and>
+                   cd \<in> derivable (initial_caps \<union> accessed_caps use_mem_caps s) \<and>
                    (r \<in> PCC ISA \<and> leq_cap CC c (unseal_method CC cc) \<or>
                     r \<in> IDC ISA \<and> leq_cap CC c (unseal_method CC cd))) \<or>
           (\<exists>c'. c \<in> invoked_caps \<and>
@@ -1181,35 +1187,35 @@ fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Righta
                  (leq_cap CC c c' \<and> r \<in> PCC ISA \<union> IDC ISA)))))"
 | "enabled s (E_read_reg r v) = (r \<in> read_privileged_regs ISA \<longrightarrow> (system_reg_access s \<or> r \<in> read_exception_regs ISA \<and> ex_traces))"
 | "enabled s (E_write_memt _ addr sz bytes tag _) =
-     (\<forall>c.  cap_of_mem_bytes_method CC bytes tag = Some c \<and> is_tagged_method CC c \<longrightarrow> c \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s))"
+     (\<forall>c.  cap_of_mem_bytes_method CC bytes tag = Some c \<and> is_tagged_method CC c \<longrightarrow> c \<in> derivable (initial_caps \<union> accessed_caps use_mem_caps s))"
 | "enabled s _ = True"
 
 lemma enabled_E_write_reg_cases:
   assumes "enabled s (E_write_reg r v)"
     and "c \<in> caps_of_regval ISA v"
     and "is_tagged_method CC c"
-  obtains (Derivable) "c \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)"
+  obtains (Derivable) "c \<in> derivable (initial_caps \<union> accessed_caps use_mem_caps s)"
   | (KCC) "c \<in> exception_targets ISA (read_from_KCC s)" and "ex_traces" and
-      "r \<in> PCC ISA" and "c \<notin> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)"
-  | (Sentry) cs where "c \<in> invoked_caps" and "cs \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)" and
+      "r \<in> PCC ISA" and "c \<notin> derivable (initial_caps \<union> accessed_caps use_mem_caps s)"
+  | (Sentry) cs where "c \<in> invoked_caps" and "cs \<in> derivable (initial_caps \<union> accessed_caps use_mem_caps s)" and
       "is_sentry_method CC cs" and "is_sealed_method CC cs" and
       "leq_cap CC c (unseal_method CC cs)" and "r \<in> PCC ISA"
   | (SentryIndirect) cs where "c \<in> invoked_indirect_caps" and "cs \<in> derivable (initial_caps \<union> accessed_reg_caps s)" and
       "is_indirect_sentry_method CC cs" and "is_sealed_method CC cs" and
       "leq_cap CC c (unseal_method CC cs)" and "r \<in> IDC ISA"
   | (CCall) cc cd where "c \<in> invoked_caps" and "invokable CC cc cd" and
-      "cc \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)" and
-      "cd \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)" and
+      "cc \<in> derivable (initial_caps \<union> accessed_caps use_mem_caps s)" and
+      "cd \<in> derivable (initial_caps \<union> accessed_caps use_mem_caps s)" and
       "r \<in> PCC ISA \<and> leq_cap CC c (unseal_method CC cc) \<or> r \<in> IDC ISA \<and> leq_cap CC c (unseal_method CC cd)" and
-      "c \<notin> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)"
+      "c \<notin> derivable (initial_caps \<union> accessed_caps use_mem_caps s)"
   | (Indirect) c' where "c \<in> invoked_caps" and
       "c' \<in> derivable (initial_caps \<union> accessed_mem_caps s)"
       "(leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c' \<and> r \<in> PCC ISA) \<or>
        (leq_cap CC c c' \<and> r \<in> PCC ISA \<union> IDC ISA)"
   using assms
-  by (cases "c \<in> derivable (initial_caps \<union> accessed_caps (\<not>invokes_indirect_caps \<and> use_mem_caps) s)"; auto; fastforce)
+  by (cases "c \<in> derivable (initial_caps \<union> accessed_caps use_mem_caps s)"; auto; fastforce)
 
-sublocale Cap_Axiom_Automaton CC ISA initial_caps enabled "invoked_indirect_caps = {} \<and> use_mem_caps" ..
+sublocale Cap_Axiom_Automaton CC ISA initial_caps enabled use_mem_caps ..
 
 lemma non_cap_event_enabledI:
   assumes "non_cap_event e"
@@ -2593,7 +2599,7 @@ locale Write_Cap_Assm_Automaton =
   fixes ev_assms :: "'regval event \<Rightarrow> bool"
 begin
 
-sublocale Cap_Axiom_Assm_Automaton where enabled = enabled and use_mem_caps = "invoked_indirect_caps = {} \<and> use_mem_caps"
+sublocale Cap_Axiom_Assm_Automaton where enabled = enabled
 proof
   fix s e
   assume "non_cap_event e"
@@ -2688,7 +2694,7 @@ locale Write_Cap_Inv_Automaton =
     and invariant :: "'regstate \<Rightarrow> bool" and inv_regs :: "register_name set"
 begin
 
-sublocale Cap_Axiom_Inv_Automaton where enabled = enabled and use_mem_caps = "invoked_indirect_caps = {} \<and> use_mem_caps"
+sublocale Cap_Axiom_Inv_Automaton where enabled = enabled
 proof
   fix s e
   assume "non_cap_event e"
@@ -2788,7 +2794,13 @@ locale Mem_Automaton = Capability_ISA_Fixed_Translation CC ISA initial_caps tran
     and translation_assms :: "'regval event \<Rightarrow> bool" +
   fixes is_fetch :: bool and use_mem_caps :: bool
     and invoked_indirect_caps :: "'cap set"
+  assumes no_invoked_indirect_caps_if_use_mem_caps: "use_mem_caps \<longrightarrow> invoked_indirect_caps = {}"
 begin
+
+lemma no_indirect_caps_and_use_mem_caps[simp]:
+  "invoked_indirect_caps = {} \<and> use_mem_caps \<longleftrightarrow> use_mem_caps"
+  using no_invoked_indirect_caps_if_use_mem_caps
+  by auto
 
 abbreviation invokes_indirect_caps where "invokes_indirect_caps \<equiv> (invoked_indirect_caps \<noteq> {})"
 
@@ -2820,7 +2832,7 @@ definition access_enabled :: "('cap, 'regval) axiom_state \<Rightarrow> acctype 
      ((tag \<noteq> B0 \<longrightarrow> address_tag_aligned ISA paddr \<and> sz = tag_granule ISA) \<and>
       (acctype = Fetch \<longrightarrow> tag = B0) \<and>
       (acctype = PTW \<or>
-       (\<exists>c' \<in> derivable (initial_caps \<union> accessed_caps (invoked_indirect_caps = {} \<and> use_mem_caps) s).
+       (\<exists>c' \<in> derivable (initial_caps \<union> accessed_caps use_mem_caps s).
           let is_cap = tag \<noteq> B0 in
           let is_local_cap = mem_val_is_local_cap CC ISA v tag \<and> tag = B1 in
           authorises_access c' acctype is_cap is_local_cap vaddr paddr sz)))"
@@ -2851,7 +2863,7 @@ fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Righta
       (\<exists>vaddr. access_enabled s acctype vaddr paddr sz (fst v_tag) (snd v_tag)))"
 | "enabled s _ = True"
 
-sublocale Cap_Axiom_Automaton where enabled = enabled and use_mem_caps = "invoked_indirect_caps = {} \<and> use_mem_caps" ..
+sublocale Cap_Axiom_Automaton where enabled = enabled ..
 
 lemma accepts_store_mem_axiom:
   assumes *: "translation_assms_trace t" and  **: "accepts t"
@@ -2901,13 +2913,12 @@ locale Mem_Assm_Automaton =
     and translation_assms :: "'regval event \<Rightarrow> bool"
     and is_fetch :: bool and ex_traces :: bool and use_mem_caps :: bool
     and invoked_indirect_caps :: "'cap set" +
-  fixes extra_assms :: "'regval event \<Rightarrow> bool"
+  fixes ev_assms :: "'regval event \<Rightarrow> bool"
+  assumes translation_assmsI: "\<And>e. ev_assms e \<Longrightarrow> translation_assms e"
 begin
 
-definition "ev_assms e \<equiv> translation_assms e \<and> extra_assms e"
-
 sublocale Cap_Axiom_Assm_Automaton
-  where enabled = enabled and ex_traces = ex_traces and ev_assms = ev_assms and use_mem_caps = "invoked_indirect_caps = {} \<and> use_mem_caps"
+  where enabled = enabled and ex_traces = ex_traces
 proof
   fix s e
   assume "non_cap_event e"
@@ -2940,7 +2951,7 @@ lemma traces_enabled_mem_axioms:
   using assms
   by (intro accepts_store_mem_axiom accepts_store_tag_axiom accepts_load_mem_axiom
             traces_enabled_accepts_fromI;
-      auto simp: pre_inv_trace_assms_def trace_assms_def ev_assms_def)+
+      auto simp: pre_inv_trace_assms_def trace_assms_def intro: translation_assmsI)+
 
 lemma traces_enabled_Read_mem:
   assumes "\<And>v. traces_enabled (m v) (axiom_step s (E_read_mem rk paddr sz v))"
@@ -2989,7 +3000,7 @@ locale Mem_Inv_Automaton =
     and invariant :: "'regstate \<Rightarrow> bool" and inv_regs :: "register_name set"
 begin
 
-sublocale Cap_Axiom_Inv_Automaton where enabled = enabled and ex_traces = ex_traces and use_mem_caps = "invoked_indirect_caps = {} \<and> use_mem_caps"
+sublocale Cap_Axiom_Inv_Automaton where enabled = enabled and ex_traces = ex_traces
 proof
   fix s e
   assume "non_cap_event e"
