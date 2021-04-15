@@ -27,6 +27,7 @@ type isa =
     lemma_overrides : lemma_override StringMap.t Bindings.t;
     reg_ref_renames : string Bindings.t;
     skip_funs : IdSet.t;
+    skip_lemmas : StringSet.t Bindings.t;
     needed_footprints : IdSet.t;
     invoked_regs : string list Bindings.t;
     invoked_indirect_regs : string list Bindings.t;
@@ -68,6 +69,7 @@ let load_isa file src_dir =
   let add_sassoc b (key, value) = StringMap.add key value b in
   let to_typ json = Initial_check.typ_of_string (to_string json) in
   let to_string_list json = convert_each to_string json in
+  let to_string_set json = StringSet.of_list (to_string_list json) in
   let to_override json =
     { name_override = to_option to_string (member "name" json);
       attrs_override = to_option to_string (member "attrs" json);
@@ -154,6 +156,9 @@ let load_isa file src_dir =
   let fun_renames = snd (List.fold_left add_fun_rename ([], fun_renames) (Analyse_sail.fun_ids ast)) in
   let add_arg_rename id arg_renames = Bindings.add id (string_of_id id ^ "__arg") arg_renames in
   let arg_renames = IdSet.fold add_arg_rename (optional_idset (member "reserved_ids" arch)) Bindings.empty in
+  let skip_lemmas = Bindings.map to_string_set (optional_bindings (member "skip_lemmas" arch)) in
+  let add_fun_skip f lemmas skips = if StringSet.mem "all" lemmas then IdSet.add f skips else skips in
+  let skip_funs = Bindings.fold add_fun_skip skip_lemmas (optional_idset (member "skips" arch)) in
   { name = to_string (member "name" arch);
     ast;
     type_env;
@@ -172,7 +177,8 @@ let load_isa file src_dir =
     arg_renames;
     lemma_overrides;
     reg_ref_renames = Bindings.map to_string (optional_bindings (member "reg_ref_renames" arch));
-    skip_funs = optional_idset (member "skips" arch);
+    skip_funs;
+    skip_lemmas;
     needed_footprints = optional_idset (member "needed_footprints" arch);
     invoked_regs = optional_bindings (member "invoked_regs" arch) |> Bindings.map to_string_list;
     invoked_indirect_regs = optional_bindings (member "invoked_indirect_regs" arch) |> Bindings.map to_string_list;

@@ -489,6 +489,11 @@ let output_line chan l =
 let funs isa = List.filter (fun id -> not (IdSet.mem id isa.skip_funs)) (fun_ids isa.ast)
 let filter_funs isa p = List.filter (fun id -> p id (Bindings.find id isa.fun_infos)) (funs isa)
 
+let generate_lemma_for_fun l isa id = match Bindings.find_opt id isa.skip_lemmas with
+  | Some ls -> not (StringSet.mem l ls)
+  | None -> true
+let filter_funs_for_lemma l isa p = filter_funs isa (fun id f -> generate_lemma_for_fun l isa id && p id f)
+
 let output_cap_lemmas chan (isa : isa) =
   let exc_funs = exception_funs (isa.ast) in
   let needed_fps = needed_footprints isa in
@@ -510,7 +515,7 @@ let output_cap_lemmas chan (isa : isa) =
   output_line chan  "  non_cap_regsI[THEN non_cap_exp_write_non_cap_reg]";
   output_line chan  "";*)
 
-  filter_funs isa (fun id f -> not (is_cap_fun isa f) && effectful f)
+  filter_funs_for_lemma "non_cap_exp" isa (fun id f -> not (is_cap_fun isa f) && effectful f)
     |> List.map (non_cap_exp_lemma isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
@@ -518,13 +523,13 @@ let output_cap_lemmas chan (isa : isa) =
   output_line chan  (format_lemma (read_cap_regs_derivable_lemma isa));
   output_line chan  "";
 
-  filter_funs isa (fun id f -> IdSet.mem id exc_funs && effectful f)
+  filter_funs_for_lemma "exp_fails" isa (fun id f -> IdSet.mem id exc_funs && effectful f)
     |> List.map (exp_fails_lemma isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
   output_line chan  "";
 
-  filter_funs isa (fun id f -> not (IdSet.subset (write_checked_regs isa) f.trans_regs_written) && IdSet.mem id needed_fps)
+  filter_funs_for_lemma "no_reg_writes_to" isa (fun id f -> not (IdSet.subset (write_checked_regs isa) f.trans_regs_written) && IdSet.mem id needed_fps)
     |> List.map (no_reg_writes_to_lemma false isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
@@ -535,13 +540,13 @@ let output_cap_lemmas chan (isa : isa) =
     let non_written_regs_no_exc = IdSet.diff (write_checked_regs isa) f.trans_regs_written_no_exc in
     not (IdSet.is_empty non_written_regs_no_exc || IdSet.equal non_written_regs non_written_regs_no_exc) && IdSet.mem id needed_fps
   in
-  filter_funs isa output_runs_no_reg_writes_to
+  filter_funs_for_lemma "runs_no_reg_writes_to" isa output_runs_no_reg_writes_to
     |> List.map (no_reg_writes_to_lemma true isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
   output_line chan  "";
 
-  filter_funs isa (fun id f -> returns_cap isa f && effectful f)
+  filter_funs_for_lemma "derivable_caps" isa (fun id f -> returns_cap isa f && effectful f)
     |> List.map (return_caps_derivable_lemma isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
@@ -568,7 +573,7 @@ let output_cap_props chan (isa : isa) =
   output_line chan  "lemmas non_cap_exp_traces_enabled[traces_enabledI] = non_cap_expI[THEN non_cap_exp_traces_enabledI]\n";
   output_line chan  "";
 
-  filter_funs isa (fun id f -> is_cap_fun isa f)
+  filter_funs_for_lemma "traces_enabled" isa (fun id f -> is_cap_fun isa f)
     |> List.map (traces_enabled_lemma false isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
@@ -586,7 +591,7 @@ let output_mem_props chan (isa : isa) =
   output_line chan  "begin";
   output_line chan  "";
 
-  filter_funs isa (fun id f -> (is_cap_fun isa f || has_ref_args f) && not (has_mem_eff f))
+  filter_funs_for_lemma "non_mem_exp" isa (fun id f -> (is_cap_fun isa f || has_ref_args f) && not (has_mem_eff f))
     |> List.map (non_mem_exp_lemma isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
@@ -600,7 +605,7 @@ let output_mem_props chan (isa : isa) =
   output_line chan  "lemmas non_mem_exp_traces_enabled[traces_enabledI] = non_mem_expI[THEN non_mem_exp_traces_enabledI]\n";
   output_line chan  "";
 
-  filter_funs isa (fun id f -> has_mem_eff f)
+  filter_funs_for_lemma "traces_enabled_mem" isa (fun id f -> has_mem_eff f)
     |> List.map (traces_enabled_lemma true isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
