@@ -249,7 +249,7 @@ let return_caps_derivable_lemma isa id =
     ("{" ^ String.concat ", " cap_reg_names ^ "} \\<subseteq> accessible_regs s \\<Longrightarrow> ")
   in
   let sysreg_assms = if ids_overlap isa.system_access_checks f.trans_calls then "sysreg_trace_assms t \\<Longrightarrow> " else "" in
-  let (next_state, next_stateI) = if is_cap_fun isa f then ("(run s t)", "") else ("s", "non_cap_exp_insert_run s, ") in
+  let (next_state, next_stateI) = if is_cap_fun isa f then ("(run s t)", "") else ("s", "non_cap_exp_derivable_insert_run, ") in
   { name = name ^ "_derivable"; attrs = "[derivable_capsE]";
     assms = [];
     stmts = ["Run (" ^ call ^ ") t c \\<Longrightarrow> " ^ arg_assm ^ access_assm ^ sysreg_assms ^ "c \\<in> derivable_caps " ^ next_state];

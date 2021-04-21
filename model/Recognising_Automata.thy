@@ -776,15 +776,6 @@ method non_cap_expI uses simp intro = (non_cap_expI_base intro: intro; simp add:
 
 declare non_mem_exp_bindI[rule del]
 
-lemma non_cap_exp_runE:
-  assumes t: "Run m t a" and m: "non_cap_exp m" and P: "P (run s t)"
-  shows "P s"
-  using P unfolding non_cap_exp_Run_run_invI[OF m t] .
-
-method non_cap_exp_insert_run for s :: "('cap, 'regval) axiom_state" =
-  (match premises in t: \<open>Run m t a\<close> for m t a \<Rightarrow>
-     \<open>rule non_cap_exp_runE[where s = s, OF t], solves \<open>non_cap_expI\<close>\<close>)
-
 named_theorems non_mem_exp_split
 
 declare option.split[where P = "non_mem_exp", non_mem_exp_split]
@@ -995,6 +986,23 @@ qed
 
 named_theorems derivable_capsE
 named_theorems derivable_capsI
+
+lemma non_cap_exp_runE:
+  assumes t: "Run m t a" and m: "non_cap_exp m" and P: "P (run s t)"
+  shows "P s"
+  using P unfolding non_cap_exp_Run_run_invI[OF m t] .
+
+lemmas non_cap_exp_derivable_caps_run = non_cap_exp_runE[where P = "\<lambda>s. c \<in> derivable_caps s" for c]
+
+method non_cap_exp_insert_run for s :: "('cap, 'regval) axiom_state" =
+  (match premises in t: \<open>Run m t a\<close> for m t a \<Rightarrow>
+     \<open>rule non_cap_exp_runE[where s = s, OF t]\<close>,
+   solves \<open>non_cap_expI\<close>)
+
+method non_cap_exp_derivable_insert_run =
+  (match premises in t: \<open>Run m t a\<close> for m t a \<Rightarrow>
+     \<open>rule non_cap_exp_derivable_caps_run[OF t]\<close>,
+   solves \<open>non_cap_expI\<close>)
 
 lemma accessed_reg_caps_run_mono:
   "accessed_reg_caps s \<subseteq> accessed_reg_caps (run s t)"
