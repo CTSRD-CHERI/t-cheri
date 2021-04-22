@@ -150,7 +150,7 @@ let non_failure_lemma isa id =
     attrs = "[failureD]"; assms = [];
     stmts = ["Failed (" ^ call ^ ") tr msg \\<Longrightarrow> " ^ assm ^ cond];
     unfolding = []; using = [];
-    proof = "(unfold " ^ name ^ "_def; non_failure; simp_all add: register_defs)" }
+    proof = "(unfold " ^ name ^ "_def; non_failure)" }
   |> apply_lemma_override isa id ("non_failure")
 
 
@@ -621,6 +621,24 @@ let output_mem_props chan (isa : isa) =
   output_line chan  "";
   output_line chan  "end"
 
+let output_non_failure_props chan (isa : isa) =
+  output_line chan  "theory CHERI_Non_Failure";
+  output_line chan  "imports CHERI_Instantiation";
+  output_line chan  "  \"Sail-T-CHERI.Non_Failure\"";
+  output_line chan  "begin";
+  output_line chan  "";
+
+  output_line chan
+    "lemmas read_reg_safe_inst[failureD] = read_reg_non_failure[where regs=registers]";
+  output_line chan  "";
+
+  filter_funs isa (fun id f -> effectful f)
+    |> List.map (non_failure_lemma isa)
+    |> List.map format_lemma |> List.iter (output_line chan);
+
+  output_line chan  "";
+  output_line chan  "end"
+
 let process_isa file =
   let isa = load_isa file !opt_src_dir in
   let out_file name = Filename.concat !opt_out_dir name in
@@ -632,6 +650,11 @@ let process_isa file =
 
   let chan = open_out (out_file "CHERI_Cap_Properties.thy") in
   output_cap_props chan isa;
+  flush chan;
+  close_out chan;
+
+  let chan = open_out (out_file "CHERI_Non_Failure.thy") in
+  output_non_failure_props chan isa;
   flush chan;
   close_out chan;
 

@@ -39,10 +39,16 @@ lemma Fail_assert_expE:
 
 lemmas trace_eqD = arg_cong[where f="\<lambda>m. (m, _, _) \<in> Traces", THEN iffD1]
 
-lemmas monad_unfolds = and_boolM_def or_boolM_def
+lemmas monad_unfolds = and_boolM_def or_boolM_def Let_def[THEN meta_eq_to_obj_eq]
+
+lemma Failed_impossible:
+  "(return x, t, Fail msg) \<in> Traces \<Longrightarrow> P"
+  "(throw x, t, Fail msg) \<in> Traces \<Longrightarrow> P"
+  by auto
 
 lemmas Fail_elims = Fail_bind_casesE
     Fail_ifE Fail_assert_expE
+    Failed_impossible
     monad_unfolds[THEN trace_eqD, elim_format]
 
 named_theorems failureD
@@ -53,7 +59,16 @@ lemma read_reg_non_failure:
   by (auto simp: regs_ok_def
     dest: read_reg_non_failure[where f="map_option fst o map_of regs"])
 
-method non_failure =
-  (auto elim!: Fail_elims Run_elims dest!: failureD)
+lemma write_reg_non_failure[failureD]:
+  "Failed (write_reg r v) tr msg \<Longrightarrow> False"
+  by (auto simp: write_reg_def elim: Traces.cases elim!: T.cases)
+
+method non_failure uses rsimps =
+  (determ \<open>auto elim!: Fail_elims dest!: failureD; (auto elim!: Run_elims simp: rsimps)?\<close>)
+
+lemma exhaust_helper:
+  "y = max_word \<Longrightarrow> (x \<noteq> y) = (x < y)"
+  "x \<noteq> y - 1 \<Longrightarrow> y \<noteq> 0 \<Longrightarrow> (x < y) = (x < y - 1)"
+  by (auto intro: neq_le_trans dest: inc_le, unat_arith+)
 
 end
