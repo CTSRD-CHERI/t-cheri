@@ -233,7 +233,14 @@ let needed_footprints isa =
   let ids' = List.concat (List.map ids_of_node (NodeSet.elements nodes')) in
   IdSet.union ids (IdSet.inter (IdSet.of_list ids') (effectful_funs isa))
 
-let return_caps_derivable_lemma isa id =
+let has_override isa id l =
+  match Bindings.find_opt id isa.lemma_overrides with
+  | Some overrides -> StringMap.mem l overrides
+  | None -> false
+
+let has_system_access_checks isa f = ids_overlap isa.system_access_checks f.trans_calls
+
+let return_caps_derivable_lemma for_fetch isa id =
   let (f, name, call) = get_fun_info isa id in
   let priv_cap_regs_read =
     if ids_overlap isa.system_access_checks f.trans_calls then IdSet.empty else
@@ -248,14 +255,14 @@ let return_caps_derivable_lemma isa id =
     if IdSet.is_empty cap_regs_read then "" else
     ("{" ^ String.concat ", " cap_reg_names ^ "} \\<subseteq> accessible_regs s \\<Longrightarrow> ")
   in
-  let sysreg_assms = if ids_overlap isa.system_access_checks f.trans_calls then "sysreg_trace_assms t \\<Longrightarrow> " else "" in
+  let sysreg_assms = if has_system_access_checks isa f then "sysreg_trace_assms s t \\<Longrightarrow> " else "" in
   let (next_state, next_stateI) = if is_cap_fun isa f then ("(run s t)", "") else ("s", "non_cap_exp_derivable_insert_run, ") in
   { name = name ^ "_derivable"; attrs = "[derivable_capsE]";
     assms = [];
     stmts = ["Run (" ^ call ^ ") t c \\<Longrightarrow> " ^ arg_assm ^ access_assm ^ sysreg_assms ^ "c \\<in> derivable_caps " ^ next_state];
     unfolding = []; using = [];
     proof = "(" ^ next_stateI ^ "unfold " ^ name ^ "_def, derivable_capsI)" }
-  |> apply_lemma_override isa id "derivable_caps"
+  |> apply_lemma_override isa id (if for_fetch && has_override isa id "derivable_caps_fetch" then "derivable_caps_fetch" else "derivable_caps")
 
 let rec arg_assms_of_nc arg_kids nc =
   let opt_binop l op r = match l, r with
@@ -292,7 +299,7 @@ let arg_assms_of_quant_item arg_kids (qi : Ast.quant_item) = match qi with
 let arg_assms_of_typquant arg_kids tq =
   List.concat (List.map (arg_assms_of_quant_item arg_kids) (quant_items tq))
 
-let traces_enabled_lemma mem isa id =
+let traces_enabled_lemma mem for_fetch isa id =
   let (f, name, call) = get_fun_info ~annot_kids:true isa id in
   let priv_cap_regs_read =
     if ids_overlap isa.system_access_checks f.trans_calls then IdSet.empty else
@@ -383,11 +390,16 @@ let traces_enabled_lemma mem isa id =
   in
   let assms = cap_assm @ asr_assm @ arg_assms @ eq_assms @ ret_typ_assm @ invoked_reg_assms @ invoked_indirect_assms @ load_auth_assms in
   let using = if assms = [] then "" else " assms: assms" in
+  let override =
+    let base = "traces_enabled" ^ (if mem then "_mem" else "") in
+    let fetch = base ^ "_fetch" in
+    if for_fetch && has_override isa id fetch then fetch else base
+  in
   { name = "traces_enabled_" ^ name; attrs = "[traces_enabledI]";
     assms; unfolding = [(name ^ "_def"); "bind_assoc"]; using = [];
     stmts = ["traces_enabled (" ^ call ^ ") s"];
     proof = "(traces_enabledI" ^ using ^ ")" }
-  |> apply_lemma_override isa id (if mem then "traces_enabled_mem" else "traces_enabled")
+  |> apply_lemma_override isa id override
 
 (* let find_strings x m = try StringMap.find x m with Not_found -> StringSet.empty
 
@@ -489,6 +501,15 @@ let output_line chan l =
 let funs isa = List.filter (fun id -> not (IdSet.mem id isa.skip_funs)) (fun_ids isa.ast)
 let filter_funs isa p = List.filter (fun id -> p id (Bindings.find id isa.fun_infos)) (funs isa)
 
+let get_fun_deps isa id = match Bindings.find_opt id isa.fun_infos with
+  | Some f -> f.trans_calls
+  | None -> IdSet.empty
+
+let execute_deps isa = IdSet.fold (fun id deps -> IdSet.union (get_fun_deps isa id) deps) isa.execute_funs isa.execute_funs
+let fetch_deps isa = IdSet.fold (fun id deps -> IdSet.union (get_fun_deps isa id) deps) isa.fetch_funs isa.fetch_funs
+let is_fetch_fun isa id = if IdSet.is_empty isa.fetch_funs then true else IdSet.mem id (fetch_deps isa)
+let is_execute_fun isa id = if IdSet.is_empty isa.execute_funs then true else IdSet.mem id (execute_deps isa)
+
 let generate_lemma_for_fun l isa id = match Bindings.find_opt id isa.skip_lemmas with
   | Some ls -> not (StringSet.mem l ls)
   | None -> true
@@ -547,9 +568,34 @@ let output_cap_lemmas chan (isa : isa) =
 
   output_line chan  "";
 
-  filter_funs_for_lemma "derivable_caps" isa (fun id f -> returns_cap isa f && effectful f)
-    |> List.map (return_caps_derivable_lemma isa)
+  filter_funs_for_lemma "derivable_caps" isa (fun id f -> returns_cap isa f && effectful f && not (has_system_access_checks isa f) && (is_execute_fun isa id || IdSet.is_empty isa.fetch_funs))
+    |> List.map (return_caps_derivable_lemma false isa)
     |> List.map format_lemma |> List.iter (output_line chan);
+
+  if not (IdSet.is_empty isa.fetch_funs) && not (IdSet.is_empty isa.execute_funs) then begin
+    output_line chan  "end";
+    output_line chan  "";
+    output_line chan ("context " ^ isa.name ^ "_Instr_Axiom_Automaton");
+    output_line chan  "begin";
+    output_line chan  "";
+  end;
+
+  filter_funs_for_lemma "derivable_caps" isa (fun id f -> returns_cap isa f && effectful f && has_system_access_checks isa f && (is_execute_fun isa id || IdSet.is_empty isa.fetch_funs))
+    |> List.map (return_caps_derivable_lemma false isa)
+    |> List.map format_lemma |> List.iter (output_line chan);
+
+  if not (IdSet.is_empty isa.fetch_funs) && not (IdSet.is_empty isa.execute_funs) then begin
+    output_line chan  "";
+    output_line chan  "end";
+    output_line chan  "";
+    output_line chan ("context " ^ isa.name ^ "_Fetch_Axiom_Automaton");
+    output_line chan  "begin";
+    output_line chan  "";
+
+    filter_funs_for_lemma "derivable_caps" isa (fun id f -> returns_cap isa f && effectful f && has_system_access_checks isa f && is_fetch_fun isa id)
+      |> List.map (return_caps_derivable_lemma true isa)
+      |> List.map format_lemma |> List.iter (output_line chan);
+  end;
 
   output_line chan  "";
   output_line chan  "end";
@@ -557,12 +603,15 @@ let output_cap_lemmas chan (isa : isa) =
   output_line chan  "end"
 
 let output_cap_props chan (isa : isa) =
+  let separate_fetch = not (IdSet.is_empty isa.fetch_funs) && not (IdSet.is_empty isa.execute_funs) in
+  let context = isa.name ^ (if separate_fetch then "_Instr" else "") ^ "_Write_Cap_Automaton" in
+
   output_line chan  "theory CHERI_Cap_Properties";
   output_line chan  "imports CHERI_Lemmas";
   output_line chan  "begin";
   output_line chan  "";
 
-  output_line chan ("context " ^ isa.name ^ "_Write_Cap_Automaton");
+  output_line chan ("context " ^ context);
   output_line chan  "begin";
   output_line chan  "";
 
@@ -574,8 +623,8 @@ let output_cap_props chan (isa : isa) =
   output_line chan  "lemmas non_cap_exp_traces_enabled[traces_enabledI] = non_cap_expI[THEN non_cap_exp_traces_enabledI]\n";
   output_line chan  "";
 
-  filter_funs_for_lemma "traces_enabled" isa (fun id f -> is_cap_fun isa f)
-    |> List.map (traces_enabled_lemma false isa)
+  filter_funs_for_lemma "traces_enabled" isa (fun id f -> is_cap_fun isa f && (is_execute_fun isa id || IdSet.is_empty isa.fetch_funs))
+    |> List.map (traces_enabled_lemma false false isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
   output_line chan  "end";
@@ -583,6 +632,9 @@ let output_cap_props chan (isa : isa) =
   output_line chan  "end"
 
 let output_mem_props chan (isa : isa) =
+  let separate_fetch = not (IdSet.is_empty isa.fetch_funs) && not (IdSet.is_empty isa.execute_funs) in
+  let mem_context = isa.name ^ (if separate_fetch then "_Instr" else "") ^ "_Mem_Automaton" in
+
   output_line chan  "theory CHERI_Mem_Properties";
   output_line chan  "imports CHERI_Lemmas";
   output_line chan  "begin";
@@ -598,7 +650,7 @@ let output_mem_props chan (isa : isa) =
 
   output_line chan  "end";
   output_line chan  "";
-  output_line chan ("context " ^ isa.name ^ "_Mem_Automaton");
+  output_line chan ("context " ^ mem_context);
   output_line chan  "begin";
   output_line chan  "";
 
@@ -606,8 +658,48 @@ let output_mem_props chan (isa : isa) =
   output_line chan  "lemmas non_mem_exp_traces_enabled[traces_enabledI] = non_mem_expI[THEN non_mem_exp_traces_enabledI]\n";
   output_line chan  "";
 
-  filter_funs_for_lemma "traces_enabled_mem" isa (fun id f -> has_mem_eff f)
-    |> List.map (traces_enabled_lemma true isa)
+  filter_funs_for_lemma "traces_enabled_mem" isa (fun id f -> has_mem_eff f && (is_execute_fun isa id || IdSet.is_empty isa.fetch_funs))
+    |> List.map (traces_enabled_lemma true false isa)
+    |> List.map format_lemma |> List.iter (output_line chan);
+
+  output_line chan  "end";
+  output_line chan  "";
+  output_line chan  "end"
+
+let output_fetch_props chan (isa : isa) =
+  output_line chan  "theory CHERI_Fetch_Properties";
+  output_line chan  "imports CHERI_Mem_Properties";
+  output_line chan  "begin";
+  output_line chan  "";
+
+  output_line chan ("context " ^ isa.name ^ "_Fetch_Write_Cap_Automaton");
+  output_line chan  "begin";
+  output_line chan  "";
+
+  output_line chan (format_lemma (write_regs_lemma isa));
+  output_line chan (format_lemma (read_regs_lemma isa));
+
+  output_line chan  "";
+
+  output_line chan  "lemmas non_cap_exp_traces_enabled[traces_enabledI] = non_cap_expI[THEN non_cap_exp_traces_enabledI]\n";
+  output_line chan  "";
+
+  filter_funs_for_lemma "traces_enabled_fetch" isa (fun id f -> is_cap_fun isa f && is_fetch_fun isa id)
+    |> List.map (traces_enabled_lemma false true isa)
+    |> List.map format_lemma |> List.iter (output_line chan);
+
+  output_line chan  "end";
+  output_line chan  "";
+  output_line chan ("context " ^ isa.name ^ "_Fetch_Mem_Automaton");
+  output_line chan  "begin";
+  output_line chan  "";
+
+  output_line chan  "lemmas non_cap_exp_traces_enabled[traces_enabledI] = non_cap_expI[THEN non_cap_exp_traces_enabledI]\n";
+  output_line chan  "lemmas non_mem_exp_traces_enabled[traces_enabledI] = non_mem_expI[THEN non_mem_exp_traces_enabledI]\n";
+  output_line chan  "";
+
+  filter_funs_for_lemma "traces_enabled_mem_fetch" isa (fun id f -> has_mem_eff f && is_fetch_fun isa id)
+    |> List.map (traces_enabled_lemma true true isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
   output_line chan  "end";
@@ -631,7 +723,14 @@ let process_isa file =
   let chan = open_out (out_file "CHERI_Mem_Properties.thy") in
   output_mem_props chan isa;
   flush chan;
-  close_out chan
+  close_out chan;
+
+  if not (IdSet.is_empty isa.fetch_funs) then begin
+    let chan = open_out (out_file "CHERI_Fetch_Properties.thy") in
+    output_fetch_props chan isa;
+    flush chan;
+    close_out chan
+  end
 
 let main () =
   let opt_file_arguments = ref [] in

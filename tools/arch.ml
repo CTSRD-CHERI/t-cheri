@@ -11,6 +11,8 @@ type isa =
   { name : string;
     ast : Type_check.tannot ast;
     type_env : Type_check.Env.t;
+    fetch_funs : IdSet.t;
+    execute_funs : IdSet.t;
     cap_regs : IdSet.t;
     read_privileged_regs : IdSet.t;
     write_privileged_regs : IdSet.t;
@@ -162,6 +164,8 @@ let load_isa file src_dir =
   { name = to_string (member "name" arch);
     ast;
     type_env;
+    fetch_funs = optional_idset (member "fetch" arch);
+    execute_funs = optional_idset (member "execute" arch);
     cap_regs;
     read_privileged_regs = optional_idset (member "read_privileged_regs" arch);
     write_privileged_regs = optional_idset (member "write_privileged_regs" arch);
