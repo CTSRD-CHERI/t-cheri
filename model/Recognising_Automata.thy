@@ -310,6 +310,25 @@ lemma accessible_regs_initial_iff[simp]:
 
 sublocale Deterministic_Automaton enabled axiom_step initial "\<lambda>_. True" .
 
+fun holds_along_trace :: "(('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool) \<Rightarrow> ('cap, 'regval) axiom_state \<Rightarrow> 'regval trace \<Rightarrow> bool" where
+  "holds_along_trace P s (e # t) \<longleftrightarrow> P s e \<and> holds_along_trace P (axiom_step s e) t"
+| "holds_along_trace P s [] \<longleftrightarrow> True"
+
+lemma holds_along_trace_append[simp]:
+  "holds_along_trace P s (t1 @ t2) \<longleftrightarrow> holds_along_trace P s t1 \<and> holds_along_trace P (run s t1) t2"
+  by (induction P s t1 rule: holds_along_trace.induct) auto
+
+lemma holds_along_trace_imp:
+  assumes "holds_along_trace P s t"
+    and "\<And>s e. P s e \<Longrightarrow> Q s e"
+  shows "holds_along_trace Q s t"
+  using assms
+  by (induction P s t rule: holds_along_trace.induct) auto
+
+lemma holds_along_trace_stateless:
+  "holds_along_trace (\<lambda>_ e. P e) s t \<longleftrightarrow> (\<forall>e \<in> set t. P e)"
+  by (induction t arbitrary: s) auto
+
 lemma cap_reg_written_before_idx_written_regs:
   "cap_reg_written_before_idx CC ISA i r t \<longleftrightarrow> r \<in> written_regs (run initial (take i t))"
 proof (induction i)
@@ -1336,21 +1355,12 @@ locale Cap_Axiom_Assm_Automaton =
     and enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool"
     and use_mem_caps :: bool +
   fixes ex_traces :: bool
-    and ev_assms :: "'regval event \<Rightarrow> bool"
+    and ev_assms :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool"
   assumes non_cap_event_enabled: "\<And>e. non_cap_event e \<Longrightarrow> enabled s e"
     and read_non_special_regs_enabled: "\<And>r v. r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> read_privileged_regs ISA \<Longrightarrow> enabled s (E_read_reg r v)"
 begin
 
-definition "trace_assms t \<equiv> \<forall>e \<in> set t. ev_assms e"
-
-lemma trace_assms_append[iff]: "trace_assms (t1 @ t2) \<longleftrightarrow> trace_assms t1 \<and> trace_assms t2"
-  by (auto simp: trace_assms_def)
-
-lemma trace_assms_Nil[simp, intro]: "trace_assms []"
-  by (auto simp: trace_assms_def)
-
-lemma trace_assms_Cons[iff]: "trace_assms (e # t) \<longleftrightarrow> ev_assms e \<and> trace_assms t"
-  by (auto simp: trace_assms_def)
+abbreviation "trace_assms \<equiv> holds_along_trace ev_assms"
 
 definition accessed_caps_invariant :: "('cap, 'regval) axiom_state \<Rightarrow> bool" where
   "accessed_caps_invariant s \<equiv>
@@ -1360,14 +1370,14 @@ definition accessed_caps_trace_invariant :: "('cap, 'regval) axiom_state \<Right
   "accessed_caps_trace_invariant s t \<equiv> (\<forall>i \<le> length t. accessed_caps_invariant (run s (take i t)))"
 
 definition pre_inv_trace_assms :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event list \<Rightarrow> bool" where
-  "pre_inv_trace_assms s t \<equiv> accessed_caps_trace_invariant s (butlast t) \<and> trace_assms t"
+  "pre_inv_trace_assms s t \<equiv> accessed_caps_trace_invariant s (butlast t) \<and> trace_assms s t"
 
 definition inv_trace_assms :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event list \<Rightarrow> bool" where
-  "inv_trace_assms s t \<equiv> accessed_caps_trace_invariant s t \<and> trace_assms t"
+  "inv_trace_assms s t \<equiv> accessed_caps_trace_invariant s t \<and> trace_assms s t"
 
 lemma inv_trace_assms_trace_assms[simp, accessible_regsE, derivable_capsE]:
   assumes "inv_trace_assms s t"
-  shows "trace_assms t"
+  shows "trace_assms s t"
   using assms
   by (auto simp: inv_trace_assms_def)
 
@@ -1399,7 +1409,7 @@ lemma pre_inv_trace_assms_Nil[simp]:
 
 lemma pre_inv_trace_assms_Cons:
   "pre_inv_trace_assms s (e # t) \<longleftrightarrow>
-   accessed_caps_invariant s \<and> ev_assms e \<and> (t = [] \<or> pre_inv_trace_assms (axiom_step s e) t)"
+   accessed_caps_invariant s \<and> ev_assms s e \<and> (t = [] \<or> pre_inv_trace_assms (axiom_step s e) t)"
   by (auto simp: pre_inv_trace_assms_def)
 
 lemma pre_inv_trace_assms_append_iff:
@@ -1429,7 +1439,7 @@ lemma pre_inv_trace_assms_append_cases:
      (auto simp: pre_inv_trace_assms_append_iff pre_inv_trace_assms_Cons inv_trace_assms_iff)
 
 lemma pre_inv_trace_assms_initialI:
-  assumes "available_caps_invariant use_mem_caps t n" and "trace_assms (take n t)"
+  assumes "available_caps_invariant use_mem_caps t n" and "trace_assms initial (take n t)"
     and "n \<le> length t"
     and "n = 0 \<longrightarrow> (\<forall>c \<in> initial_caps. is_tagged_method CC c \<longrightarrow> cap_invariant c)"
   shows "pre_inv_trace_assms initial (take n t)"
@@ -1516,7 +1526,7 @@ lemma traces_enabled_accepts_from_takeI:
 
 lemma traces_enabled_acceptsI:
   assumes "hasTrace t m" and "traces_enabled m initial" and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
-    and "available_caps_invariant use_mem_caps t n" and "trace_assms (take n t)" and "n \<le> length t"
+    and "available_caps_invariant use_mem_caps t n" and "trace_assms initial (take n t)" and "n \<le> length t"
   shows "accepts (take n t)"
   using assms
   by (cases n; auto intro: traces_enabled_accepts_from_takeI pre_inv_trace_assms_initialI)
@@ -2604,7 +2614,7 @@ locale Write_Cap_Assm_Automaton =
   and cap_invariant :: "'cap \<Rightarrow> bool"
   and ex_traces :: bool and use_mem_caps :: bool
   and invoked_caps :: "'cap set" and invoked_indirect_caps :: "'cap set" +
-  fixes ev_assms :: "'regval event \<Rightarrow> bool"
+  fixes ev_assms :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool"
 begin
 
 sublocale Cap_Axiom_Assm_Automaton where enabled = enabled
@@ -2668,7 +2678,7 @@ lemma traces_enabled_write_memt[traces_enabledI]:
              nat_of_bv BCa addr = Some addr'
                \<and> mem_bytes_of_bits BCb data = Some bytes
                \<and> cap_of_mem_bytes_method CC bytes tag = Some c
-               \<and> ev_assms (E_write_memt wk addr' (nat sz) bytes tag r)
+               \<and> ev_assms s (E_write_memt wk addr' (nat sz) bytes tag r)
              \<longrightarrow> c \<in> derivable_caps s"
   shows "traces_enabled (write_memt BCa BCb wk addr sz data tag) s"
   using assms
@@ -2921,8 +2931,8 @@ locale Mem_Assm_Automaton =
     and translation_assms :: "'regval event \<Rightarrow> bool"
     and is_fetch :: bool and ex_traces :: bool and use_mem_caps :: bool
     and invoked_indirect_caps :: "'cap set" +
-  fixes ev_assms :: "'regval event \<Rightarrow> bool"
-  assumes translation_assmsI: "\<And>e. ev_assms e \<Longrightarrow> translation_assms e"
+  fixes ev_assms :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool"
+  assumes translation_assmsI: "\<And>s e. ev_assms s e \<Longrightarrow> translation_assms e"
 begin
 
 sublocale Cap_Axiom_Assm_Automaton
@@ -2949,6 +2959,10 @@ lemma non_mem_exp_traces_enabledI:
   using that
   by (auto simp: traces_enabled_def intro: non_mem_exp_trace_enabledI trace_enabled_take)
 
+lemma translation_assms_traceI:
+  "trace_assms s t \<Longrightarrow> translation_assms_trace t"
+  by (induction t arbitrary: s) (auto intro: translation_assmsI)
+
 lemma traces_enabled_mem_axioms:
   assumes "traces_enabled m initial" and "hasTrace t m"
     and "pre_inv_trace_assms initial t"
@@ -2958,8 +2972,8 @@ lemma traces_enabled_mem_axioms:
     and "load_mem_axiom CC ISA is_fetch initial_caps use_mem_caps invoked_indirect_caps t"
   using assms
   by (intro accepts_store_mem_axiom accepts_store_tag_axiom accepts_load_mem_axiom
-            traces_enabled_accepts_fromI;
-      auto simp: pre_inv_trace_assms_def trace_assms_def intro: translation_assmsI)+
+            traces_enabled_accepts_fromI translation_assms_traceI[where s = initial];
+      auto simp: pre_inv_trace_assms_def intro: translation_assmsI)+
 
 lemma traces_enabled_Read_mem:
   assumes "\<And>v. traces_enabled (m v) (axiom_step s (E_read_mem rk paddr sz v))"
