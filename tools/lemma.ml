@@ -13,6 +13,7 @@ type lemma_override =
   { name_override : string option;
     attrs_override : string option;
     assms_override : string list option;
+    extra_assms : string list;
     stmts_override : string list option;
     using_override : string list option;
     unfolding_override : string list option;
@@ -32,7 +33,7 @@ let format_lemma l =
   shows ^ String.concat stmt_sep (List.map dquot l.stmts) ^ "\n" ^
   (if l.using = [] then "" else "  using " ^ String.concat " " l.using ^ "\n") ^
   (if l.unfolding = [] then "" else "  unfolding " ^ String.concat " " l.unfolding ^ "\n") ^
-  "  by " ^ l.proof ^ "\n"
+  (if l.proof = "sorry" then "  sorry" else ("  by " ^ l.proof)) ^ "\n"
 
 let apply_override o l =
   (* let using = match (o.using_override, l.using, o.assms_override, l.assms) with
@@ -43,7 +44,7 @@ let apply_override o l =
   let using = Util.option_default l.using o.using_override in
   { name = Util.option_default l.name o.name_override;
     attrs = Util.option_default l.attrs o.attrs_override;
-    assms = Util.option_default l.assms o.assms_override;
+    assms = (Util.option_default l.assms o.assms_override) @ o.extra_assms;
     stmts = Util.option_default l.stmts o.stmts_override;
     using = using;
     unfolding = Util.option_default l.unfolding o.unfolding_override;

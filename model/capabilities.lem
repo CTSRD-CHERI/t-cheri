@@ -12,14 +12,14 @@ type otype = nat
 class (Capability 'c)
   val is_tagged : 'c -> bool
   val is_sealed : 'c -> bool
-  val is_sentry : 'c -> bool  (* TODO: Differentiate between different forms of sentries, e.g. direct vs. indirect? *)
+  val is_sentry : 'c -> bool
+  val is_indirect_sentry : 'c -> bool
   val get_base : 'c -> address
   val get_top : 'c -> address
   val get_obj_type : 'c -> otype
   val get_perms : 'c -> perms
   val get_cursor : 'c -> address
   val is_global : 'c -> bool
-  val set_tag : 'c -> bool -> 'c
   val seal : 'c -> otype -> 'c
   val unseal : 'c -> 'c
   val clear_global : 'c -> 'c
@@ -94,7 +94,7 @@ let rec cap_derivable_bounded n C c = match n with
   | 0 -> (c IN C)
   | n+1 ->
      (exists c'. cap_derivable_bounded n C c' && leq_cap c c') ||
-     (exists c' otype. cap_derivable_bounded n C c' && is_tagged c' && not (is_sealed c') && seal c' otype = c && is_sentry c) ||
+     (exists c' otype. cap_derivable_bounded n C c' && is_tagged c' && not (is_sealed c') && seal c' otype = c && (is_sentry c || is_indirect_sentry c)) ||
      (exists c' c''.
         cap_derivable_bounded n C c' &&
         cap_derivable_bounded n C c'' &&

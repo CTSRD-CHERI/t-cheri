@@ -48,17 +48,19 @@ let is_cap_typ isa typ =
 let base_typ_of isa typ = Type_check.Env.base_typ_of isa.type_env typ
 
 let returns_cap isa f = is_cap_typ isa f.ret_typ
-let is_cap_fun isa f = has_mem_eff f || uses isa.cap_regs f
+let is_cap_fun isa f = has_mem_eff f || uses isa.cap_regs f || reads isa.read_privileged_regs f || writes isa.write_privileged_regs f
 let cap_funs isa =
   Bindings.filter (fun _ f -> is_cap_fun isa f) isa.fun_infos
   |> Bindings.bindings |> List.map fst |> IdSet.of_list
 
-let has_ref_args f = List.exists is_ref_typ f.arg_typs
+let arg_typs f = List.map snd f.args
+let has_ref_args f = List.exists is_ref_typ (arg_typs f)
 
 let mangle_name renames n =
   (try Bindings.find n renames with Not_found -> isa_name n)
 
 let mangle_fun_name arch = mangle_name arch.fun_renames
+let mangle_arg_name arch = mangle_name arch.arg_renames
 let mangle_reg_ref arch n = mangle_name arch.reg_ref_renames (append_id n "_ref")
 
 let get_kid_itself typ = match unaux_typ typ with
@@ -68,21 +70,21 @@ let get_kid_itself typ = match unaux_typ typ with
   | _ -> None
 
 let format_fun_name arch id = mangle_fun_name arch id
-let format_fun_args ?annot_kids:(annot_kids=false) f =
-  let format_arg i typ =
-    let arg = "arg" ^ string_of_int i in
+let format_fun_args ?annot_kids:(annot_kids=false) arch f =
+  let format_arg i (id, typ) =
+    let arg = mangle_arg_name arch id in
     match get_kid_itself typ with
     | Some kid -> "(" ^ arg ^ " :: " ^ string_of_kid kid ^ "::len itself)"
     | None -> arg
   in
-  String.concat " " (List.mapi format_arg f.arg_typs)
+  String.concat " " (List.mapi format_arg f.args)
 let format_fun_call ?annot_kids:(annot_kids=false) arch id f =
   let tannot = match Type_check.destruct_bitvector arch.type_env f.ret_typ with
     | Some (Nexp_aux (Nexp_var kid, _), _) when annot_kids ->
        " :: " ^ string_of_kid kid ^ "::len word M"
     | _ -> ""
   in
-  format_fun_name arch id ^ " " ^ format_fun_args ~annot_kids f ^ tannot
+  format_fun_name arch id ^ " " ^ format_fun_args ~annot_kids arch f ^ tannot
 
 let apply_lemma_override arch id lemma_type lemma =
   match Bindings.find_opt id arch.lemma_overrides with
@@ -99,12 +101,12 @@ let get_fun_info ?annot_kids:(annot_kids=false) isa id =
 
 let non_cap_exp_lemma isa id : lemma =
   let (f, name, call) = get_fun_info isa id in
-  let get_arg_assm i r =
+  let get_arg_assm i (arg, r) =
     if (is_ref_typ r && not (is_cap_typ isa (base_typ_of isa r))) then
-      ["non_cap_reg arg" ^ string_of_int i]
+      ["non_cap_reg " ^ mangle_arg_name isa arg; "name " ^ mangle_arg_name isa arg ^ " \\<notin> privileged_regs"]
     else []
   in
-  let assms = List.concat (List.mapi get_arg_assm f.arg_typs) in
+  let assms = List.concat (List.mapi get_arg_assm f.args) in
   let using = (if assms = [] then [] else ["assms"]) in
   { name = "non_cap_exp_" ^ name; attrs = "[non_cap_expI]"; assms;
     stmts = ["non_cap_exp (" ^ call ^ ")"];
@@ -131,13 +133,12 @@ let no_reg_writes_to_lemma no_exc isa id =
     "Rs \\<subseteq> {" ^ String.concat ", " reg_names ^ "}"
     (* @ List.concat (List.mapi get_arg_assm f.arg_typs) *)
   in
-  let simps = if regs = [] then "" else " simp: register_defs" in
   let exc_prefix = if no_exc then "runs_" else "" in
   { name = exc_prefix ^ "no_reg_writes_to_" ^ name;
     attrs = "[" ^ exc_prefix ^ "no_reg_writes_toI, simp]"; assms = [];
     stmts = [assm ^ " \\<Longrightarrow> " ^ exc_prefix ^ "no_reg_writes_to Rs (" ^ call ^ ")"];
     unfolding = []; using = [];
-    proof = "(unfold " ^ name ^ "_def bind_assoc, no_reg_writes_toI" ^ simps ^ ")" }
+    proof = "(unfold " ^ name ^ "_def bind_assoc, no_reg_writes_toI)" }
   |> apply_lemma_override isa id (exc_prefix ^ "no_reg_writes_to")
 
 (* We (currently) only need register write footprints of functions that have
@@ -168,6 +169,20 @@ let fun_requirements isa id =
       checked_reads = IdSet.inter (write_checked_regs isa) f.trans_regs_read }
   else no_requirements
 
+(* Always generate footprints for effectful functions used in loops (the
+ * algorithm below that checks sequences of statements inside blocks for
+ * required footprints might otherwise miss those) *)
+let loop_requirements r =
+  { r with needed_footprints = IdSet.union r.needed_footprints r.called_cap_funs }
+
+let is_loop_combinator id =
+  let combinators = IdSet.of_list (List.map mk_id ["foreach#"; "while#"; "until#"; "while#t"; "until#t"]) in
+  IdSet.mem id combinators
+
+let join_fun_arg_requirements isa id rs =
+  let r = List.fold_left join_requirements (fun_requirements isa id) rs in
+  if is_loop_combinator id then loop_requirements r else r
+
 let reg_requirements isa id =
   { no_requirements with checked_reads = IdSet.inter (write_checked_regs isa) (IdSet.singleton id) }
 
@@ -184,10 +199,12 @@ let check_requirements left right =
 let requirements_alg isa =
   { (Rewriter.pure_exp_alg no_requirements join_requirements) with
     e_id = reg_requirements isa;
-    e_app = (fun (id, rs) -> List.fold_left join_requirements (fun_requirements isa id) rs);
-    e_app_infix = (fun (r1, id, r2) -> List.fold_left join_requirements (fun_requirements isa id) [r1; r2]);
+    e_app = (fun (id, rs) -> join_fun_arg_requirements isa id rs);
+    e_app_infix = (fun (r1, id, r2) -> join_fun_arg_requirements isa id [r1; r2]);
     lEXP_memory = (fun (id, rs) -> List.fold_left join_requirements (fun_requirements isa id) rs);
     e_block = (fun rs -> List.fold_right check_requirements rs no_requirements);
+    e_loop = (fun (_, _, r_cond, r_body) -> join_requirements r_cond (loop_requirements r_body));
+    e_for = (fun (_, r1, r2, r3, _, r_body) -> List.fold_left join_requirements (loop_requirements r_body) [r1; r2; r3]);
     e_let = (fun (r1, r2) -> check_requirements r1 r2);
     e_internal_plet = (fun (r1, r2, r3) -> List.fold_right check_requirements [r1; r2; r3] no_requirements);
     pat_when = (fun (r1, r2, r3) -> List.fold_right check_requirements [r1; r2; r3] no_requirements); }
@@ -205,12 +222,12 @@ let add_needed_footprints isa needed_funs = function
   | _ -> needed_funs
 
 let needed_footprints isa =
-  let ids = List.fold_left (add_needed_footprints isa) IdSet.empty isa.ast in
+  let ids = List.fold_left (add_needed_footprints isa) isa.needed_footprints isa.ast.defs in
   (* Add dependencies *)
   let nodes = List.map (fun id -> Slice.Function id) (IdSet.elements ids) in
   let module NodeSet = Set.Make(Slice.Node) in
   let module G = Graph.Make(Slice.Node) in
-  let g = Slice.graph_of_ast (Ast.Defs isa.ast) in
+  let g = Slice.graph_of_ast isa.ast in
   let nodes' = G.reachable (NodeSet.of_list nodes) NodeSet.empty g in
   let ids_of_node = function | Slice.Function id -> [id] | _ -> [] in
   let ids' = List.concat (List.map ids_of_node (NodeSet.elements nodes')) in
@@ -218,18 +235,24 @@ let needed_footprints isa =
 
 let return_caps_derivable_lemma isa id =
   let (f, name, call) = get_fun_info isa id in
-  let cap_regs_read = IdSet.inter (special_regs isa) f.trans_regs_read_no_exc in
+  let priv_cap_regs_read =
+    if ids_overlap isa.system_access_checks f.trans_calls then IdSet.empty else
+    IdSet.inter isa.read_privileged_regs f.trans_regs_read_no_exc
+  in
+  let nonpriv_cap_regs_read = IdSet.inter (IdSet.diff (special_regs isa) (privileged_regs isa)) f.trans_regs_read in
+  let cap_regs_read = IdSet.union priv_cap_regs_read nonpriv_cap_regs_read in
   let cap_reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") (IdSet.elements cap_regs_read) in
-  let get_arg_assm i r = if (is_cap_typ isa (base_typ_of isa r)) then ["arg" ^ string_of_int i ^ " \\<in> derivable_caps s \\<Longrightarrow> "] else [] in
-  let arg_assm = String.concat "" (List.concat (List.mapi get_arg_assm f.arg_typs)) in
+  let get_arg_assm i (arg, r) = if (is_cap_typ isa (base_typ_of isa r)) then [mangle_arg_name isa arg ^ " \\<in> derivable_caps s \\<Longrightarrow> "] else [] in
+  let arg_assm = String.concat "" (List.concat (List.mapi get_arg_assm f.args)) in
   let access_assm =
     if IdSet.is_empty cap_regs_read then "" else
     ("{" ^ String.concat ", " cap_reg_names ^ "} \\<subseteq> accessible_regs s \\<Longrightarrow> ")
   in
+  let sysreg_assms = if ids_overlap isa.system_access_checks f.trans_calls then "sysreg_trace_assms t \\<Longrightarrow> " else "" in
   let (next_state, next_stateI) = if is_cap_fun isa f then ("(run s t)", "") else ("s", "non_cap_exp_insert_run s, ") in
   { name = name ^ "_derivable"; attrs = "[derivable_capsE]";
     assms = [];
-    stmts = ["Run (" ^ call ^ ") t c \\<Longrightarrow> " ^ arg_assm ^ access_assm ^ "c \\<in> derivable_caps " ^ next_state];
+    stmts = ["Run (" ^ call ^ ") t c \\<Longrightarrow> " ^ arg_assm ^ access_assm ^ sysreg_assms ^ "c \\<in> derivable_caps " ^ next_state];
     unfolding = []; using = [];
     proof = "(" ^ next_stateI ^ "unfold " ^ name ^ "_def, derivable_capsI)" }
   |> apply_lemma_override isa id "derivable_caps"
@@ -271,22 +294,48 @@ let arg_assms_of_typquant arg_kids tq =
 
 let traces_enabled_lemma mem isa id =
   let (f, name, call) = get_fun_info ~annot_kids:true isa id in
-  let cap_regs_read = IdSet.inter (special_regs isa) f.trans_regs_read_no_exc in
-  let cap_reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") (IdSet.elements cap_regs_read) in
+  let priv_cap_regs_read =
+    if ids_overlap isa.system_access_checks f.trans_calls then IdSet.empty else
+      IdSet.union
+        (IdSet.inter isa.read_privileged_regs f.trans_regs_read_no_exc)
+        (IdSet.inter (IdSet.diff isa.read_privileged_regs isa.read_exception_regs) f.trans_regs_read)
+  in
+  let priv_regs_written =
+    if ids_overlap isa.system_access_checks f.trans_calls then IdSet.empty else
+      IdSet.union
+        (IdSet.inter isa.write_privileged_regs f.trans_regs_written_no_exc)
+        (IdSet.inter (IdSet.diff isa.write_privileged_regs isa.write_exception_regs) f.trans_regs_written)
+  in
+  let nonpriv_cap_regs_read = IdSet.inter (IdSet.diff (special_regs isa) (privileged_regs isa)) f.trans_regs_read in
+  let cap_regs_read = IdSet.union priv_cap_regs_read nonpriv_cap_regs_read in
+  let reg_names_of rs = List.map (fun r -> "''" ^ string_of_id r ^ "''") (IdSet.elements rs) in
+  let cap_reg_names = reg_names_of cap_regs_read in
   let cap_assm =
-    if ids_overlap cap_regs_read isa.privileged_regs || (writes isa.cap_regs f && not (IdSet.is_empty cap_regs_read)) then
+    if IdSet.subset cap_regs_read isa.read_privileged_regs && not (writes isa.cap_regs f) && not (IdSet.is_empty cap_regs_read) && not mem then
+      (* The register read axiom allows reading privileged registers in the exception case (ex_traces), although that is not sufficient
+       * to allow use of the read capabilities for general purposes, only for writing the PCC *)
+      let ex_regs = reg_names_of (IdSet.inter cap_regs_read isa.read_exception_regs) in
+      let other_regs = reg_names_of (IdSet.diff cap_regs_read isa.read_exception_regs) in
+      (if ex_regs = [] then [] else ["{" ^ String.concat ", " cap_reg_names ^ "} \\<subseteq> accessible_regs s \\<or> ex_traces"]) @
+      (if other_regs = [] then [] else ["{" ^ String.concat ", " cap_reg_names ^ "} \\<subseteq> accessible_regs s"])
+    else if ids_overlap cap_regs_read isa.read_privileged_regs || (writes isa.cap_regs f && not (IdSet.is_empty cap_regs_read)) then
       ["{" ^ String.concat ", " cap_reg_names ^ "} \\<subseteq> accessible_regs s"]
     else []
   in
+  let asr_assm =
+    if IdSet.is_empty priv_regs_written || mem then [] else
+    if IdSet.subset priv_regs_written isa.write_exception_regs then ["system_reg_access s \\<or> ex_traces"] else
+    ["system_reg_access s"]
+  in
   let cap_arg_assms =
     if has_mem_eff f || writes isa.cap_regs f then
-      List.concat (List.mapi (fun i t -> if is_cap_typ isa t then ["arg" ^ string_of_int i ^ " \\<in> derivable_caps s"] else []) f.arg_typs)
+      List.concat (List.mapi (fun i (a, t) -> if is_cap_typ isa t then [mangle_arg_name isa a ^ " \\<in> derivable_caps s"] else []) f.args)
     else []
   in
-  let add_arg_kid (i, arg_kids, kid_eqs) arg_typ =
+  let add_arg_kid (i, arg_kids, kid_eqs) (arg_id, arg_typ) =
     let new_kid = match Type_check.destruct_numeric arg_typ with
       | Some ([], _, Nexp_aux (Nexp_var kid, _)) ->
-         Some (kid, "arg" ^ string_of_int i)
+         Some (kid, mangle_arg_name isa arg_id)
       | _ ->
          begin match get_kid_itself arg_typ with
            | Some kid ->
@@ -294,7 +343,7 @@ let traces_enabled_lemma mem isa id =
            | _ ->
               begin match Type_check.destruct_bitvector isa.type_env arg_typ with
                 | Some (Nexp_aux (Nexp_var kid, _), _) ->
-                   Some (kid, "int (size arg" ^ string_of_int i ^ ")")
+                   Some (kid, "int (size " ^ mangle_arg_name isa arg_id ^ ")")
                 | _ -> None
               end
          end
@@ -308,7 +357,7 @@ let traces_enabled_lemma mem isa id =
     | _ ->
         (i + 1, arg_kids, kid_eqs)
   in
-  let (_, arg_kids, eq_assms) = List.fold_left add_arg_kid (0, KBindings.empty, []) f.arg_typs in
+  let (_, arg_kids, eq_assms) = List.fold_left add_arg_kid (0, KBindings.empty, []) f.args in
   let arg_assms = cap_arg_assms @ (arg_assms_of_typquant arg_kids f.typquant) in
   let is_kid_bitvector kid typ = match Type_check.destruct_bitvector isa.type_env typ with
     | Some (Nexp_aux (Nexp_var kid', _), _) -> Kid.compare kid kid' = 0
@@ -316,7 +365,7 @@ let traces_enabled_lemma mem isa id =
   in
   let ret_typ_assm = match Type_check.destruct_bitvector isa.type_env f.ret_typ with
     | Some (Nexp_aux (Nexp_var kid, _), _)
-      when KBindings.mem kid arg_kids && not (List.exists (is_kid_bitvector kid) f.arg_typs) ->
+      when KBindings.mem kid arg_kids && not (List.exists (is_kid_bitvector kid) (arg_typs f)) ->
        ["int LENGTH(" ^ string_of_kid kid ^ ") = " ^ KBindings.find kid arg_kids]
     | _ -> []
   in
@@ -324,12 +373,15 @@ let traces_enabled_lemma mem isa id =
     | Some regs when not mem -> List.map (fun r -> r ^ " \\<in> invoked_regs") regs
     | _ -> []
   in
-  let invokes_mem_caps_assm =
-    if IdSet.mem id isa.invokes_mem_caps then ["invokes_mem_caps"] else
-    if not (IdSet.disjoint f.trans_calls isa.cap_load_funs) then ["\\<not>invokes_mem_caps"] else
-    []
+  let invoked_indirect_assms = match Bindings.find_opt id isa.invoked_indirect_regs with
+    | Some regs -> List.map (fun r -> r ^ " \\<in> invoked_indirect_regs") regs
+    | None -> if IdSet.disjoint f.trans_calls isa.cap_load_funs then [] else ["\\<not>invokes_indirect_caps"]
   in
-  let assms = cap_assm @ arg_assms @ eq_assms @ ret_typ_assm @ invoked_reg_assms @ invokes_mem_caps_assm in
+  let load_auth_assms = match Bindings.find_opt id isa.load_auths with
+    | Some regs -> List.map (fun r -> r ^ " \\<in> load_auths") regs
+    | None -> []
+  in
+  let assms = cap_assm @ asr_assm @ arg_assms @ eq_assms @ ret_typ_assm @ invoked_reg_assms @ invoked_indirect_assms @ load_auth_assms in
   let using = if assms = [] then "" else " assms: assms" in
   { name = "traces_enabled_" ^ name; attrs = "[traces_enabledI]";
     assms; unfolding = [(name ^ "_def"); "bind_assoc"]; using = [];
@@ -354,28 +406,60 @@ let regs_used =
   StringSet.diff (List.fold_left add_used_regs StringSet.empty fun_infos) conf_regs *)
 
 let non_cap_regs_lemma isa : lemma =
-  let regs = State.find_registers isa.ast |> List.map snd |> IdSet.of_list in
-  let non_cap_regs = IdSet.elements (IdSet.diff regs (IdSet.union isa.cap_regs isa.privileged_regs)) in
+  let regs = State.find_registers isa.ast.defs |> List.map snd |> IdSet.of_list in
+  let non_cap_regs = IdSet.elements (IdSet.diff regs isa.cap_regs) in
   let stmts = List.map (fun r -> "non_cap_reg " ^ mangle_reg_ref isa r) non_cap_regs in
   { name = "non_cap_regsI"; attrs = "[intro, simp]";
     assms = []; unfolding = []; using = []; stmts;
     proof = "(auto simp: non_cap_reg_def register_defs)" }
 
-let write_cap_regs_lemma isa =
-  let stmt r = "traces_enabled (write_reg " ^ mangle_reg_ref isa r ^ " c) s" in
-  let stmts = List.map stmt (IdSet.elements isa.cap_regs) in
-  { name = "traces_enabled_write_cap_regs"; attrs = "[traces_enabledI]";
-    assms = ["c \\<in> derivable_caps s"]; unfolding = []; using = ["assms"];
-    stmts;
+let read_non_cap_regs_lemma isa : lemma =
+  let regs = State.find_registers isa.ast.defs |> List.map snd |> IdSet.of_list in
+  let non_cap_regs = IdSet.elements (IdSet.diff regs (IdSet.union isa.cap_regs isa.read_privileged_regs)) in
+  let stmts = List.map (fun r -> "non_cap_exp (read_reg " ^ mangle_reg_ref isa r ^ ")") non_cap_regs in
+  { name = "non_cap_exp_read_non_cap_regs"; attrs = "[non_cap_expI]";
+    assms = []; unfolding = []; using = []; stmts;
+    proof = "(intro non_cap_exp_read_non_cap_reg non_cap_regsI; auto simp: register_defs)+" }
+
+let write_non_cap_regs_lemma isa : lemma =
+  let regs = State.find_registers isa.ast.defs |> List.map snd |> IdSet.of_list in
+  let non_cap_regs = IdSet.elements (IdSet.diff regs (IdSet.union isa.cap_regs isa.write_privileged_regs)) in
+  let stmts = List.map (fun r -> "\\<And>v. non_cap_exp (write_reg " ^ mangle_reg_ref isa r ^ " v)") non_cap_regs in
+  { name = "non_cap_exp_write_non_cap_regs"; attrs = "[non_cap_expI]";
+    assms = []; unfolding = []; using = []; stmts;
+    proof = "(intro non_cap_exp_write_non_cap_reg non_cap_regsI; auto simp: register_defs)+" }
+
+let write_regs_lemma isa =
+  let stmt r =
+    let (var, cap_assm) = if IdSet.mem r isa.cap_regs then ("c", "c \\<in> derivable_caps s \\<Longrightarrow> ") else ("v", "") in
+    let asr_assm =
+      if IdSet.mem r isa.write_privileged_regs then
+        if IdSet.mem r isa.write_exception_regs then "system_reg_access s \\<or> ex_traces \\<Longrightarrow> " else
+        "system_reg_access s \\<Longrightarrow> "
+      else ""
+    in
+    "\\<And>" ^ var ^ ". " ^ cap_assm ^ asr_assm ^ "traces_enabled (write_reg " ^ mangle_reg_ref isa r ^ " " ^ var ^ ") s"
+  in
+  let regs = IdSet.elements (IdSet.union isa.cap_regs isa.write_privileged_regs) in
+  let stmts = List.map stmt regs in
+  { name = "traces_enabled_write_regs"; attrs = "[traces_enabledI]";
+    assms = []; unfolding = []; using = []; stmts;
     proof = "(intro traces_enabled_write_reg; auto simp: register_defs derivable_caps_def)+" }
 
-let read_cap_regs_lemma isa =
+let read_regs_lemma isa =
   let stmt r =
-    let assms = if IdSet.mem r isa.privileged_regs then "system_reg_access s \\<or> ex_traces \\<Longrightarrow> " else "" in
-    assms ^ "traces_enabled (read_reg " ^ mangle_reg_ref isa r ^ ") s"
+    let asr_assm =
+      if IdSet.mem r isa.read_privileged_regs then
+        if IdSet.mem r isa.read_exception_regs then "system_reg_access s \\<or> ex_traces \\<Longrightarrow> " else
+        "system_reg_access s \\<Longrightarrow> "
+      else ""
+    in
+    asr_assm ^ "traces_enabled (read_reg " ^ mangle_reg_ref isa r ^ ") s"
   in
-  let stmts = List.map stmt (IdSet.elements isa.cap_regs) in
-  { name = "traces_enabled_read_cap_regs"; attrs = "[traces_enabledI]";
+  (*let regs = State.find_registers isa.ast |> List.map snd in*)
+  let regs = IdSet.elements (IdSet.union isa.cap_regs isa.read_privileged_regs) in
+  let stmts = List.map stmt regs in
+  { name = "traces_enabled_read_regs"; attrs = "[traces_enabledI]";
     assms = []; unfolding = []; using = []; stmts;
     proof = "(intro traces_enabled_read_reg; auto simp: register_defs)+" }
 
@@ -412,15 +496,19 @@ let output_cap_lemmas chan (isa : isa) =
   output_line chan  "imports CHERI_Instantiation";
   output_line chan  "begin";
   output_line chan  "";
+  output_line chan  "declare register_defs[simp_rules_add subset_assms_simp]";
+  output_line chan  "";
   output_line chan ("context " ^ isa.name ^ "_Axiom_Automaton");
   output_line chan  "begin";
   output_line chan  "";
 
   output_line chan (format_lemma (non_cap_regs_lemma isa));
-  output_line chan  "lemmas non_cap_exp_rw_non_cap_reg[non_cap_expI] =";
+  output_line chan (format_lemma (read_non_cap_regs_lemma isa));
+  output_line chan (format_lemma (write_non_cap_regs_lemma isa));
+  (*output_line chan  "lemmas non_cap_exp_rw_non_cap_reg[non_cap_expI] =";
   output_line chan  "  non_cap_regsI[THEN non_cap_exp_read_non_cap_reg]";
   output_line chan  "  non_cap_regsI[THEN non_cap_exp_write_non_cap_reg]";
-  output_line chan  "";
+  output_line chan  "";*)
 
   filter_funs isa (fun id f -> not (is_cap_fun isa f) && effectful f)
     |> List.map (non_cap_exp_lemma isa)
@@ -472,8 +560,8 @@ let output_cap_props chan (isa : isa) =
   output_line chan  "begin";
   output_line chan  "";
 
-  output_line chan (format_lemma (write_cap_regs_lemma isa));
-  output_line chan (format_lemma (read_cap_regs_lemma isa));
+  output_line chan (format_lemma (write_regs_lemma isa));
+  output_line chan (format_lemma (read_regs_lemma isa));
 
   output_line chan  "";
 

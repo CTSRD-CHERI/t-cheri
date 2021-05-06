@@ -1,4 +1,5 @@
 open Ast
+open Ast_defs
 open Ast_util
 open Rewriter
 
@@ -6,7 +7,7 @@ let opt_splice = ref ([]:string list)
 
 type fun_info =
   { typquant : typquant;
-    arg_typs : typ list;
+    args : (id * typ) list;
     ret_typ : typ;
     effect : effect;
     calls : IdSet.t;
@@ -90,7 +91,7 @@ let add_exception_fun exception_funs = function
      if List.for_all funcl_fails funcls then IdSet.add id exception_funs else exception_funs
   | _ -> exception_funs
 
-let exception_funs defs = List.fold_left add_exception_fun IdSet.empty defs
+let exception_funs ast = List.fold_left add_exception_fun IdSet.empty ast.defs
 
 let add_fun_infos_of_def env exception_funs fun_infos = function
   | DEF_fundef (FD_aux (FD_function (_, _, _, funcls), _) as fd) ->
@@ -98,6 +99,18 @@ let add_fun_infos_of_def env exception_funs fun_infos = function
      let exp_of_pexp pexp =
        let (_, _, exp, _) = destruct_pexp pexp in
        exp
+     in
+     let arg_ids = match funcls with
+       | [FCL_aux (FCL_Funcl (_, pexp), _)] ->
+          let (pat, _, _, _) = destruct_pexp pexp in
+          begin match unaux_pat pat with
+            | P_id id -> Some [id]
+            | P_tup pats ->
+               let get_id = function P_id id -> Some id | _ -> None in
+               List.map unaux_pat pats |> List.map get_id |> Util.option_all
+            | _ -> None
+          end
+       | _ -> None
      in
      let exp_of_funcl (FCL_aux (FCL_Funcl (_, p), _)) = exp_of_pexp p in
      let exps = List.map exp_of_funcl funcls in
@@ -138,9 +151,14 @@ let add_fun_infos_of_def env exception_funs fun_infos = function
        | typquant, Typ_aux (Typ_fn (arg_typs, ret_typ, effect), _) -> typquant, arg_typs, ret_typ, effect
        | _ -> raise (Reporting.err_unreachable Parse_ast.Unknown __POS__ ("Function " ^ string_of_id id ^ " does not have function type"))
      in
+     let args = match arg_ids with
+       | Some ids when List.length ids = List.length arg_typs -> List.combine ids arg_typs
+       | _ ->
+          List.mapi (fun i typ -> (mk_id ("arg" ^ string_of_int i), typ)) arg_typs
+     in
      Bindings.add id
        {
-         typquant; arg_typs; ret_typ; effect; calls; regs_read; regs_read_no_exc; regs_written; regs_written_no_exc;
+         typquant; args; ret_typ; effect; calls; regs_read; regs_read_no_exc; regs_written; regs_written_no_exc;
          trans_calls; trans_regs_read; trans_regs_read_no_exc; trans_regs_written; trans_regs_written_no_exc
        }
        fun_infos
@@ -148,11 +166,11 @@ let add_fun_infos_of_def env exception_funs fun_infos = function
      raise (Reporting.err_todo Parse_ast.Unknown "Analysis of mutually recursive functions not implemented")
   | _ -> fun_infos
 
-let fun_ids defs = List.concat (List.map (function DEF_fundef fd -> [id_of_fundef fd] | _ -> []) defs)
+let fun_ids ast = List.concat (List.map (function DEF_fundef fd -> [id_of_fundef fd] | _ -> []) ast.defs)
 
-let fun_infos_of_defs env defs =
-  let exc_funs = exception_funs defs in
-  List.fold_left (add_fun_infos_of_def env exc_funs) Bindings.empty defs
+let fun_infos_of_ast env ast =
+  let exc_funs = exception_funs ast in
+  List.fold_left (add_fun_infos_of_def env exc_funs) Bindings.empty ast.defs
 
 let load_files ?mutrecs:(mutrecs=IdSet.empty) files =
   let open Process_file in
@@ -167,10 +185,12 @@ let load_files ?mutrecs:(mutrecs=IdSet.empty) files =
   Constant_propagation_mutrec.targets := IdSet.elements mutrecs;
   Util.opt_verbosity := 1;
 
-  let _, ast, env = load_files [] Type_check.initial_env files in
-  let ast, env = descatter env ast in
-  let ast, env =
+  let (_, ast, env) = load_files [] Type_check.initial_env files in
+  let (ast, env) = descatter env ast in
+  let (ast, env) =
     List.fold_right (fun file (ast,_) -> Splice.splice ast file)
       (!opt_splice) (ast, env)
   in
-  rewrite_ast_target "lem" env ast
+  let (ast, env) = rewrite_ast_target "lem" env ast in
+  Constraint.save_digests ();
+  (ast, env)

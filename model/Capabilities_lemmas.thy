@@ -37,8 +37,9 @@ lemma leq_cap_get_mem_region_subseteq:
 
 locale Capabilities =
   fixes CC :: "'cap Capability_class"
-  assumes is_tagged_set_tag[simp]: "\<And>c tag. is_tagged_method CC (set_tag_method CC c tag) = tag"
-    and is_tagged_seal[simp]: "\<And>c t. is_tagged_method CC (seal_method CC c t) = is_tagged_method CC c"
+  assumes is_tagged_seal[simp]: "\<And>c t. is_tagged_method CC (seal_method CC c t) = is_tagged_method CC c"
+    and is_tagged_unseal[simp]: "\<And>c. is_tagged_method CC (unseal_method CC c) = is_tagged_method CC c"
+    and is_tagged_clear_global[simp]: "\<And>c. is_tagged_method CC (clear_global_method CC c) = is_tagged_method CC c"
     and is_tagged_cap_of_mem_bytes[simp]: "\<And>c bytes tag. cap_of_mem_bytes_method CC bytes tag = Some c \<Longrightarrow> is_tagged_method CC c \<longleftrightarrow> tag = B1"
 begin
 
@@ -58,7 +59,8 @@ inductive_set derivable :: "'cap set \<Rightarrow> 'cap set" for C :: "'cap set"
      seal_method CC c' (get_cursor_method CC c'') \<in> derivable C"
 | SealEntry:
     "\<lbrakk>c' \<in> derivable C; is_tagged_method CC c';
-      \<not>is_sealed_method CC c'; is_sentry_method CC (seal_method CC c' otype)\<rbrakk> \<Longrightarrow>
+      \<not>is_sealed_method CC c';
+      is_sentry_method CC (seal_method CC c' otype) \<or> is_indirect_sentry_method CC (seal_method CC c' otype)\<rbrakk> \<Longrightarrow>
      seal_method CC c' otype \<in> derivable C"
 
 lemma derivable_mono:
@@ -195,6 +197,26 @@ proof (intro ballI impI)
     by (induction rule: derivable.induct)
        (auto simp: leq_cap_def leq_bounds_def base_seal_eq top_seal_eq base_clear_global_eq top_clear_global_eq)
 qed
+
+end
+
+locale Capabilities_Invariant = Capabilities CC
+  for CC :: "'cap Capability_class" +
+  fixes cap_invariant :: "'cap \<Rightarrow> bool"
+  assumes leq_cap_invariant: "\<And>c c'. cap_invariant c \<Longrightarrow> leq_cap CC c' c \<Longrightarrow> is_tagged_method CC c \<Longrightarrow> is_tagged_method CC c' \<Longrightarrow> cap_invariant c'"
+    and seal_cap_invariant: "\<And>c otype. cap_invariant c \<Longrightarrow> is_tagged_method CC c \<Longrightarrow> cap_invariant (seal_method CC c otype)"
+    and unseal_cap_invariant: "\<And>c. cap_invariant c \<Longrightarrow> is_tagged_method CC c \<Longrightarrow> cap_invariant (unseal_method CC c)"
+    and clear_global_cap_invariant: "\<And>c. cap_invariant c \<Longrightarrow> is_tagged_method CC c \<Longrightarrow> cap_invariant (clear_global_method CC c)"
+begin
+
+lemma derivable_cap_invariant:
+  assumes "c \<in> derivable C" and "is_tagged_method CC c"
+    and "\<forall>c' \<in> C. is_tagged_method CC c' \<longrightarrow> cap_invariant c'"
+  shows "cap_invariant c"
+  using assms
+  by (induction rule: derivable.induct)
+     (auto intro: leq_cap_invariant seal_cap_invariant unseal_cap_invariant clear_global_cap_invariant
+           simp: clear_global_unless_def)
 
 end
 

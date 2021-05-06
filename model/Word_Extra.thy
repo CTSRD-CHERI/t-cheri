@@ -165,6 +165,14 @@ lemma uint_less [simp]:
   shows "uint x \<le> 2 ^ LENGTH('a)"
 using uint_lt[where w=x, THEN order.strict_implies_order] .
 
+lemma of_int_uint:
+  "of_int (uint w) = ucast w"
+  by (simp add: ucast_def word_of_int)
+
+lemma of_nat_unat:
+  "of_nat (unat w) = ucast w"
+  by (simp add: ucast_def word_of_nat unat_def)
+
 text \<open>A useful technique to prove equality over words is to compare the words bit by bit.\<close>
 
 lemma test_bit_nat:
@@ -353,6 +361,17 @@ corollary min_length_unat:
 using min_unat_length[where x=x]
 by simp
 
+lemma add_and_masks:
+  "NO_MATCH (a AND mask b) x \<Longrightarrow>
+    (x + y) AND mask n = ((x AND mask n) + y) AND mask n"
+  "NO_MATCH (a AND mask b) y \<Longrightarrow>
+    (x + y) AND mask n = (x + (y AND mask n)) AND mask n"
+  "NO_MATCH (a AND mask b) x \<Longrightarrow>
+    (x - y) AND mask n = ((x AND mask n) - y) AND mask n"
+  "NO_MATCH (a AND mask b) y \<Longrightarrow>
+    (x - y) AND mask n = (x - (y AND mask n)) AND mask n"
+  by (simp_all add: mask_eqs)
+
 subsection \<open>@{const max_word}\<close>
 
 text \<open>These lemmas are not a corollary of a corresponding lemma about @{const mask}.\<close>
@@ -405,6 +424,12 @@ corollary unat_not_mask:
          (if LENGTH('a) \<le> n then 0 else 2 ^ LENGTH('a) - 2 ^ n)"
 by (auto simp: unat_not unat_max_word unat_mask)
 
+lemma word_not_two_complement:
+  fixes x :: "('a :: len) word"
+  shows
+  "NOT x = (- x - 1)"
+  by (simp add: max_word_minus word_not_alt)
+
 subsection \<open>Conjunction\<close>
         
 lemma conj_outside_absorb [simp]:
@@ -420,6 +445,14 @@ lemma word_xor_mask [simp]:
   shows "x XOR mask n = NOT x"
 using assms
 by (intro word_eqI) (auto simp: word_size word_ops_nth_size)
+
+subsection \<open>Addition and bitwise operations\<close>
+
+lemma word_plus_is_or:
+  fixes x y :: "('a :: len) word"
+  shows "x AND y = 0 \<Longrightarrow> x + y = x OR y"
+  using word_plus_and_or[of x y]
+  by simp
 
 subsection \<open>Lower and upper bits\<close>
 
@@ -852,6 +885,40 @@ lemma word_and_mask_shiftl_eq_shiftl[simp]:
 
 lemma word_and_mask_0_iff_not_testbits: "(w AND mask n) = 0 \<longleftrightarrow> (\<forall>i < n. \<not>w !! i)"
   using test_bit_size[of w] by (auto simp: word_ao_nth word_eq_iff word_size)
+
+lemma word_of_int_shiftl:
+  "word_of_int (Bits.shiftl x y) = Bits.shiftl (word_of_int x) y"
+  by (auto simp: word_eq_iff nth_shiftl)
+
+lemma shiftl_mask_eq_0:
+  "m \<le> n \<Longrightarrow> (x << n) AND mask m = 0"
+  by (simp add: word_eq_iff word_ops_nth_size nth_shiftl word_size)
+
+lemma test_bit_plus_mask_zero:
+  assumes high_eq: "x AND NOT (mask k) = y AND NOT (mask k)"
+    and low: "z AND mask k = 0"
+    and test: "n < k \<longrightarrow> test_bit x n = test_bit y n"
+  shows "test_bit (x + z) n = test_bit (y + z) n"
+proof -
+  have P: "(x + z) AND (NOT (mask k)) = (y + z) AND (NOT (mask k))"
+    apply (simp only: word_minus_word_and_mask[symmetric])
+    apply (simp add: word_plus_and_mask low word_and_le1 high_eq)
+    done
+
+  have Q: "(x + z) AND mask k = x AND mask k"
+    by (simp add: word_plus_and_mask low word_and_le1)
+
+  have R: "(y + z) AND mask k = y AND mask k"
+    by (simp add: word_plus_and_mask low word_and_le1)
+
+  from P Q R test show ?thesis
+    apply (simp add: word_eq_iff)
+    apply (drule spec[where x=n])+
+    apply (simp add: word_ops_nth_size word_size)
+    apply ((intro iffI; elim impCE; (frule test_bit_size)?), simp_all add: word_size)
+     apply auto
+    done
+qed
 
 subsection \<open>@{const slice}\<close>
 
@@ -1374,6 +1441,39 @@ lemma shiftl_zero [simp]:
 using assms
 by (intro word_eqI) (simp add: word_size nth_shiftl)
 
+lemma word_shiftl_add:
+  "Bits.shiftl (x :: ('a :: len) word) (i + j) = Bits.shiftl (Bits.shiftl x i) j"
+  by (simp add: shiftl_t2n power_add)
+
+lemma word_shiftl_add_comm:
+  "Bits.shiftl (x :: ('a :: len) word) (i + j) = Bits.shiftl (Bits.shiftl x j) i"
+  by (simp add: shiftl_t2n power_add)
+
+lemma word_and_mask_shiftl_eq:
+  "(x AND mask i) << j = (x << j) AND mask (i + j)"
+  by (auto simp add: word_eq_iff word_ops_nth_size nth_shiftl word_size)
+
+lemma plus_minus_shiftl_distrib:
+  fixes x :: "('a :: len) word"
+  shows "(x + y) << i = (x << i) + (y << i)"
+    "(x - y) << i = (x << i) - (y << i)"
+  by (simp_all add: shiftl_t2n algebra_simps)
+
+lemma shiftr_shiftl:
+  "(Bits.shiftr x i) << j = (if i < j
+    then (x AND NOT (mask i)) << j - i
+    else Bits.shiftr (x AND NOT (mask i)) (i - j))"
+  apply (simp add: word_eq_iff nth_shiftl nth_shiftr
+        word_ops_nth_size word_ao_nth)
+  apply (auto; frule test_bit_size; auto simp: word_ops_nth_size word_size)
+  done
+
+lemma shiftr_shiftl_alt:
+  "(Bits.shiftr x i) << j = (if i \<le> j
+    then (x AND NOT (mask i)) << j - i
+    else Bits.shiftr (x AND NOT (mask i)) (i - j))"
+  by (simp add: shiftr_shiftl)
+
 subsection \<open>@{const scast}\<close>
 
 lemma nth_scast:
@@ -1437,6 +1537,35 @@ proof (intro word_eqI impI, unfold word_size)
       thus ?thesis by simp
     qed
 qed
+
+lemma nth_scast2[OF refl]:
+  "w2 = scast w \<Longrightarrow> w2 !! n =
+    ((if n < size w then w !! n else Bits.msb w) \<and> n < size w2)"
+  apply (simp add: nth_scast msb_nth)
+  apply (cases "n = size w - 1", auto simp: word_size)
+  done
+
+lemma scast_eq_ucast_or:
+  "scast x = ucast x OR (if Bits.msb x then NOT (mask (size x)) else 0)"
+  apply (simp add: word_eq_iff word_ops_nth_size nth_ucast nth_scast2 word_size)
+  apply (auto dest: test_bit_size simp: word_size)
+  done
+
+lemma scast_eq_ucast_plus:
+  "scast x = ucast x + (if Bits.msb x then NOT (mask (size x)) else 0)"
+  apply (subst word_plus_is_or)
+   apply (simp add: word_eq_iff word_ops_nth_size nth_ucast word_size)
+   apply (auto dest: test_bit_size simp: word_size)[1]
+  apply (simp add: scast_eq_ucast_or)
+  done
+
+lemma scast_eq_ucast:
+  "LENGTH ('b) \<le> LENGTH ('a) \<Longrightarrow>
+    (scast (x :: ('a :: len) word) :: ('b :: len) word) = ucast x"
+  apply (rule word_eqI)
+  apply (clarsimp simp: nth_scast nth_ucast)
+  apply (case_tac "n = size x - 1", simp_all add: word_size)
+  done
 
 subsection \<open>Upper bits and @{const slice}\<close>
 
@@ -1515,6 +1644,21 @@ using ucast_eq_imp_and_mask_eq[where 'b='b and x=x and y=y and n=n]
 using and_mask_eq_imp_ucast_eq[where 'b='b and x=x and y=y and n=n]
 by auto
 
+lemma ucast_minus:
+  fixes x y :: "'a ::len0 word"
+  shows "(ucast (x - y)::'b::len word) = (ucast x - ucast y) AND mask (LENGTH('a))"
+  apply (cases "LENGTH('a) < LENGTH('b)")
+   apply (simp_all add: ucast_minus_down ucast_minus_up)
+  done
+
+lemmas ucast_uminus = ucast_minus[where x=0, simplified]
+
+lemma ucast_up_shiftr[OF refl, simplified is_up_def source_size target_size]:
+  "uc = ucast \<Longrightarrow> is_up uc \<Longrightarrow> uc (Bits.shiftr x i) = Bits.shiftr (uc x) i"
+  apply (clarsimp simp: is_up_def source_size_def target_size_def)
+  apply (auto simp add: word_eq_iff nth_shiftr nth_ucast word_size dest: test_bit_size)
+  done
+
 subsection \<open>Aligned inequalities\<close>
 
 lemma le_and_not_mask:
@@ -1578,6 +1722,29 @@ corollary word_and_not_mask_and_mask_size:
 using word_and_mask_and_not_mask_size[OF assms]
 using word_bool_alg.conj.assoc word_bool_alg.conj.commute
 by metis
+
+subsection \<open>More inequalities\<close>
+
+lemma word_sub_1_less:
+  fixes x :: "('a :: len) word"
+  shows "x \<noteq> 0 \<Longrightarrow> x - 1 < x"
+  by (simp add: word_less_nat_alt measure_unat)
+
+lemma word_le_nonzero_negate:
+  fixes x :: "('a :: len) word"
+  shows "x \<le> y \<Longrightarrow> x \<noteq> 0 \<Longrightarrow> (- y) \<le> (- x)"
+  using word_le_minus_mono[of "-1" "-1" "x - 1" "y - 1"]
+    word_sub_1_less[of x] word_sub_1_less[of y]
+  apply simp
+  apply (erule meta_mp)
+  apply (rule word_le_minus_mono, simp_all)
+  apply (cases "y = 0", simp_all)
+  done
+
+lemma word_le_nonzero_negateI:
+  fixes x :: "('a :: len) word"
+  shows "- x \<le> - y \<Longrightarrow> x \<noteq> 0 \<Longrightarrow> y \<le> x"
+  by (drule word_le_nonzero_negate, simp+)
 
 (*<*)
 end
