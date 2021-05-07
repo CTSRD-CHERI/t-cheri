@@ -516,8 +516,10 @@ lemmas to_smt_word_init[to_smt_word] = test_bit_is_slice_check
     word_set_bit_to_smt
     max_word_def mask_def
     slice_up_is_ucast[unfolded word_size] cast_down_is_slice
+    One_nat_def[symmetric]
 
 named_theorems to_smt_word_del
+lemmas to_smt_word_del_init[to_smt_word_del] = One_nat_def[to_smt_word_del]
 
 ML \<open>
 fun smt_word_tac ctxt = BW_Alt.let_to_imp_tac ctxt
