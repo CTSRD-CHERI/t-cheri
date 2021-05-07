@@ -13,14 +13,41 @@ lemma leq_cap_tag_imp[intro]:
   using assms
   by (auto simp: leq_cap_def)
 
+lemma leq_bounds_trans:
+  assumes "leq_bounds CC c c'" and "leq_bounds CC c' c''"
+  shows "leq_bounds CC c c''"
+  using assms
+  by (auto simp: leq_bounds_def)
+
 lemma leq_bools_iff:
   "leq_bools bs1 bs2 \<longleftrightarrow> (\<forall>n < length bs1. bs1 ! n \<longrightarrow> bs2 ! n) \<and> length bs2 = length bs1"
   by (induction bs1 bs2 rule: leq_bools.induct) (auto simp: nth_Cons split: nat.splits)
 
+lemma leq_bools_refl[simp, intro]:
+  "leq_bools b b"
+  by (auto simp: leq_bools_iff)
+
 lemma leq_perms_refl[simp, intro]:
-  "leq_perms p p"
-  unfolding leq_perms_def leq_bools_iff
+  "leq_perms CC c c"
+  unfolding leq_perms_def
   by auto
+
+lemma leq_bools_trans:
+  "leq_bools b b' \<Longrightarrow> leq_bools b' b'' \<Longrightarrow> leq_bools b b''"
+  by (auto simp: leq_bools_iff)
+
+lemma leq_perms_trans:
+  assumes "leq_perms CC c c'" and "leq_perms CC c' c''"
+  shows "leq_perms CC c c''"
+  using assms
+  unfolding leq_perms_def
+  by (metis leq_bools_trans)
+
+lemma leq_cap_trans:
+  assumes "leq_cap CC c c'" and "leq_cap CC c' c''"
+  shows "leq_cap CC c c''"
+  using assms
+  by (auto simp: leq_cap_def elim: leq_bounds_trans leq_perms_trans)
 
 lemma address_range_upt[simp]: "address_range start len = [start ..< start + len]"
   by (induction len) (auto simp: address_range_def)

@@ -56,8 +56,19 @@ let rec leq_bools l1 l2 = match (l1, l2) with
 end
 declare termination_argument leq_bools = automatic
 
-val leq_perms : perms -> perms -> bool
-let leq_perms p1 p2 = leq_bools p1 p2
+val leq_perms : forall 'cap. Capability 'cap => 'cap -> 'cap -> bool
+let leq_perms c1 c2 =
+  (leq_bools (get_perms c1) (get_perms c2) &&
+   (permits_execute c1 --> permits_execute c2) &&
+   (permits_ccall c1 --> permits_ccall c2) &&
+   (permits_load c1 --> permits_load c2) &&
+   (permits_load_cap c1 --> permits_load_cap c2) &&
+   (permits_seal c1 --> permits_seal c2) &&
+   (permits_store c1 --> permits_store c2) &&
+   (permits_store_cap c1 --> permits_store_cap c2) &&
+   (permits_store_local_cap c1 --> permits_store_local_cap c2) &&
+   (permits_system_access c1 --> permits_system_access c2) &&
+   (permits_unseal c1 --> permits_unseal c2))
 
 val leq_bounds : forall 'cap. Capability 'cap => 'cap -> 'cap -> bool
 let leq_bounds c1 c2 =
@@ -74,7 +85,7 @@ let leq_cap c1 c2 =
      (not (is_sealed c1) && not (is_sealed c2)) &&
      (leq_bounds c1 c2) &&
      (is_global c1 --> is_global c2) &&
-     (leq_perms (get_perms c1) (get_perms c2)))
+     (leq_perms c1 c2))
 
 val invokable : forall 'cap. Capability 'cap => 'cap -> 'cap -> bool
 let invokable cc cd =
