@@ -318,6 +318,11 @@ lemma holds_along_trace_append[simp]:
   "holds_along_trace P s (t1 @ t2) \<longleftrightarrow> holds_along_trace P s t1 \<and> holds_along_trace P (run s t1) t2"
   by (induction P s t1 rule: holds_along_trace.induct) auto
 
+lemma holds_along_trace_take:
+  "holds_along_trace P s t \<Longrightarrow> holds_along_trace P s (take n t)"
+  using holds_along_trace_append[of P s "take n t" "drop n t", unfolded append_take_drop_id]
+  by auto
+
 lemma holds_along_trace_imp:
   assumes "holds_along_trace P s t"
     and "\<And>s e. P s e \<Longrightarrow> Q s e"
@@ -1443,9 +1448,9 @@ lemma pre_inv_trace_assms_initialI:
     and "n \<le> length t"
     and "n = 0 \<longrightarrow> (\<forall>c \<in> initial_caps. is_tagged_method CC c \<longrightarrow> cap_invariant c)"
   shows "pre_inv_trace_assms initial (take n t)"
-  using assms
-  unfolding available_caps_invariant_def pre_inv_trace_assms_def accessed_caps_trace_invariant_def accessed_caps_invariant_def
-  by (cases n) (auto simp: min_absorb1 butlast_take less_Suc_eq_le accessed_caps_def)
+    using assms
+    unfolding available_caps_invariant_def pre_inv_trace_assms_def accessed_caps_trace_invariant_def accessed_caps_invariant_def
+    by (cases n) (auto simp: min_absorb1 butlast_take less_Suc_eq_le accessed_caps_def)
 
 lemma accessed_caps_trace_invariant_take:
   assumes "accessed_caps_trace_invariant s t"
@@ -1524,19 +1529,20 @@ lemma traces_enabled_accepts_from_takeI:
   unfolding runTrace_iff_Traces[symmetric]
   by (intro trace_enabled_acceptI) (auto elim!: final_cases)
 
-lemma traces_enabled_acceptsI:
-  assumes "hasTrace t m" and "traces_enabled m initial" and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
-    and "available_caps_invariant use_mem_caps t n" and "trace_assms initial (take n t)" and "n \<le> length t"
-  shows "accepts (take n t)"
-  using assms
-  by (cases n; auto intro: traces_enabled_accepts_from_takeI pre_inv_trace_assms_initialI)
-
 lemma traces_enabled_accepts_fromI:
   assumes "hasTrace t m" and "traces_enabled m s" and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
     and "pre_inv_trace_assms s t"
   shows "accepts_from s t"
   using assms traces_enabled_accepts_from_takeI[OF assms(1-3), where n = "length t"]
   by auto
+
+lemma traces_enabled_acceptsI:
+  assumes "hasTrace t m" and "traces_enabled m initial" and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
+    and "available_caps_invariant use_mem_caps t n" and "trace_assms initial (take n t)" and "n \<le> length t"
+  shows "accepts (take n t)"
+  using assms
+  by (cases n)
+     (auto intro: traces_enabled_accepts_from_takeI traces_enabled_accepts_fromI pre_inv_trace_assms_initialI)
 
 text \<open>@{term traces_enabled} only provides guarantees if the starting state satisfies the
  capability invariants.\<close>
@@ -2201,30 +2207,18 @@ method traces_enabled_step uses simp intro elim assms =
     | (traces_enabled_foreachM_intro assms: assms simp: simp)
     | (rule insert_subset[where B="insert y C" for y C, THEN iffD2], simp(no_asm)))
 
-method traces_enabledI_with methods solve uses intro elim =
-  ((rule intro TrueI; traces_enabledI_with solve intro: intro elim: elim)
-    | (erule elim conjE; traces_enabledI_with solve intro: intro elim: elim)
-    | ((rule traces_enabled_combinatorI traces_enabled_builtin_combinatorsI[rotated], try_simp_traces_enabled); traces_enabledI_with solve intro: intro elim: elim)
-    | (rule traces_enabledI; traces_enabledI_with solve intro: intro elim: elim)
-    | (rule traces_enabled_split[THEN iffD2]; intro conjI impI; traces_enabledI_with solve intro: intro elim: elim)
+method traces_enabledI_with methods solve uses simp intro elim assms =
+  (((traces_enabled_step simp: simp intro: intro elim: elim assms: assms)+; traces_enabledI_with solve simp: simp intro: intro elim: elim assms: assms)
+    | (split_inv_trace_assms_append; traces_enabledI_with solve simp: simp intro: intro elim: elim assms: assms)
+    | (accessible_regs_step simp: simp assms: assms; solves \<open>traces_enabledI_with solve simp: simp intro: intro elim: elim assms: assms\<close>)
+    | (derivable_caps_step; solves \<open>traces_enabledI_with solve simp: simp intro: intro elim: elim assms: assms\<close>)
+    | (solves \<open>no_reg_writes_toI simp: simp\<close>)
     | solve)
 
-(*method traces_enabledI uses simp intro elim assms =
-  (traces_enabledI_with
-     \<open>(solves \<open>accessible_regsI simp: simp assms: assms\<close>)
-      | (solves \<open>derivable_capsI simp: simp assms: assms\<close>)
-      | (use assms in \<open>auto intro!: intro elim!: elim simp: simp\<close>)?\<close>
-     intro: intro)*)
-
 method traces_enabledI uses simp intro elim assms =
-  (((traces_enabled_step simp: simp intro: intro elim: elim assms: assms)+; traces_enabledI simp: simp intro: intro elim: elim assms: assms)
-    | (split_inv_trace_assms_append; traces_enabledI simp: simp intro: intro elim: elim assms: assms)
-    | (accessible_regs_step simp: simp assms: assms; solves \<open>traces_enabledI simp: simp intro: intro elim: elim assms: assms\<close>)
-    | (derivable_caps_step; solves \<open>traces_enabledI simp: simp intro: intro elim: elim assms: assms\<close>)
-    | (solves \<open>no_reg_writes_toI simp: simp\<close>)
-    | (use assms in \<open>auto intro!: intro elim!: elim simp: simp\<close>)?)
-
-(* method traces_enabledI = (intro traces_enabledI preserves_invariantI) *)
+  (traces_enabledI_with
+     \<open>(use assms in \<open>auto intro!: intro elim!: elim simp: simp\<close>)?\<close>
+     simp: simp intro: intro elim: elim assms: assms)
 
 lemma if_derivable_capsI[derivable_capsI]:
   assumes "cond \<Longrightarrow> c1 \<in> derivable_caps s" and "\<not>cond \<Longrightarrow> c2 \<in> derivable_caps s"
@@ -2688,14 +2682,15 @@ lemma traces_enabled_write_memt[traces_enabledI]:
 
 lemma traces_enabled_reg_axioms:
   assumes "traces_enabled m initial" and "hasTrace t m"
-    and "pre_inv_trace_assms initial t"
+    and "available_caps_invariant use_mem_caps t n" and "trace_assms initial (take n t)" and "n \<le> length t"
     and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
-  shows "store_cap_reg_axiom CC ISA ex_traces initial_caps use_mem_caps invoked_caps invoked_indirect_caps t"
-    and "store_cap_mem_axiom CC ISA initial_caps use_mem_caps invoked_indirect_caps t"
-    and "read_reg_axiom CC ISA ex_traces t"
+  shows "store_cap_reg_axiom CC ISA ex_traces initial_caps use_mem_caps invoked_caps invoked_indirect_caps (take n t)"
+    and "store_cap_mem_axiom CC ISA initial_caps use_mem_caps invoked_indirect_caps (take n t)"
+    and "read_reg_axiom CC ISA ex_traces (take n t)"
+    and "write_reg_axiom CC ISA ex_traces (take n t)"
   using assms
   by (intro recognises_store_cap_reg_read_reg_axioms;
-      elim traces_enabled_accepts_fromI;
+      elim traces_enabled_acceptsI;
       auto)+
 
 end
@@ -2965,15 +2960,15 @@ lemma translation_assms_traceI:
 
 lemma traces_enabled_mem_axioms:
   assumes "traces_enabled m initial" and "hasTrace t m"
-    and "pre_inv_trace_assms initial t"
+    and "available_caps_invariant use_mem_caps t n" and "trace_assms initial (take n t)" and "n \<le> length t"
     and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
-  shows "store_mem_axiom CC ISA initial_caps use_mem_caps invoked_indirect_caps t"
-    and "store_tag_axiom CC ISA t"
-    and "load_mem_axiom CC ISA is_fetch initial_caps use_mem_caps invoked_indirect_caps t"
+  shows "store_mem_axiom CC ISA initial_caps use_mem_caps invoked_indirect_caps (take n t)"
+    and "store_tag_axiom CC ISA (take n t)"
+    and "load_mem_axiom CC ISA is_fetch initial_caps use_mem_caps invoked_indirect_caps (take n t)"
   using assms
   by (intro accepts_store_mem_axiom accepts_store_tag_axiom accepts_load_mem_axiom
-            traces_enabled_accepts_fromI translation_assms_traceI[where s = initial];
-      auto simp: pre_inv_trace_assms_def intro: translation_assmsI)+
+            traces_enabled_acceptsI translation_assms_traceI[where s = initial];
+      auto)+
 
 lemma traces_enabled_Read_mem:
   assumes "\<And>v. traces_enabled (m v) (axiom_step s (E_read_mem rk paddr sz v))"

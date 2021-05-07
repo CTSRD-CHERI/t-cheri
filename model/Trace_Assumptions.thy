@@ -117,6 +117,12 @@ lemma Run_catch_early_returnE:
   unfolding catch_early_return_def
   by (elim Run_try_catchE) (auto split: sum.splits)
 
+lemma final_simps[intro, simp]:
+  "final (Done a)"
+  "final (Exception e)"
+  "final (Fail msg)"
+  by (auto simp: final_def)
+
 section \<open>(Conditionally) deterministic monadic expressions\<close>
 
 definition "determ_exp_if P m c \<equiv> (\<forall>t a. Run m t a \<and> P t \<longrightarrow> a = c)"
@@ -882,11 +888,6 @@ lemma determ_runs_bindI:
   using assms
   by (intro determ_runsI[where c = "the_result (f (the_result m))"])
      (auto elim!: Run_inv_bindE simp: determ_the_result_eq)
-
-lemma final_simps[intro, simp]:
-  "final (Exception e)"
-  "final (Fail msg)"
-  by (auto simp: final_def)
 
 lemma runs_preserve_invariant_Run_invariant[simp]:
   assumes "runs_preserve_invariant m"
