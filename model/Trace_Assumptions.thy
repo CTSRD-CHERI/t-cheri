@@ -117,6 +117,20 @@ lemma Run_catch_early_returnE:
   unfolding catch_early_return_def
   by (elim Run_try_catchE) (auto split: sum.splits)
 
+lemma catch_early_return_bind_liftR:
+  "catch_early_return (liftR m \<bind> f) = (m \<bind> (\<lambda>a. catch_early_return (f a)))"
+  by (induction m) (auto simp: catch_early_return_def liftR_def throw_def)
+
+lemma catch_early_return_bind_early_return:
+  "catch_early_return (early_return a \<bind> f) = return a"
+  by (auto simp: catch_early_return_def early_return_def throw_def)
+
+lemmas catch_early_return_bind_substs =
+  catch_early_return_bind_liftR[THEN forw_subst]
+  catch_early_return_bind_early_return[THEN forw_subst]
+  bind_assoc[THEN forw_subst[where P = "\<lambda>m. P (catch_early_return m)" for P]]
+  bind_return[THEN forw_subst[where P = "\<lambda>m. P (catch_early_return m)" for P]]
+
 lemma final_simps[intro, simp]:
   "final (Done a)"
   "final (Exception e)"
@@ -175,6 +189,9 @@ lemma no_reg_writes_to_bindI_ignore_left:
   using assms
   by (intro no_reg_writes_to_bindI)
 
+lemmas runs_no_reg_writes_to_catch_early_return_bind[intro, simp, runs_no_reg_writes_toI] =
+  catch_early_return_bind_substs[where P = "runs_no_reg_writes_to Rs" for Rs]
+
 lemma runs_no_reg_writes_to_bindI[intro, simp, runs_no_reg_writes_toI]:
   assumes "runs_no_reg_writes_to Rs m" and "\<And>t a. Run m t a \<Longrightarrow> runs_no_reg_writes_to Rs (f a)"
   shows "runs_no_reg_writes_to Rs (m \<bind> f)"
@@ -229,6 +246,12 @@ lemma runs_no_reg_writes_to_let[simp, runs_no_reg_writes_toI]:
   "runs_no_reg_writes_to Rs (f x) \<Longrightarrow> runs_no_reg_writes_to Rs (let a = x in f a)"
   by auto
 
+lemma runs_no_reg_writes_to_catch_early_return_let[simp, runs_no_reg_writes_toI]:
+  assumes "runs_no_reg_writes_to Rs (catch_early_return (f x))"
+  shows "runs_no_reg_writes_to Rs (catch_early_return (let a = x in f a))"
+  using assms
+  by auto
+
 lemma no_reg_writes_to_if[simp, no_reg_writes_toI]:
   assumes "c \<Longrightarrow> no_reg_writes_to Rs m1" and "\<not>c \<Longrightarrow> no_reg_writes_to Rs m2"
   shows "no_reg_writes_to Rs (if c then m1 else m2)"
@@ -246,6 +269,9 @@ lemma runs_no_reg_writes_to_if[simp, runs_no_reg_writes_toI]:
   shows "runs_no_reg_writes_to Rs (if c then m1 else m2)"
   using assms
   by auto
+
+lemmas runs_no_reg_writes_to_catch_early_return_if[simp, runs_no_reg_writes_toI] =
+  if_split[where P = "\<lambda>m. runs_no_reg_writes_to Rs (catch_early_return m)" for Rs, THEN iffD2]
 
 lemma runs_no_reg_writes_to_if_no_asm:
   assumes "runs_no_reg_writes_to Rs m1" and "runs_no_reg_writes_to Rs m2"
@@ -265,6 +291,9 @@ lemma runs_no_reg_writes_to_case_prod[intro, simp, runs_no_reg_writes_toI]:
   using assms
   by (cases z) auto
 
+lemmas runs_no_reg_writes_to_catch_early_return_case_prod[simp, runs_no_reg_writes_toI] =
+  prod.split[where P = "\<lambda>m. runs_no_reg_writes_to Rs (catch_early_return m)" for Rs, THEN iffD2]
+
 lemma no_reg_writes_to_case_bool[intro, simp, no_reg_writes_toI]:
   assumes "z \<Longrightarrow> no_reg_writes_to Rs m1" and "\<not>z \<Longrightarrow> no_reg_writes_to Rs m2"
   shows "no_reg_writes_to Rs (case z of True \<Rightarrow> m1 | False \<Rightarrow> m2)"
@@ -276,6 +305,9 @@ lemma runs_no_reg_writes_to_case_bool[intro, simp, runs_no_reg_writes_toI]:
   shows "runs_no_reg_writes_to Rs (case z of True \<Rightarrow> m1 | False \<Rightarrow> m2)"
   using assms
   by (cases z) auto
+
+lemmas runs_no_reg_writes_to_catch_early_return_case_bool[simp, runs_no_reg_writes_toI] =
+  bool.split[where P = "\<lambda>m. runs_no_reg_writes_to Rs (catch_early_return m)" for Rs, THEN iffD2]
 
 lemma no_reg_writes_to_choose_regval[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (choose_regval desc)"

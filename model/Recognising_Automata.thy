@@ -2020,6 +2020,9 @@ lemma traces_enabled_liftR[traces_enabledI]:
   unfolding liftR_def
   by (intro traces_enabled_try_catch) (auto simp: traces_enabled_def)
 
+lemmas traces_enabled_catch_early_return_binds[traces_enabledI] =
+  catch_early_return_bind_substs[where P = "\<lambda>m. traces_enabled m s" for s]
+
 definition
   "early_returns_enabled m s \<equiv>
      traces_enabled m s \<and>
@@ -2401,6 +2404,9 @@ lemma traces_enabled_liftR[traces_enabledI]:
   using assms
   unfolding liftR_def
   by (intro traces_enabled_try_catch) (auto simp: traces_enabled_def Run_inv_def)
+
+lemmas traces_enabled_catch_early_return_binds[traces_enabledI] =
+  catch_early_return_bind_substs[where P = "\<lambda>m. traces_enabled m s regs" for s regs]
 
 definition
   "early_returns_enabled m s regs \<equiv>
