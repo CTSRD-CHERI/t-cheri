@@ -59,9 +59,12 @@ let has_ref_args f = List.exists is_ref_typ (arg_typs f)
 let mangle_name renames n =
   (try Bindings.find n renames with Not_found -> isa_name n)
 
-let mangle_fun_name arch = mangle_name arch.fun_renames
-let mangle_arg_name arch = mangle_name arch.arg_renames
-let mangle_reg_ref arch n = mangle_name arch.reg_ref_renames (append_id n "_ref")
+let union_bindings b1 b2 = Bindings.union (fun k x y -> Some y) b1 b2
+let mangle_fun_name ?extra_renames:(extra_renames=Bindings.empty) arch = mangle_name (union_bindings arch.fun_renames extra_renames)
+let mangle_arg_name ?extra_renames:(extra_renames=Bindings.empty) arch = mangle_name (union_bindings arch.arg_renames extra_renames)
+let mangle_reg_ref ?extra_renames:(extra_renames=Bindings.empty) arch n = mangle_name (union_bindings arch.reg_ref_renames extra_renames) (append_id n "_ref")
+
+let arg_renames ids = List.fold_left (fun rs id -> Bindings.add (mk_id id) (id ^ "__arg") rs) Bindings.empty ids
 
 let get_kid_itself typ = match unaux_typ typ with
   | Typ_app (itself, [Ast.A_aux (Ast.A_nexp (Nexp_aux (Nexp_var kid, _)), _)])
@@ -70,21 +73,21 @@ let get_kid_itself typ = match unaux_typ typ with
   | _ -> None
 
 let format_fun_name arch id = mangle_fun_name arch id
-let format_fun_args ?annot_kids:(annot_kids=false) arch f =
+let format_fun_args ?annot_kids:(annot_kids=false) ?extra_renames:(extra_renames=Bindings.empty) arch f =
   let format_arg i (id, typ) =
-    let arg = mangle_arg_name arch id in
+    let arg = mangle_arg_name ~extra_renames arch id in
     match get_kid_itself typ with
     | Some kid -> "(" ^ arg ^ " :: " ^ string_of_kid kid ^ "::len itself)"
     | None -> arg
   in
   String.concat " " (List.mapi format_arg f.args)
-let format_fun_call ?annot_kids:(annot_kids=false) arch id f =
+let format_fun_call ?annot_kids:(annot_kids=false) ?extra_renames:(extra_renames=Bindings.empty) arch id f =
   let tannot = match Type_check.destruct_bitvector arch.type_env f.ret_typ with
     | Some (Nexp_aux (Nexp_var kid, _), _) when annot_kids ->
        " :: " ^ string_of_kid kid ^ "::len word M"
     | _ -> ""
   in
-  format_fun_name arch id ^ " " ^ format_fun_args ~annot_kids arch f ^ tannot
+  format_fun_name arch id ^ " " ^ format_fun_args ~annot_kids ~extra_renames arch f ^ tannot
 
 let apply_lemma_override arch id lemma_type lemma =
   match Bindings.find_opt id arch.lemma_overrides with
@@ -95,9 +98,9 @@ let apply_lemma_override arch id lemma_type lemma =
      end
   | None -> lemma
 
-let get_fun_info ?annot_kids:(annot_kids=false) isa id =
+let get_fun_info ?annot_kids:(annot_kids=false) ?extra_renames:(extra_renames=Bindings.empty) isa id =
   let f = Bindings.find id isa.fun_infos in
-  (f, format_fun_name isa id, format_fun_call ~annot_kids isa id f)
+  (f, format_fun_name isa id, format_fun_call ~annot_kids ~extra_renames isa id f)
 
 let non_cap_exp_lemma isa id : lemma =
   let (f, name, call) = get_fun_info isa id in
@@ -123,7 +126,8 @@ let non_mem_exp_lemma isa id =
   |> apply_lemma_override isa id "non_mem_exp"
 
 let no_reg_writes_to_lemma no_exc isa id =
-  let (f, name, call) = get_fun_info isa id in
+  let extra_renames = arg_renames ["Rs"] in
+  let (f, name, call) = get_fun_info isa ~extra_renames id in
   (* Restricting attention to special capability registers for now *)
   let regs_written = if no_exc then f.trans_regs_written_no_exc else f.trans_regs_written in
   let regs = IdSet.elements (IdSet.diff (write_checked_regs isa) regs_written) in
@@ -241,7 +245,8 @@ let has_override isa id l =
 let has_system_access_checks isa f = ids_overlap isa.system_access_checks f.trans_calls
 
 let return_caps_derivable_lemma for_fetch isa id =
-  let (f, name, call) = get_fun_info isa id in
+  let extra_renames = arg_renames ["s"; "t"; "c"] in
+  let (f, name, call) = get_fun_info ~extra_renames isa id in
   let priv_cap_regs_read =
     if ids_overlap isa.system_access_checks f.trans_calls then IdSet.empty else
     IdSet.inter isa.read_privileged_regs f.trans_regs_read_no_exc
@@ -249,7 +254,7 @@ let return_caps_derivable_lemma for_fetch isa id =
   let nonpriv_cap_regs_read = IdSet.inter (IdSet.diff (special_regs isa) (privileged_regs isa)) f.trans_regs_read in
   let cap_regs_read = IdSet.union priv_cap_regs_read nonpriv_cap_regs_read in
   let cap_reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") (IdSet.elements cap_regs_read) in
-  let get_arg_assm i (arg, r) = if (is_cap_typ isa (base_typ_of isa r)) then [mangle_arg_name isa arg ^ " \\<in> derivable_caps s \\<Longrightarrow> "] else [] in
+  let get_arg_assm i (arg, r) = if (is_cap_typ isa (base_typ_of isa r)) then [mangle_arg_name ~extra_renames isa arg ^ " \\<in> derivable_caps s \\<Longrightarrow> "] else [] in
   let arg_assm = String.concat "" (List.concat (List.mapi get_arg_assm f.args)) in
   let access_assm =
     if IdSet.is_empty cap_regs_read then "" else
@@ -300,7 +305,8 @@ let arg_assms_of_typquant arg_kids tq =
   List.concat (List.map (arg_assms_of_quant_item arg_kids) (quant_items tq))
 
 let traces_enabled_lemma mem for_fetch isa id =
-  let (f, name, call) = get_fun_info ~annot_kids:true isa id in
+  let extra_renames = arg_renames ["s"] in
+  let (f, name, call) = get_fun_info ~annot_kids:true ~extra_renames isa id in
   let priv_cap_regs_read =
     if ids_overlap isa.system_access_checks f.trans_calls then IdSet.empty else
       IdSet.union
@@ -336,13 +342,13 @@ let traces_enabled_lemma mem for_fetch isa id =
   in
   let cap_arg_assms =
     if has_mem_eff f || writes isa.cap_regs f then
-      List.concat (List.mapi (fun i (a, t) -> if is_cap_typ isa t then [mangle_arg_name isa a ^ " \\<in> derivable_caps s"] else []) f.args)
+      List.concat (List.mapi (fun i (a, t) -> if is_cap_typ isa t then [mangle_arg_name ~extra_renames isa a ^ " \\<in> derivable_caps s"] else []) f.args)
     else []
   in
   let add_arg_kid (i, arg_kids, kid_eqs) (arg_id, arg_typ) =
     let new_kid = match Type_check.destruct_numeric arg_typ with
       | Some ([], _, Nexp_aux (Nexp_var kid, _)) ->
-         Some (kid, mangle_arg_name isa arg_id)
+         Some (kid, mangle_arg_name ~extra_renames isa arg_id)
       | _ ->
          begin match get_kid_itself arg_typ with
            | Some kid ->
@@ -350,7 +356,7 @@ let traces_enabled_lemma mem for_fetch isa id =
            | _ ->
               begin match Type_check.destruct_bitvector isa.type_env arg_typ with
                 | Some (Nexp_aux (Nexp_var kid, _), _) ->
-                   Some (kid, "int (size " ^ mangle_arg_name isa arg_id ^ ")")
+                   Some (kid, "int (size " ^ mangle_arg_name ~extra_renames isa arg_id ^ ")")
                 | _ -> None
               end
          end
