@@ -6,6 +6,9 @@ Require Import Coq.Arith.PeanoNat.
 
 Require Import bbv.Word.
 
+Set Implicit Arguments.
+Set Strict Implicit.
+
 Import ListNotations.
 Open Scope nat_scope.
 Open Scope list_scope.
@@ -39,8 +42,8 @@ Section AddressSet.
 
 End AddressSet.
 
-
-Class Permission (P A:Type) `{Arch A}:=
+Class Permission (P:Type)
+      {A:Type} `{Arch A}:=
   {
   (* Convenience functions to examine some permission bits *)
   permits_execute : P -> bool;
@@ -58,7 +61,9 @@ Class Permission (P A:Type) `{Arch A}:=
   get_bits : P -> word (perms_nbits)
   }.
 
-Class Capability (C P:Type) `{Permission P} :=
+Class Capability (C:Type)
+      {A:Type} `{AA:Arch A}
+      {P:Type} `{@Permission P A AA} :=
   {
   is_tagged : C -> bool;
   is_sealed : C -> bool;
