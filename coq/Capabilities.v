@@ -23,16 +23,18 @@ Module Import NE := FSetToFiniteSet.WS_to_Finite_set(Nat_as_OT)(NS).
 
 (* TODO: size by arch *)
 Definition perms   := list bool.
+
+(* TODO: abstract *)
 Definition address := nat.
+
+(* TODO: Bitvector with size defined by arch *)
 Definition otype   := nat.
 
+(* TODO: avoid ordering, try NoDup list? *)
 Definition address_set := NS.t.
 
-(* From `sail2_values.lem` *)
-Inductive bitU := B0 | B1 | BU.
-
-(* From `sail2_values.lem` *)
-Definition memory_byte := list bitU.
+(* TODO: abstract *)
+Parameter memory_byte:Type.
 
 Class Permission (P:Type) :=
   {
@@ -51,7 +53,6 @@ Class Permission (P:Type) :=
 
   (* Get all permission bits *)
   get_bits : P -> perms;
-
   }.
 
 Class Capability (C P:Type) `{Permission P} :=
@@ -69,7 +70,8 @@ Class Capability (C P:Type) `{Permission P} :=
   seal : C -> otype -> C;
   unseal : C -> C;
   clear_global : C -> C;
-  cap_of_mem_bytes : list memory_byte -> bitU -> option C;
+  (* TODO: size of memory block should be in arch *)
+  cap_of_mem_bytes : list memory_byte -> bool -> option C;
   }.
 
 Definition address_range (start:address) (len:address): list address
