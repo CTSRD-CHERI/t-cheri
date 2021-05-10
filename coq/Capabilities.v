@@ -3,23 +3,11 @@
 
 Require Import Coq.Lists.List.
 (* Require Import bbv.Word. *)
-From Coq.FSets Require Import
-     FSetAVL
-     FSetInterface
-     FSetFacts
-     FSetProperties
-     FSetToFiniteSet.
-Require Import Coq.Structures.OrderedTypeEx.
 Require Import Coq.Arith.PeanoNat.
 
 Import ListNotations.
 Open Scope nat_scope.
 Open Scope list_scope.
-
-(* Set of natural numbers *)
-Module NS := FSetAVL.Make(Nat_as_OT).
-Module Import NSP := FSetProperties.WProperties_fun(Nat_as_OT)(NS).
-Module Import NE := FSetToFiniteSet.WS_to_Finite_set(Nat_as_OT)(NS).
 
 (* TODO: size by arch *)
 Definition perms   := list bool.
@@ -30,15 +18,19 @@ Definition address := nat.
 (* TODO: Bitvector with size defined by arch *)
 Definition otype   := nat.
 
-(* TODO: avoid ordering, try NoDup list? *)
-Definition address_set := NS.t.
+Section AddressSet.
+
+  Definition address_set := {l:list address| NoDup l}.
+
+  Definition empty_address_set:address_set := @exist _ _ [] (NoDup_nil _).
+
+End AddressSet.
 
 (* TODO: abstract *)
 Parameter memory_byte:Type.
 
 Class Permission (P:Type) :=
   {
-
   (* Convenience functions to examine some permission bits *)
   permits_execute : P -> bool;
   permits_ccall : P -> bool;
@@ -77,12 +69,11 @@ Class Capability (C P:Type) `{Permission P} :=
 Definition address_range (start:address) (len:address): list address
   := List.map (fun n => start +n) (List.seq 0 len).
 
-
 Definition get_mem_region {C:Type} `{Capability C} (c:C): address_set
   :=
-    if get_top c <? get_base c then NS.empty else
+    if get_top c <? get_base c then empty_address_set else
       let len := get_top c - get_base c in
-      NSP.of_list (address_range (get_base c) len).
+      (address_range (get_base c) len).
 
 Fixpoint leq_bools (l1 l2: list bool): bool
   :=
