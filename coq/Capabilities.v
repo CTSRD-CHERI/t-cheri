@@ -21,6 +21,7 @@ Module NS := FSetAVL.Make(Nat_as_OT).
 Module Import NSP := FSetProperties.WProperties_fun(Nat_as_OT)(NS).
 Module Import NE := FSetToFiniteSet.WS_to_Finite_set(Nat_as_OT)(NS).
 
+(* TODO: size by arch *)
 Definition perms   := list bool.
 Definition address := nat.
 Definition otype   := nat.
@@ -33,7 +34,27 @@ Inductive bitU := B0 | B1 | BU.
 (* From `sail2_values.lem` *)
 Definition memory_byte := list bitU.
 
-Class Capability (C:Type) :=
+Class Permission (P:Type) :=
+  {
+
+  (* Convenience functions to examine some permission bits *)
+  permits_execute : P -> bool;
+  permits_ccall : P -> bool;
+  permits_load : P -> bool;
+  permits_load_cap : P -> bool;
+  permits_seal : P -> bool;
+  permits_store : P -> bool;
+  permits_store_cap : P -> bool;
+  permits_store_local_cap : P -> bool;
+  permits_system_access : P -> bool;
+  permits_unseal : P -> bool;
+
+  (* Get all permission bits *)
+  get_bits : P -> perms;
+
+  }.
+
+Class Capability (C P:Type) `{Permission P} :=
   {
   is_tagged : C -> bool;
   is_sealed : C -> bool;
@@ -42,23 +63,13 @@ Class Capability (C:Type) :=
   get_base : C -> address;
   get_top : C -> address;
   get_obj_type : C -> otype;
-  get_perms : C -> perms;
+  get_perms : P -> perms;
   get_cursor : C -> address;
   is_global : C -> bool;
   seal : C -> otype -> C;
   unseal : C -> C;
   clear_global : C -> C;
   cap_of_mem_bytes : list memory_byte -> bitU -> option C;
-  permits_execute : C -> bool;
-  permits_ccall : C -> bool;
-  permits_load : C -> bool;
-  permits_load_cap : C -> bool;
-  permits_seal : C -> bool;
-  permits_store : C -> bool;
-  permits_store_cap : C -> bool;
-  permits_store_local_cap : C -> bool;
-  permits_system_access : C -> bool;
-  permits_unseal : C -> bool;
   }.
 
 Definition address_range (start:address) (len:address): list address
