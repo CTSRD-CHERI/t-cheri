@@ -1,22 +1,35 @@
-(* Coq formalization on CHERI Capablities based on
-   `capablities.lem` *)
+(* Coq formalization on CHERI Capablities *)
 
 Require Import Coq.Lists.List.
-(* Require Import bbv.Word. *)
+Require Import Coq.Vectors.Vector.
 Require Import Coq.Arith.PeanoNat.
+
+Require Import bbv.Word.
 
 Import ListNotations.
 Open Scope nat_scope.
 Open Scope list_scope.
 
-(* TODO: size by arch *)
-Definition perms   := list bool.
+(* Various architeture-dependent definitions affecting CHERI *)
+Class Arch (A:Type) :=
+  {
+  (* Number of bits for permissions *)
+  perms_nbits: nat ;
+
+  (* Number of bits describing object type.
+     TODO: maybe use max value instead?
+   *)
+  otype_nbits: nat;
+
+  (* Size of capability encoding in bytes *)
+  capability_nbyes: nat;
+
+  (* Type to describe memory byte *)
+  memory_byte:Type;
+  }.
 
 (* TODO: abstract *)
 Definition address := nat.
-
-(* TODO: Bitvector with size defined by arch *)
-Definition otype   := nat.
 
 Section AddressSet.
 
@@ -26,10 +39,8 @@ Section AddressSet.
 
 End AddressSet.
 
-(* TODO: abstract *)
-Parameter memory_byte:Type.
 
-Class Permission (P:Type) :=
+Class Permission (P A:Type) `{Arch A}:=
   {
   (* Convenience functions to examine some permission bits *)
   permits_execute : P -> bool;
@@ -44,7 +55,7 @@ Class Permission (P:Type) :=
   permits_unseal : P -> bool;
 
   (* Get all permission bits *)
-  get_bits : P -> perms;
+  get_bits : P -> word (perms_nbits)
   }.
 
 Class Capability (C P:Type) `{Permission P} :=
@@ -55,15 +66,14 @@ Class Capability (C P:Type) `{Permission P} :=
   is_indirect_sentry : C -> bool;
   get_base : C -> address;
   get_top : C -> address;
-  get_obj_type : C -> otype;
-  get_perms : P -> perms;
+  get_obj_type : C -> word (otype_nbits);
+  get_perms : C -> P;
   get_cursor : C -> address;
   is_global : C -> bool;
-  seal : C -> otype -> C;
+  seal : C -> word (otype_nbits) -> C;
   unseal : C -> C;
   clear_global : C -> C;
-  (* TODO: size of memory block should be in arch *)
-  cap_of_mem_bytes : list memory_byte -> bool -> option C;
+  cap_of_mem_bytes : (Vector.t memory_byte capability_nbyes) -> bool -> option C;
   }.
 
 Definition address_range (start:address) (len:address): list address
