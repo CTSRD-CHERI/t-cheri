@@ -530,25 +530,6 @@ let output_cap_lemmas chan (isa : isa) =
   output_line chan  "";
   output_line chan  "declare register_defs[simp_rules_add subset_assms_simp]";
   output_line chan  "";
-  output_line chan ("context " ^ isa.name ^ "_Axiom_Automaton");
-  output_line chan  "begin";
-  output_line chan  "";
-
-  output_line chan (format_lemma (non_cap_regs_lemma isa));
-  output_line chan (format_lemma (read_non_cap_regs_lemma isa));
-  output_line chan (format_lemma (write_non_cap_regs_lemma isa));
-  (*output_line chan  "lemmas non_cap_exp_rw_non_cap_reg[non_cap_expI] =";
-  output_line chan  "  non_cap_regsI[THEN non_cap_exp_read_non_cap_reg]";
-  output_line chan  "  non_cap_regsI[THEN non_cap_exp_write_non_cap_reg]";
-  output_line chan  "";*)
-
-  filter_funs_for_lemma "non_cap_exp" isa (fun id f -> not (is_cap_fun isa f) && effectful f)
-    |> List.map (non_cap_exp_lemma isa)
-    |> List.map format_lemma |> List.iter (output_line chan);
-
-  output_line chan  "";
-  output_line chan  (format_lemma (read_cap_regs_derivable_lemma isa));
-  output_line chan  "";
 
   filter_funs_for_lemma "exp_fails" isa (fun id f -> IdSet.mem id exc_funs && effectful f)
     |> List.map (exp_fails_lemma isa)
@@ -572,6 +553,26 @@ let output_cap_lemmas chan (isa : isa) =
     |> List.map (no_reg_writes_to_lemma true isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
+  output_line chan  "";
+
+  output_line chan ("context " ^ isa.name ^ "_Axiom_Automaton");
+  output_line chan  "begin";
+  output_line chan  "";
+
+  output_line chan (format_lemma (non_cap_regs_lemma isa));
+  output_line chan (format_lemma (read_non_cap_regs_lemma isa));
+  output_line chan (format_lemma (write_non_cap_regs_lemma isa));
+  (*output_line chan  "lemmas non_cap_exp_rw_non_cap_reg[non_cap_expI] =";
+  output_line chan  "  non_cap_regsI[THEN non_cap_exp_read_non_cap_reg]";
+  output_line chan  "  non_cap_regsI[THEN non_cap_exp_write_non_cap_reg]";
+  output_line chan  "";*)
+
+  filter_funs_for_lemma "non_cap_exp" isa (fun id f -> not (is_cap_fun isa f) && effectful f)
+    |> List.map (non_cap_exp_lemma isa)
+    |> List.map format_lemma |> List.iter (output_line chan);
+
+  output_line chan  "";
+  output_line chan  (format_lemma (read_cap_regs_derivable_lemma isa));
   output_line chan  "";
 
   filter_funs_for_lemma "derivable_caps" isa (fun id f -> returns_cap isa f && effectful f && not (has_system_access_checks isa f) && (is_execute_fun isa id || IdSet.is_empty isa.fetch_funs))
