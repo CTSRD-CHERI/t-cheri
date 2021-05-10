@@ -8,6 +8,7 @@ Require Import bbv.Word.
 
 Set Implicit Arguments.
 Set Strict Implicit.
+Generalizable All Variables.
 
 Import ListNotations.
 Open Scope nat_scope.
@@ -31,19 +32,51 @@ Class Arch (A:Type) :=
   memory_byte:Type;
   }.
 
-(* TODO: abstract *)
-Definition address := nat.
+Class Address (A:Type) :=
+  {
 
-Section AddressSet.
+  (* "less than" *)
+  address_le: A -> A -> Prop ;
 
-  Definition address_set := {l:list address| NoDup l}.
+  address_le_dec: forall a b, {address_le a b}+{~ address_le a b};
 
-  Definition empty_address_set:address_set := @exist _ _ [] (NoDup_nil _).
+  (* Generates of set of addresses in the given range. NOTE: unlike
+     functoin with same name in capablities.lem, the 2nd argument is
+     end of interval (exclusive), not the lenght! No error handling
+     for now. We will return empty set instead. But may be later
+     extended with error handling.
 
-End AddressSet.
+     TODO: @thomas.sewell: Here's one of the headaches: a 0-length
+     capability may be valid in CHERI. It isn't capable of enabling
+     any operation at any address, but it might be passed around by
+     software as a token. Maybe. The model apparently supports this
+     but, to my knowledge, nobody actually does this yet, so we don't
+     know if there are any extra corner cases in the
+     implementation. Anyway, you'll note that the inclusive encoding
+     of such a capability is strange, and creates potentially
+     dangerous confusion between the 0-length capability starting at
+     address 0 and the 2^64-length capability starting at address 0.
+   *)
+  address_range: A -> A -> {l:list A| NoDup l} ;
+  }.
+
+Section AddressHelpers.
+  Context `{ADR: Address A}.
+
+  (* Set of addresses type aliase *)
+  Definition address_set := {l:list A| NoDup l} .
+
+  (* Empty address set constant *)
+  Definition empty_address_set: address_set := @exist _ _ [] (NoDup_nil _).
+
+  (* boolean versoin of [address_le] preficate *)
+  Definition address_leb: A -> A -> bool :=
+    fun a b => if address_le_dec a b then true else false.
+
+End AddressHelpers.
 
 Class Permission (P:Type)
-      {A:Type} `{Arch A}:=
+      `{ARCH: Arch A}:=
   {
   (* Convenience functions to examine some permission bits *)
   permits_execute : P -> bool;
@@ -62,8 +95,9 @@ Class Permission (P:Type)
   }.
 
 Class Capability (C:Type)
-      {A:Type} `{AA:Arch A}
-      {P:Type} `{@Permission P A AA} :=
+      `{ARCH: Arch A}
+      `{ADR: Address address}
+      `{PERM: @Permission P A ARCH} :=
   {
   is_tagged : C -> bool;
   is_sealed : C -> bool;
@@ -81,29 +115,14 @@ Class Capability (C:Type)
   cap_of_mem_bytes : (Vector.t memory_byte capability_nbyes) -> bool -> option C;
   }.
 
-Definition address_range (start:address) (len:address): list address
-  := List.map (fun n => start +n) (List.seq 0 len).
 
-Definition get_mem_region {C:Type} `{Capability C} (c:C): address_set
-  :=
-    if get_top c <? get_base c then empty_address_set else
-      let len := get_top c - get_base c in
-      (address_range (get_base c) len).
+Section CapabilityProperties.
+  Context `{ARCH: Arch A}.
+  Context `{ADR: Address address}.
+  Context `{PERM: @Permission P A ARCH}.
+  Context `{CAPA: @Capability C _ ARCH  _ ADR _ PERM}.
 
-Fixpoint leq_bools (l1 l2: list bool): bool
-  :=
-    match (l1, l2) with
-    | ([], []) => true
-    | (_::_, []) => false
-    | ([], _::_) => false
-    | (b1 :: l1, b2 :: l2) => (implb b1 b2) && leq_bools l1 l2
-    end.
+  Definition get_mem_region `{Capability C} (c:C): address_set
+    := address_range (get_base c) (get_top c).
 
-Definition leq_perms: perms -> perms -> bool:= leq_bools.
-
-Definition leq_bounds {C:Type} `{Capability C} (c1 c2:C): bool
-  :=
-    ((get_base c1 =? get_base c2) && (get_top c1 =? get_top c2))
-    || ((get_base c2 <=? get_base c1)
-       && (get_top c1 <=? get_top c2)
-       && (get_base c1 <=? get_top c1)).
+End CapabilityProperties.
