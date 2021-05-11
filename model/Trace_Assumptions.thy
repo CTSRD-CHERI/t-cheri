@@ -498,7 +498,20 @@ lemma exp_fails_if_then_else:
 locale Register_State =
   fixes get_regval :: "string \<Rightarrow> 'regstate \<Rightarrow> 'regval option"
     and set_regval :: "string \<Rightarrow> 'regval \<Rightarrow> 'regstate \<Rightarrow> 'regstate option"
+  (* TODO: Add optional register_value state generation to Sail where the next two hold by construction? *)
+  assumes read_absorb_write: "\<And>r v s s'. set_regval r v s = Some s' \<Longrightarrow> get_regval r s' = Some v"
+    and read_ignore_write: "\<And>r r' v s s'. set_regval r v s = Some s' \<Longrightarrow> r' \<noteq> r \<Longrightarrow> get_regval r' s' = get_regval r' s"
 begin
+
+abbreviation "s_emit_event e s \<equiv> emitEventS (get_regval, set_regval) e s"
+abbreviation "s_run_trace t s \<equiv> runTraceS (get_regval, set_regval) t s"
+abbreviation "s_allows_trace t s \<equiv> \<exists>s'. s_run_trace t s = Some s'"
+
+fun get_reg_val :: "register_name \<Rightarrow> 'regstate sequential_state \<Rightarrow> 'regval option" where
+  "get_reg_val r s = get_regval r (regstate s)"
+
+fun put_reg_val :: "register_name \<Rightarrow> 'regval \<Rightarrow> 'regstate sequential_state \<Rightarrow> 'regstate sequential_state option" where
+  "put_reg_val r v s = map_option (\<lambda>rs'. s\<lparr>regstate := rs'\<rparr>) (set_regval r v (regstate s))"
 
 fun updates_regs :: "string set \<Rightarrow> 'regval trace \<Rightarrow> 'regstate \<Rightarrow> 'regstate option" where
   "updates_regs R [] s = Some s"

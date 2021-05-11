@@ -1,5 +1,5 @@
 theory Properties
-imports Cheri_axioms_lemmas Sail.Sail2_state_lemmas
+imports Cheri_axioms_lemmas Trace_Assumptions Sail.Sail2_state_lemmas
 begin
 
 section \<open>Helper lemmas and definitions\<close>
@@ -108,31 +108,17 @@ locale CHERI_ISA = Capability_Invariant_ISA CC ISA initial_caps cap_invariant
   assumes instr_cheri_axioms: "\<And>t n instr. hasTrace t \<lbrakk>instr\<rbrakk> \<Longrightarrow> n \<le> length t \<Longrightarrow> instr_available_caps_invariant instr t n \<Longrightarrow> instr_assms instr t \<Longrightarrow> instr_cheri_axioms instr t n"
     and fetch_cheri_axioms: "\<And>t n. hasTrace t (instr_fetch ISA) \<Longrightarrow> n \<le> length t \<Longrightarrow> fetch_available_caps_invariant t n \<Longrightarrow> fetch_assms t \<Longrightarrow> fetch_cheri_axioms t n"
 
-locale Register_Accessors =
-  fixes read_regval :: "register_name \<Rightarrow> 'regs \<Rightarrow> 'regval option"
-    and write_regval :: "register_name \<Rightarrow> 'regval \<Rightarrow> 'regs \<Rightarrow> 'regs option"
-  (* TODO: Add optional register_value state generation to Sail where the next two hold by construction *)
-  assumes read_absorb_write: "\<And>r v s s'. write_regval r v s = Some s' \<Longrightarrow> read_regval r s' = Some v"
-    and read_ignore_write: "\<And>r r' v s s'. write_regval r v s = Some s' \<Longrightarrow> r' \<noteq> r \<Longrightarrow> read_regval r' s' = read_regval r' s"
-begin
-
-abbreviation "s_emit_event e s \<equiv> emitEventS (read_regval, write_regval) e s"
-abbreviation "s_run_trace t s \<equiv> runTraceS (read_regval, write_regval) t s"
-abbreviation "s_allows_trace t s \<equiv> \<exists>s'. s_run_trace t s = Some s'"
-
-end
-
 locale CHERI_ISA_State =
   CHERI_ISA CC ISA cap_invariant initial_caps fetch_assms instr_assms +
-  Register_Accessors read_regval write_regval
+  Register_State get_regval set_regval
   for CC :: "'cap Capability_class"
   and ISA :: "('cap, 'regval, 'instr, 'e) isa"
   and cap_invariant :: "'cap \<Rightarrow> bool"
   and initial_caps :: "'cap set"
   and fetch_assms :: "'regval trace \<Rightarrow> bool"
   and instr_assms :: "'instr \<Rightarrow> 'regval trace \<Rightarrow> bool"
-  and read_regval :: "register_name \<Rightarrow> 'regs \<Rightarrow> 'regval option"
-  and write_regval :: "register_name \<Rightarrow> 'regval \<Rightarrow> 'regs \<Rightarrow> 'regs option" +
+  and get_regval :: "register_name \<Rightarrow> 'regs \<Rightarrow> 'regval option"
+  and set_regval :: "register_name \<Rightarrow> 'regval \<Rightarrow> 'regs \<Rightarrow> 'regs option" +
   (* State versions of ISA model parameters *)
   fixes s_translate_address :: "nat \<Rightarrow> acctype \<Rightarrow> 'regs sequential_state \<Rightarrow> nat option"
   assumes translate_address_sound: "\<And>t s vaddr paddr load.
@@ -144,14 +130,8 @@ locale CHERI_ISA_State =
           address_tag_aligned ISA paddr \<longleftrightarrow> address_tag_aligned ISA vaddr"
 begin
 
-fun get_reg_val :: "register_name \<Rightarrow> 'regs sequential_state \<Rightarrow> 'regval option" where
-  "get_reg_val r s = read_regval r (regstate s)"
-
-fun put_reg_val :: "register_name \<Rightarrow> 'regval \<Rightarrow> 'regs sequential_state \<Rightarrow> 'regs sequential_state option" where
-  "put_reg_val r v s = map_option (\<lambda>rs'. s\<lparr>regstate := rs'\<rparr>) (write_regval r v (regstate s))"
-
 fun get_reg_caps :: "register_name \<Rightarrow> 'regs sequential_state \<Rightarrow> 'cap set" where
-  "get_reg_caps r s = (case read_regval r (regstate s) of Some v \<Rightarrow> {c \<in> caps_of_regval ISA v. is_tagged_method CC c} | None \<Rightarrow> {})"
+  "get_reg_caps r s = (case get_regval r (regstate s) of Some v \<Rightarrow> {c \<in> caps_of_regval ISA v. is_tagged_method CC c} | None \<Rightarrow> {})"
 
 fun get_mem_cap :: "nat \<Rightarrow> nat \<Rightarrow> 'regs sequential_state \<Rightarrow> 'cap option" where
   "get_mem_cap addr sz s =
