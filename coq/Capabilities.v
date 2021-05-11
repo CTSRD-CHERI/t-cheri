@@ -139,7 +139,6 @@ Section CapabilityProperties.
     | Some (exist _ (b1,t1) _), Some (exist _ (b2, t2) _) =>
       address_leb b2 b1 && address_leb t1 t2
     | None, None => true
-    | None, Some _ => true (* TODO: is empty address interval <= any non empty? *)
     | _,_ => false
     end.
 
