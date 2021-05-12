@@ -16,24 +16,6 @@ Open Scope nat_scope.
 Open Scope list_scope.
 Open Scope bool_scope.
 
-(* Various architeture-dependent definitions affecting CHERI *)
-Class Arch (A:Type) :=
-  {
-  (* Number of bits for permissions *)
-  perms_nbits: nat ;
-
-  (* Number of bits describing object type.
-     TODO: maybe use max value instead?
-   *)
-  otype_nbits: nat;
-
-  (* Size of capability encoding in bytes *)
-  capability_nbyes: nat;
-
-  (* Type to describe memory byte *)
-  memory_byte:Type;
-  }.
-
 Section Interval.
   Variable V:Type.
   Variable V_lt: V -> V -> Prop.
@@ -75,6 +57,24 @@ End Interval.
 Arguments Incl_Interval {V}%type_scope {V_lt}%type_scope.
 Arguments Empty_Interval {V}%type_scope {V_lt}%type_scope.
 
+(* Various architeture-dependent definitions affecting CHERI *)
+Class Arch (A:Type) :=
+  {
+  (* Number of bits for permissions *)
+  perms_nbits: nat ;
+
+  (* Number of bits describing object type.
+     TODO: maybe use max value instead?
+   *)
+  otype_nbits: nat;
+
+  (* Size of capability encoding in bytes *)
+  capability_nbyes: nat;
+
+  (* Type to describe memory byte *)
+  memory_byte:Type;
+  }.
+
 Class Address (A:Type) :=
   {
   (* "less than" *)
@@ -88,13 +88,13 @@ Class Address (A:Type) :=
   addresses_in_interval: (Interval address_lt)-> {l:list A| NoDup l} ;
   }.
 
-Section AddressHelpers.
+Section AddressProperties.
   Context `{ADR: Address A}.
 
   (* address interval. *)
   Definition address_interval := Interval address_lt.
 
-  (* Set of addresses type aliase *)
+  (* Set of addresses type alias *)
   Definition address_set := {l:list A| NoDup l} .
 
   (* Empty address set constant *)
@@ -112,7 +112,7 @@ Section AddressHelpers.
   Definition address_leb: A -> A -> bool :=
     fun a b => address_ltb a b || address_eqb a b.
 
-End AddressHelpers.
+End AddressProperties.
 
 Class Permission (P:Type)
       `{ARCH: Arch A}:=
@@ -129,15 +129,78 @@ Class Permission (P:Type)
   permits_system_access: P -> bool;
   permits_unseal: P -> bool;
 
-  (* Get all permission bits *)
-  get_bits: P -> word (perms_nbits)
+  (* Encode permissions as a bit vector *)
+  perms_encode: P -> word (perms_nbits)
   }.
+
+Section PermissinProperties.
+  Context `{ARCH: Arch A}
+          `{ADR: Address address}
+          `{PERM: @Permission P A ARCH}.
+
+  (* Logical comparison ofpermssions based solely on their boolean
+     properties expressed in [Permissoin] typeclass interface.
+     Underlying implementation type may have some additional fields
+     not considered here *)
+  Definition perms_eqb (p1 p2: P): bool :=
+    Bool.eqb (permits_execute p1         )  (permits_execute p2) &&
+    Bool.eqb (permits_ccall p1           ) (permits_ccall p2) &&
+    Bool.eqb (permits_load p1            ) (permits_load p2) &&
+    Bool.eqb (permits_load p1            ) (permits_load p2) &&
+    Bool.eqb (permits_seal p1            ) (permits_seal p2) &&
+    Bool.eqb (permits_store p1           ) (permits_store p2) &&
+    Bool.eqb (permits_store_cap p1       ) (permits_store_cap p2) &&
+    Bool.eqb (permits_store_local_cap p1 ) (permits_store_local_cap p2) &&
+    Bool.eqb (permits_system_access p1   ) (permits_system_access p2) &&
+    Bool.eqb (permits_unseal p1          ) (permits_unseal p2).
+
+  (* Logical "lessn than" comparison of permssions based solely on
+     their boolean properties expressed in [Permissoin] typeclass
+     interface.  Underlying implementation type may have some
+     additional fields not considered here *)
+  Definition perms_leqb (p1 p2: P): bool :=
+    implb (permits_execute p1         ) (permits_execute p2) &&
+    implb (permits_ccall p1           ) (permits_ccall p2) &&
+    implb (permits_load p1            ) (permits_load p2) &&
+    implb (permits_load p1            ) (permits_load p2) &&
+    implb (permits_seal p1            ) (permits_seal p2) &&
+    implb (permits_store p1           ) (permits_store p2) &&
+    implb (permits_store_cap p1       ) (permits_store_cap p2) &&
+    implb (permits_store_local_cap p1 ) (permits_store_local_cap p2) &&
+    implb (permits_system_access p1   ) (permits_system_access p2) &&
+    implb (permits_unseal p1          ) (permits_unseal p2).
+
+End PermissinProperties.
+
+Class ObjectType (OT:Type)
+      `{ARCH: Arch A} :=
+  {
+  (* Decidable equality *)
+  ot_eq_dec: forall a b : OT, {a = b} + {a <> b};
+
+  (* encode object type as bit vector *)
+  ot_encode: OT -> word (otype_nbits);
+  }.
+
+Section ObjectTypeProperties.
+  Context `{ARCH: Arch A}
+          `{OTYPE: @ObjectType OT A ARCH}.
+
+  (* boolean versoin of [=] *)
+  Definition ot_eqb: OT -> OT -> bool :=
+    fun a b => if ot_eq_dec a b then true else false.
+
+End ObjectTypeProperties.
 
 Class Capability (C:Type)
       `{ARCH: Arch A}
+      `{OTYPE: @ObjectType OT A ARCH}
       `{ADR: Address address}
       `{PERM: @Permission P A ARCH} :=
   {
+
+  (* Decidable equality *)
+  cap_eq_dec: forall a b : C, {a = b} + {a <> b};
 
   is_tagged: C -> bool;
   is_sealed: C -> bool;
@@ -148,7 +211,7 @@ Class Capability (C:Type)
      memory region *)
   get_bounds: C -> address_interval;
 
-  get_obj_type: C -> word (otype_nbits);
+  get_obj_type: C -> OT;
   get_perms: C -> P;
   get_cursor: C -> address;
 
@@ -158,15 +221,21 @@ Class Capability (C:Type)
   is_global: C -> bool;
   clear_global: C -> C;
 
-  cap_of_mem_bytes: (Vector.t memory_byte capability_nbyes) -> bool -> option C;
+  (* Try to decode sequence of bytes as a capability *)
+  cap_decode: (Vector.t memory_byte capability_nbyes) -> bool -> option C;
   }.
 
 Section CapabilityProperties.
 
   Context `{ARCH: Arch A}
+          `{OTYPE: @ObjectType OT A ARCH}
           `{ADR: Address address}
           `{PERM: @Permission P A ARCH}
-          `{CAPA: @Capability C A ARCH  address ADR P PERM}.
+          `{CAPA: @Capability C A ARCH OT OTYPE address ADR P PERM}.
+
+
+  (* Set of cap type alias *)
+  Definition cap_set := {l:list C| NoDup l} .
 
   Definition get_mem_region (c:C): address_set
     := addresses_in_interval (get_bounds c).
@@ -179,4 +248,28 @@ Section CapabilityProperties.
          (get_bounds c1) (get_bounds c2)
     then true else false.
 
+  Definition cap_eqb (c1 c2:C) : bool:=
+    if cap_eq_dec c1 c2 then true else false.
+
+  Definition leq_cap (c1 c2:C): bool:=
+    (cap_eqb c1 c2)
+    || (negb (is_tagged c1))
+    || ((is_tagged c2) &&
+       (negb (is_sealed c1) && negb (is_sealed c2)) &&
+       (leq_bounds c1 c2) &&
+       (implb (is_global c1) (is_global c2)) &&
+       (perms_leqb (get_perms c1) (get_perms c2))).
+
+  Definition invokable (cc cd: C): bool:=
+    let pc := get_perms cc in
+    let pd := get_perms cd in
+    is_tagged cc && is_tagged cd &&
+    is_sealed cc && is_sealed cd &&
+    negb (is_sentry cc) && negb (is_sentry cd) &&
+    permits_ccall pc && permits_ccall pd &&
+    ot_eqb (get_obj_type cc) (get_obj_type cd) &&
+    permits_execute pc && negb (permits_execute pd).
+
+  Definition clear_global_unless (g:bool) (c:C): C :=
+    if g then c else clear_global c.
 End CapabilityProperties.
