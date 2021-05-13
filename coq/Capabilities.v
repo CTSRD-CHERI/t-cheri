@@ -57,7 +57,7 @@ Arguments Incl_Interval {V}%type_scope {V_lt}%type_scope.
 Arguments Empty_Interval {V}%type_scope {V_lt}%type_scope.
 
 (* Various architeture-dependent definitions affecting CHERI *)
-Class Arch (A:Type) :=
+Class CArch (A:Type) :=
   {
   (* Number of bits for permissions *)
   perms_nbits: nat ;
@@ -74,7 +74,7 @@ Class Arch (A:Type) :=
   memory_byte:Type;
   }.
 
-Class Address (A:Type) :=
+Class CAddress (A:Type) :=
   {
   (* "less than" *)
   address_lt: relation A;
@@ -87,8 +87,8 @@ Class Address (A:Type) :=
   addresses_in_interval: (Interval address_lt)-> {l:list A| NoDup l} ;
   }.
 
-Section AddressProperties.
-  Context `{ADR: Address A}.
+Section CAddressProperties.
+  Context `{ADR: CAddress A}.
 
   (* address interval. *)
   Definition address_interval := Interval address_lt.
@@ -107,10 +107,10 @@ Section AddressProperties.
   Definition address_le: relation A :=
     fun a b => address_lt a b \/ a = b.
 
-End AddressProperties.
+End CAddressProperties.
 
-Class Permission (P:Type)
-      `{ARCH: Arch A}:=
+Class CPermission (P:Type)
+      `{ARCH: CArch A}:=
   {
   (* Convenience functions to examine some permission bits *)
   permits_execute: P -> Prop;
@@ -129,9 +129,9 @@ Class Permission (P:Type)
   }.
 
 Section PermissinProperties.
-  Context `{ARCH: Arch A}
-          `{ADR: Address address}
-          `{PERM: @Permission P A ARCH}.
+  Context `{ARCH: CArch A}
+          `{ADR: CAddress Address}
+          `{PERM: @CPermission P A ARCH}.
 
   (* Logical comparison ofpermssions based solely on their properties
      expressed in [Permissoin] typeclass interface.  Underlying
@@ -167,8 +167,8 @@ Section PermissinProperties.
 
 End PermissinProperties.
 
-Class ObjectType (OT:Type)
-      `{ARCH: Arch A} :=
+Class CObjectType (OT:Type)
+      `{ARCH: CArch A} :=
   {
   (* Decidable equality *)
   ot_eq_dec: forall a b : OT, {a = b} + {a <> b};
@@ -177,11 +177,11 @@ Class ObjectType (OT:Type)
   ot_encode: OT -> word (otype_nbits);
   }.
 
-Class Capability (C:Type)
-      `{ARCH: Arch A}
-      `{OTYPE: @ObjectType OT A ARCH}
-      `{ADR: Address address}
-      `{PERM: @Permission P A ARCH} :=
+Class CCapability (C:Type)
+      `{ARCH: CArch AR}
+      `{OTYPE: @CObjectType OT AR ARCH}
+      `{ADR: CAddress A}
+      `{PERM: @CPermission P AR ARCH} :=
   {
 
   (* Decidable equality *)
@@ -198,7 +198,7 @@ Class Capability (C:Type)
 
   get_obj_type: C -> OT;
   get_perms: C -> P;
-  get_cursor: C -> address;
+  get_cursor: C -> A;
 
   seal: C -> OT -> C;
   unseal: C -> C;
@@ -210,13 +210,13 @@ Class Capability (C:Type)
   cap_decode: (Vector.t memory_byte capability_nbyes) -> bool -> option C;
   }.
 
-Section CapabilityProperties.
+Section CCapabilityProperties.
 
-  Context `{ARCH: Arch A}
-          `{OTYPE: @ObjectType OT A ARCH}
-          `{ADR: Address address}
-          `{PERM: @Permission P A ARCH}
-          `{CAPA: @Capability C A ARCH OT OTYPE address ADR P PERM}.
+  Context `{ARCH: CArch AR}
+          `{OTYPE: @CObjectType OT AR ARCH}
+          `{ADR: CAddress A}
+          `{PERM: @CPermission P AR ARCH}
+          `{CAPA: @CCapability C AR ARCH OT OTYPE A ADR P PERM}.
 
 
   (* Set of cap type alias *)
@@ -291,4 +291,4 @@ Section CapabilityProperties.
     end.
    *)
 
-End CapabilityProperties.
+End CCapabilityProperties.
