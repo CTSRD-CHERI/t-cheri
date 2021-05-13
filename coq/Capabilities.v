@@ -188,7 +188,6 @@ Class CCapability (C:Type)
   cap_eq_dec: forall a b : C, {a = b} + {a <> b};
 
   is_tagged: C -> Prop;
-  is_sealed: C -> Prop;
   is_sentry: C -> Prop;
   is_indirect_sentry: C -> Prop;
 
@@ -196,7 +195,9 @@ Class CCapability (C:Type)
      memory region *)
   get_bounds: C -> address_interval;
 
-  get_obj_type: C -> OT;
+  (* Return [None] it the capability is "unsealed" and
+     [Some OT] otherwise *)
+  get_obj_type: C -> option OT;
   get_perms: C -> P;
   get_address: C -> A;
 
@@ -205,6 +206,11 @@ Class CCapability (C:Type)
 
   is_global: C -> Prop;
   clear_global: C -> C;
+
+  (* Partial mapping between addresses and object types.
+     TODO: Maybe should be moved elswhwere, like [CArch].
+   *)
+  otype_of_address: A -> option OT;
 
   (* Try to decode sequence of bytes as a capability *)
   cap_decode: (Vector.t memory_byte capability_nbyes) -> bool -> option C;
@@ -224,6 +230,12 @@ Section CCapabilityProperties.
 
   Definition cat_set_in (x:C) (cs:cap_set) : Prop
     := List.In x (proj1_sig cs).
+
+  Definition is_sealed (c:C) : Prop
+    := match get_obj_type c with
+       | None => False
+       | Some _ => True
+       end.
 
   Definition get_mem_region (c:C): address_set
     := addresses_in_interval (get_bounds c).
@@ -257,8 +269,6 @@ Section CCapabilityProperties.
     (g /\ c1 = c2) \/
     (~g /\ clear_global c1 = c2).
 
-
-  (*
   (* Derivation of capabilities, bounded by derivation depth to
      guarantee termination *)
   Fixpoint cap_derivable_bounded (n:nat) (cs:cap_set) (c:C): Prop :=
@@ -278,17 +288,18 @@ Section CCapabilityProperties.
           /\ is_tagged c''
           /\ not (is_sealed c'')
           /\ address_set_in (get_address c'') (get_mem_region c'')
-          /\ ((is_sealed c'
-              /\ permits_unseal (get_perms c'')
-              /\ get_obj_type c' = get_address c''
-              /\ eq_clear_global_unless (is_global c'') (unseal c') c
-             )  \/
-             (~ is_sealed c'
-              /\ permits_seal (get_perms c'')
-              /\ seal c' (get_address c'') = c)
+          /\ (exists ot'',
+                (otype_of_address (get_address c'') = Some ot'') /\
+                ((is_sealed c'
+                  /\ permits_unseal (get_perms c'')
+                  /\ get_obj_type c' = Some ot''
+                  /\ eq_clear_global_unless (is_global c'') (unseal c') c
+                 )  \/
+                 (~ is_sealed c'
+                  /\ permits_seal (get_perms c'')
+                  /\ seal c' ot'' = c))
             )
       )
     end.
-   *)
 
 End CCapabilityProperties.
