@@ -14,7 +14,6 @@ Generalizable All Variables.
 Import ListNotations.
 Open Scope nat_scope.
 Open Scope list_scope.
-Open Scope bool_scope.
 
 Section Interval.
   Variable V:Type.
@@ -97,20 +96,16 @@ Section AddressProperties.
   (* Set of addresses type alias *)
   Definition address_set := {l:list A| NoDup l} .
 
+  (* Set membership predicate *)
+  Definition address_set_in (a:A) (xs:address_set) : Prop
+    := List.In a (proj1_sig xs).
+
   (* Empty address set constant *)
   Definition empty_address_set: address_set := @exist _ _ [] (NoDup_nil _).
 
-  (* boolean versoin of [=] *)
-  Definition address_eqb: A -> A -> bool :=
-    fun a b => if address_eq_dec a b then true else false.
-
-  (* boolean versoin of [address_lt] preficate *)
-  Definition address_ltb: A -> A -> bool :=
-    fun a b => if address_lt_dec a b then true else false.
-
-  (* boolean "less of equal" perdicate on on addresses *)
-  Definition address_leb: A -> A -> bool :=
-    fun a b => address_ltb a b || address_eqb a b.
+  (* "less of equal" relation on on addresses *)
+  Definition address_le: relation A :=
+    fun a b => address_lt a b \/ a = b.
 
 End AddressProperties.
 
@@ -118,16 +113,16 @@ Class Permission (P:Type)
       `{ARCH: Arch A}:=
   {
   (* Convenience functions to examine some permission bits *)
-  permits_execute: P -> bool;
-  permits_ccall: P -> bool;
-  permits_load: P -> bool;
-  permits_load_cap: P -> bool;
-  permits_seal: P -> bool;
-  permits_store: P -> bool;
-  permits_store_cap: P -> bool;
-  permits_store_local_cap: P -> bool;
-  permits_system_access: P -> bool;
-  permits_unseal: P -> bool;
+  permits_execute: P -> Prop;
+  permits_ccall: P -> Prop;
+  permits_load: P -> Prop;
+  permits_load_cap: P -> Prop;
+  permits_seal: P -> Prop;
+  permits_store: P -> Prop;
+  permits_store_cap: P -> Prop;
+  permits_store_local_cap: P -> Prop;
+  permits_system_access: P -> Prop;
+  permits_unseal: P -> Prop;
 
   (* Encode permissions as a bit vector *)
   perms_encode: P -> word (perms_nbits)
@@ -138,37 +133,37 @@ Section PermissinProperties.
           `{ADR: Address address}
           `{PERM: @Permission P A ARCH}.
 
-  (* Logical comparison ofpermssions based solely on their boolean
-     properties expressed in [Permissoin] typeclass interface.
-     Underlying implementation type may have some additional fields
-     not considered here *)
-  Definition perms_eqb (p1 p2: P): bool :=
-    Bool.eqb (permits_execute p1         )  (permits_execute p2) &&
-    Bool.eqb (permits_ccall p1           ) (permits_ccall p2) &&
-    Bool.eqb (permits_load p1            ) (permits_load p2) &&
-    Bool.eqb (permits_load p1            ) (permits_load p2) &&
-    Bool.eqb (permits_seal p1            ) (permits_seal p2) &&
-    Bool.eqb (permits_store p1           ) (permits_store p2) &&
-    Bool.eqb (permits_store_cap p1       ) (permits_store_cap p2) &&
-    Bool.eqb (permits_store_local_cap p1 ) (permits_store_local_cap p2) &&
-    Bool.eqb (permits_system_access p1   ) (permits_system_access p2) &&
-    Bool.eqb (permits_unseal p1          ) (permits_unseal p2).
+  (* Logical comparison ofpermssions based solely on their properties
+     expressed in [Permissoin] typeclass interface.  Underlying
+     implementation type may have some additional fields not
+     considered here *)
+  Definition perms_eq (p1 p2: P): Prop :=
+    (permits_execute p1         ) = (permits_execute p2) /\
+    (permits_ccall p1           ) = (permits_ccall p2) /\
+    (permits_load p1            ) = (permits_load p2) /\
+    (permits_load p1            ) = (permits_load p2) /\
+    (permits_seal p1            ) = (permits_seal p2) /\
+    (permits_store p1           ) = (permits_store p2) /\
+    (permits_store_cap p1       ) = (permits_store_cap p2) /\
+    (permits_store_local_cap p1 ) = (permits_store_local_cap p2) /\
+    (permits_system_access p1   ) = (permits_system_access p2) /\
+    (permits_unseal p1          ) = (permits_unseal p2).
 
   (* Logical "lessn than" comparison of permssions based solely on
-     their boolean properties expressed in [Permissoin] typeclass
+     their properties expressed in [Permissoin] typeclass
      interface.  Underlying implementation type may have some
      additional fields not considered here *)
-  Definition perms_leqb (p1 p2: P): bool :=
-    implb (permits_execute p1         ) (permits_execute p2) &&
-    implb (permits_ccall p1           ) (permits_ccall p2) &&
-    implb (permits_load p1            ) (permits_load p2) &&
-    implb (permits_load p1            ) (permits_load p2) &&
-    implb (permits_seal p1            ) (permits_seal p2) &&
-    implb (permits_store p1           ) (permits_store p2) &&
-    implb (permits_store_cap p1       ) (permits_store_cap p2) &&
-    implb (permits_store_local_cap p1 ) (permits_store_local_cap p2) &&
-    implb (permits_system_access p1   ) (permits_system_access p2) &&
-    implb (permits_unseal p1          ) (permits_unseal p2).
+  Definition perms_leq (p1 p2: P): Prop :=
+    ((permits_execute p1         ) -> (permits_execute p2)) /\
+    ((permits_ccall p1           ) -> (permits_ccall p2)) /\
+    ((permits_load p1            ) -> (permits_load p2)) /\
+    ((permits_load p1            ) -> (permits_load p2)) /\
+    ((permits_seal p1            ) -> (permits_seal p2)) /\
+    ((permits_store p1           ) -> (permits_store p2)) /\
+    ((permits_store_cap p1       ) -> (permits_store_cap p2)) /\
+    ((permits_store_local_cap p1 ) -> (permits_store_local_cap p2)) /\
+    ((permits_system_access p1   ) -> (permits_system_access p2)) /\
+    ((permits_unseal p1          ) -> (permits_unseal p2)).
 
 End PermissinProperties.
 
@@ -182,16 +177,6 @@ Class ObjectType (OT:Type)
   ot_encode: OT -> word (otype_nbits);
   }.
 
-Section ObjectTypeProperties.
-  Context `{ARCH: Arch A}
-          `{OTYPE: @ObjectType OT A ARCH}.
-
-  (* boolean versoin of [=] *)
-  Definition ot_eqb: OT -> OT -> bool :=
-    fun a b => if ot_eq_dec a b then true else false.
-
-End ObjectTypeProperties.
-
 Class Capability (C:Type)
       `{ARCH: Arch A}
       `{OTYPE: @ObjectType OT A ARCH}
@@ -202,10 +187,10 @@ Class Capability (C:Type)
   (* Decidable equality *)
   cap_eq_dec: forall a b : C, {a = b} + {a <> b};
 
-  is_tagged: C -> bool;
-  is_sealed: C -> bool;
-  is_sentry: C -> bool;
-  is_indirect_sentry: C -> bool;
+  is_tagged: C -> Prop;
+  is_sealed: C -> Prop;
+  is_sentry: C -> Prop;
+  is_indirect_sentry: C -> Prop;
 
   (* Returns either inclusive bounds for covered
      memory region *)
@@ -215,10 +200,10 @@ Class Capability (C:Type)
   get_perms: C -> P;
   get_cursor: C -> address;
 
-  seal: C -> word (otype_nbits) -> C;
+  seal: C -> OT -> C;
   unseal: C -> C;
 
-  is_global: C -> bool;
+  is_global: C -> Prop;
   clear_global: C -> C;
 
   (* Try to decode sequence of bytes as a capability *)
@@ -237,39 +222,73 @@ Section CapabilityProperties.
   (* Set of cap type alias *)
   Definition cap_set := {l:list C| NoDup l} .
 
+  Definition cat_set_in (x:C) (cs:cap_set) : Prop
+    := List.In x (proj1_sig cs).
+
   Definition get_mem_region (c:C): address_set
     := addresses_in_interval (get_bounds c).
 
-  Definition leq_bounds (c1 c2:C): bool :=
-    if interval_leq_dec
-         address_lt_irref
-         address_eq_dec
-         address_lt_dec
-         (get_bounds c1) (get_bounds c2)
-    then true else false.
+  (* "<=" relation on bounds *)
+  Definition leq_bounds: relation C :=
+    fun c1 c2 => interval_leq (get_bounds c1) (get_bounds c2).
 
-  Definition cap_eqb (c1 c2:C) : bool:=
-    if cap_eq_dec c1 c2 then true else false.
+  (* "<=" relation on Capabilities *)
+  Definition leq_cap: relation C :=
+    fun c1 c2 =>
+      c1 = c2
+      \/ (~ is_tagged c1)
+      \/ (is_tagged c2 /\
+         (~ is_sealed c1 /\ ~ is_sealed c2) /\
+         (leq_bounds c1 c2) /\
+         (is_global c1 -> is_global c2) /\
+         (perms_leq (get_perms c1) (get_perms c2))).
 
-  Definition leq_cap (c1 c2:C): bool:=
-    (cap_eqb c1 c2)
-    || (negb (is_tagged c1))
-    || ((is_tagged c2) &&
-       (negb (is_sealed c1) && negb (is_sealed c2)) &&
-       (leq_bounds c1 c2) &&
-       (implb (is_global c1) (is_global c2)) &&
-       (perms_leqb (get_perms c1) (get_perms c2))).
-
-  Definition invokable (cc cd: C): bool:=
+  Definition invokable (cc cd: C): Prop:=
     let pc := get_perms cc in
     let pd := get_perms cd in
-    is_tagged cc && is_tagged cd &&
-    is_sealed cc && is_sealed cd &&
-    negb (is_sentry cc) && negb (is_sentry cd) &&
-    permits_ccall pc && permits_ccall pd &&
-    ot_eqb (get_obj_type cc) (get_obj_type cd) &&
-    permits_execute pc && negb (permits_execute pd).
+    is_tagged cc /\ is_tagged cd /\
+    is_sealed cc /\ is_sealed cd /\
+    ~ is_sentry cc /\ ~ is_sentry cd /\
+    permits_ccall pc /\ permits_ccall pd /\
+    get_obj_type cc = get_obj_type cd /\
+    permits_execute pc /\ ~ permits_execute pd.
 
-  Definition clear_global_unless (g:bool) (c:C): C :=
-    if g then c else clear_global c.
+  Definition eq_clear_global_unless (g:Prop) (c1 c2:C): Prop:=
+    (g /\ c1 = c2) \/
+    (~g /\ clear_global c1 = c2).
+
+
+  (*
+  (* Derivation of capabilities, bounded by derivation depth to
+     guarantee termination *)
+  Fixpoint cap_derivable_bounded (n:nat) (cs:cap_set) (c:C): Prop :=
+    match n with
+    | O => cat_set_in c cs
+    | S n =>
+      (exists c', cap_derivable_bounded n cs c' /\ leq_cap c c') \/
+      (exists c' otype, cap_derivable_bounded n cs c'
+                   /\ is_tagged c'
+                   /\ ~ is_sealed c'
+                   /\ seal c' otype = c
+                   /\ (is_sentry c \/ is_indirect_sentry c)) \/
+      (exists c' c'',
+          cap_derivable_bounded n cs c'
+          /\ cap_derivable_bounded n cs c''
+          /\ is_tagged c'
+          /\ is_tagged c''
+          /\ not (is_sealed c'')
+          /\ address_set_in (get_cursor c'') (get_mem_region c'')
+          /\ ((is_sealed c'
+              /\ permits_unseal (get_perms c'')
+              /\ get_obj_type c' = get_cursor c''
+              /\ eq_clear_global_unless (is_global c'') (unseal c') c
+             )  \/
+             (~ is_sealed c'
+              /\ permits_seal (get_perms c'')
+              /\ seal c' (get_cursor c'') = c)
+            )
+      )
+    end.
+   *)
+
 End CapabilityProperties.
