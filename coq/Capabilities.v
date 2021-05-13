@@ -198,7 +198,7 @@ Class CCapability (C:Type)
 
   get_obj_type: C -> OT;
   get_perms: C -> P;
-  get_cursor: C -> A;
+  get_address: C -> A;
 
   seal: C -> OT -> C;
   unseal: C -> C;
@@ -277,15 +277,15 @@ Section CCapabilityProperties.
           /\ is_tagged c'
           /\ is_tagged c''
           /\ not (is_sealed c'')
-          /\ address_set_in (get_cursor c'') (get_mem_region c'')
+          /\ address_set_in (get_address c'') (get_mem_region c'')
           /\ ((is_sealed c'
               /\ permits_unseal (get_perms c'')
-              /\ get_obj_type c' = get_cursor c''
+              /\ get_obj_type c' = get_address c''
               /\ eq_clear_global_unless (is_global c'') (unseal c') c
              )  \/
              (~ is_sealed c'
               /\ permits_seal (get_perms c'')
-              /\ seal c' (get_cursor c'') = c)
+              /\ seal c' (get_address c'') = c)
             )
       )
     end.
