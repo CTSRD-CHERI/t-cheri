@@ -59,17 +59,6 @@ Arguments Empty_Interval {V}%type_scope {V_lt}%type_scope.
 (* Various architeture-dependent definitions affecting CHERI *)
 Class CArch (A:Type) :=
   {
-  (* Number of bits for permissions *)
-  perms_nbits: nat ;
-
-  (* Number of bits describing object type.
-     TODO: maybe use max value instead?
-   *)
-  otype_nbits: nat;
-
-  (* Size of capability encoding in bytes *)
-  capability_nbyes: nat;
-
   (* Type to describe memory byte *)
   memory_byte:Type;
   }.
@@ -124,7 +113,12 @@ Class CPermission (P:Type)
   permits_system_access: P -> Prop;
   permits_unseal: P -> Prop;
 
-  (* Encode permissions as a bit vector *)
+  (* --- Encoding permissions as a bit vector --- *)
+
+  (* Number of bits *)
+  perms_nbits: nat ;
+
+  (* Encoding function *)
   perms_encode: P -> word (perms_nbits)
   }.
 
@@ -172,6 +166,11 @@ Class CObjectType (OT:Type)
   {
   (* Decidable equality *)
   ot_eq_dec: forall a b : OT, {a = b} + {a <> b};
+
+  (* --- Encoding object types as bit vectors --- *)
+
+  (* Number of bits describing object type. *)
+  otype_nbits: nat;
 
   (* encode object type as bit vector *)
   ot_encode: OT -> word (otype_nbits);
@@ -226,8 +225,12 @@ Section CapabilityDefinition.
      *)
     otype_of_address: A -> option OT;
 
+    (* --- Capability encoding in memory --- *)
+
+    (* Size of capability encoding in byttes *)
+    capability_nbytes: nat;
     (* Try to decode sequence of bytes as a capability *)
-    cap_decode: (Vector.t memory_byte capability_nbyes) -> bool -> option C;
+    cap_decode: (Vector.t memory_byte capability_nbytes) -> bool -> option C;
     }.
 
 End CapabilityDefinition.
