@@ -295,6 +295,8 @@ Section CCapabilityProperties.
          /\ (is_global c1 -> is_global c2)
          /\ perms_leq (get_perms c1) (get_perms c2)).
 
+  Local Notation "x <= y" := (cap_leq x y).
+
   Definition invokable (cc cd: C): Prop:=
     let pc := get_perms cc in
     let pd := get_perms cd in
