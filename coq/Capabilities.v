@@ -177,44 +177,60 @@ Class CObjectType (OT:Type)
   ot_encode: OT -> word (otype_nbits);
   }.
 
-Class CCapability (C:Type)
-      `{ARCH: CArch AR}
-      `{OTYPE: @CObjectType OT AR ARCH}
-      `{ADR: CAddress A}
-      `{PERM: @CPermission P AR ARCH} :=
-  {
 
-  (* Decidable equality *)
-  cap_eq_dec: forall a b : C, {a = b} + {a <> b};
+Section CapabilityDefinition.
+  Context `{ARCH: CArch AR}
+          `{OTYPE: @CObjectType OT AR ARCH}
+          `{ADR: CAddress A}
+          `{PERM: @CPermission P AR ARCH}.
 
-  is_tagged: C -> Prop;
-  is_sentry: C -> Prop;
-  is_indirect_sentry: C -> Prop;
+  (* Various types of seals supported *)
+  Variant CapSealType :=
+  | Cap_Seal
+  | Cap_SEntry
+  | Cap_Indirect_SEntry.
 
-  (* Returns either inclusive bounds for covered
+  Variant CapSeal :=
+  | Cap_Unsealed
+  | Cap_Sealed (sealtype:CapSealType) (otype:OT).
+
+  Class CCapability (C:Type) :=
+    {
+
+    (* Decidable equality *)
+    cap_eq_dec: forall a b : C, {a = b} + {a <> b};
+
+    (* TODO: "is_valid" is perhaps more friendly name ? *)
+    is_tagged: C -> Prop;
+
+    (* Returns either inclusive bounds for covered
      memory region *)
-  get_bounds: C -> address_interval;
+    get_bounds: C -> address_interval;
 
-  (* Return [None] it the capability is "unsealed" and
-     [Some OT] otherwise *)
-  get_obj_type: C -> option OT;
-  get_perms: C -> P;
-  get_address: C -> A;
+    get_perms: C -> P;
+    get_address: C -> A;
 
-  seal: C -> OT -> C;
-  unseal: C -> C;
+    (* Get informaiton about "seal" on this capability *)
+    get_seal: C -> CapSeal;
 
-  is_global: C -> Prop;
-  clear_global: C -> C;
+    (* TODO: these are for setting "simple" sealing.
+       Do we need similar for sentry and indirect sentry ? *)
+    seal: C -> OT -> C;
+    unseal: C -> C;
 
-  (* Partial mapping between addresses and object types.
+    is_global: C -> Prop;
+    clear_global: C -> C;
+
+    (* Partial mapping between addresses and object types.
      TODO: Maybe should be moved elswhwere, like [CArch].
-   *)
-  otype_of_address: A -> option OT;
+     *)
+    otype_of_address: A -> option OT;
 
-  (* Try to decode sequence of bytes as a capability *)
-  cap_decode: (Vector.t memory_byte capability_nbyes) -> bool -> option C;
-  }.
+    (* Try to decode sequence of bytes as a capability *)
+    cap_decode: (Vector.t memory_byte capability_nbyes) -> bool -> option C;
+    }.
+
+End CapabilityDefinition.
 
 Section CCapabilityProperties.
 
@@ -222,8 +238,35 @@ Section CCapabilityProperties.
           `{OTYPE: @CObjectType OT AR ARCH}
           `{ADR: CAddress A}
           `{PERM: @CPermission P AR ARCH}
-          `{CAPA: @CCapability C AR ARCH OT OTYPE A ADR P PERM}.
+          `{CAPA: @CCapability AR ARCH OT A ADR P C}.
 
+  (* Helper function to check if capability is sealed (with any kind of seal *)
+  Definition is_sealed (c:C) : Prop
+    := match get_seal c with
+       | Cap_Sealed _ _ => True
+       | _ => False
+       end.
+
+  (* Helper function to check if sealed entry capability *)
+  Definition is_sentry (c:C) : Prop
+    := match get_seal c with
+       | Cap_Sealed Cap_SEntry _ => True
+       | _ => False
+       end.
+
+  (* Helper function to check if indirect entry capability *)
+  Definition is_indirect_sentry (c:C) : Prop
+    := match get_seal c with
+       | Cap_Sealed Cap_Indirect_SEntry _ => True
+       | _ => False
+       end.
+    (* Return [None] it the capability is "unsealed" and
+     [Some OT] otherwise *)
+  Definition get_obj_type (c:C): option OT
+    := match get_seal c with
+       | Cap_Sealed _ otype => Some otype
+       | _ => None
+       end.
 
   (* Set of cap type alias *)
   Definition cap_set := {l:list C| NoDup l} .
@@ -231,29 +274,23 @@ Section CCapabilityProperties.
   Definition cat_set_in (x:C) (cs:cap_set) : Prop
     := List.In x (proj1_sig cs).
 
-  Definition is_sealed (c:C) : Prop
-    := match get_obj_type c with
-       | None => False
-       | Some _ => True
-       end.
-
   Definition get_mem_region (c:C): address_set
     := addresses_in_interval (get_bounds c).
 
   (* "<=" relation on bounds *)
-  Definition leq_bounds: relation C :=
+  Definition bounds_leq: relation C :=
     fun c1 c2 => interval_leq (get_bounds c1) (get_bounds c2).
 
   (* "<=" relation on Capabilities *)
-  Definition leq_cap: relation C :=
+  Definition cap_leq: relation C :=
     fun c1 c2 =>
       c1 = c2
-      \/ (~ is_tagged c1)
-      \/ (is_tagged c2 /\
-         (~ is_sealed c1 /\ ~ is_sealed c2) /\
-         (leq_bounds c1 c2) /\
-         (is_global c1 -> is_global c2) /\
-         (perms_leq (get_perms c1) (get_perms c2))).
+      \/ ~ is_tagged c1
+      \/ (is_tagged c2
+         /\ ~ is_sealed c1 /\ ~ is_sealed c2
+         /\ bounds_leq c1 c2
+         /\ (is_global c1 -> is_global c2)
+         /\ perms_leq (get_perms c1) (get_perms c2)).
 
   Definition invokable (cc cd: C): Prop:=
     let pc := get_perms cc in
@@ -275,31 +312,28 @@ Section CCapabilityProperties.
     match n with
     | O => cat_set_in c cs
     | S n =>
-      (exists c', cap_derivable_bounded n cs c' /\ leq_cap c c') \/
-      (exists c' otype, cap_derivable_bounded n cs c'
-                   /\ is_tagged c'
-                   /\ ~ is_sealed c'
-                   /\ seal c' otype = c
-                   /\ (is_sentry c \/ is_indirect_sentry c)) \/
-      (exists c' c'',
-          cap_derivable_bounded n cs c'
-          /\ cap_derivable_bounded n cs c''
-          /\ is_tagged c'
-          /\ is_tagged c''
-          /\ not (is_sealed c'')
-          /\ address_set_in (get_address c'') (get_mem_region c'')
-          /\ (exists ot'',
-                (otype_of_address (get_address c'') = Some ot'') /\
-                ((is_sealed c'
-                  /\ permits_unseal (get_perms c'')
-                  /\ get_obj_type c' = Some ot''
-                  /\ eq_clear_global_unless (is_global c'') (unseal c') c
-                 )  \/
-                 (~ is_sealed c'
-                  /\ permits_seal (get_perms c'')
-                  /\ seal c' ot'' = c))
-            )
-      )
+      (exists c', cap_derivable_bounded n cs c' /\ cap_leq c c')
+      \/ (exists c' otype, cap_derivable_bounded n cs c'
+                     /\ is_tagged c'
+                     /\ ~ is_sealed c'
+                     /\ seal c' otype = c
+                     /\ (is_sentry c \/ is_indirect_sentry c))
+      \/ (exists c' c'',
+            cap_derivable_bounded n cs c'
+            /\ cap_derivable_bounded n cs c''
+            /\ is_tagged c'
+            /\ is_tagged c''
+            /\ ~ is_sealed c''
+            /\ address_set_in (get_address c'') (get_mem_region c'')
+            /\ (exists ot'',
+                  (otype_of_address (get_address c'') = Some ot'')
+                  /\ ((is_sealed c'
+                      /\ permits_unseal (get_perms c'')
+                      /\ get_obj_type c' = Some ot''
+                      /\ eq_clear_global_unless (is_global c'') (unseal c') c)
+                     \/ (~ is_sealed c'
+                        /\ permits_seal (get_perms c'')
+                        /\ seal c' ot'' = c))))
     end.
 
 End CCapabilityProperties.
