@@ -601,7 +601,7 @@ lemma non_cap_exp_throw[non_cap_expI]:
   "non_cap_exp (throw e)"
   by (auto simp: non_cap_exp_def)
 
-lemma non_cap_exp_early_return[non_cap_expI]:
+lemma non_cap_exp_early_return[intro!]:
   "non_cap_exp (early_return a)"
   by (auto simp: early_return_def intro!: non_cap_expI)
 
@@ -620,6 +620,10 @@ lemma non_cap_exp_liftR[intro!]:
 lemma non_mem_exp_liftR:
   "non_mem_exp (liftR m)" if "non_mem_exp m"
   by (auto simp: liftR_def intro!: that non_mem_exp_try_catch non_cap_expI[THEN non_cap_exp_non_mem_exp])
+
+lemma non_mem_exp_early_return[intro!]:
+  "non_mem_exp (early_return a)"
+  by (auto simp: early_return_def intro!: non_cap_expI[THEN non_cap_exp_non_mem_exp])
 
 lemma non_cap_exp_assert_exp[non_cap_expI]:
   "non_cap_exp (assert_exp c msg)"
@@ -794,7 +798,8 @@ lemmas non_cap_exp_combinators =
 
 method non_cap_expI_base uses intro =
   (rule intro non_cap_expI non_cap_exp_split[THEN iffD2] non_cap_exp_combinators
-        non_cap_exp_read_non_cap_reg non_cap_exp_write_non_cap_reg allI impI conjI)+
+        non_cap_exp_read_non_cap_reg non_cap_exp_write_non_cap_reg non_cap_exp_early_return
+        allI impI conjI)+
 
 method non_cap_expI uses simp intro = (non_cap_expI_base intro: intro; simp add: simp)
 
@@ -813,7 +818,7 @@ lemmas non_mem_exp_combinators =
 
 method non_mem_expI uses simp intro =
   (intro intro non_mem_expI non_mem_exp_split[THEN iffD2] non_mem_exp_combinators
-         non_cap_expI[THEN non_cap_exp_non_mem_exp] allI impI conjI;
+         non_cap_expI[THEN non_cap_exp_non_mem_exp] non_mem_exp_early_return allI impI conjI;
    simp add: simp)
 
 lemma Run_write_reg_no_cap[trace_simp]:
@@ -1360,10 +1365,14 @@ locale Cap_Axiom_Assm_Automaton =
     and enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool"
     and use_mem_caps :: bool +
   fixes ex_traces :: bool
+    and is_isa_exception :: "'e \<Rightarrow> bool"
     and ev_assms :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool"
+    and wellformed_ev :: "'regval event \<Rightarrow> bool"
   assumes non_cap_event_enabled: "\<And>e. non_cap_event e \<Longrightarrow> enabled s e"
     and read_non_special_regs_enabled: "\<And>r v. r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> read_privileged_regs ISA \<Longrightarrow> enabled s (E_read_reg r v)"
 begin
+
+abbreviation "wellformed_trace t \<equiv> \<forall>e \<in> set t. wellformed_ev e"
 
 abbreviation "trace_assms \<equiv> holds_along_trace ev_assms"
 
@@ -1374,11 +1383,14 @@ definition accessed_caps_invariant :: "('cap, 'regval) axiom_state \<Rightarrow>
 definition accessed_caps_trace_invariant :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event list \<Rightarrow> bool" where
   "accessed_caps_trace_invariant s t \<equiv> (\<forall>i \<le> length t. accessed_caps_invariant (run s (take i t)))"
 
-definition pre_inv_trace_assms :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event list \<Rightarrow> bool" where
-  "pre_inv_trace_assms s t \<equiv> accessed_caps_trace_invariant s (butlast t) \<and> trace_assms s t"
+fun pre_inv_trace_assms :: "('cap, 'regval) axiom_state \<Rightarrow> nat \<Rightarrow> 'regval event list \<Rightarrow> bool" where
+  "pre_inv_trace_assms s (Suc n) (e # t) =
+     (accessed_caps_invariant s \<and> ev_assms s e \<and> wellformed_ev e \<and> pre_inv_trace_assms (axiom_step s e) n t)"
+| "pre_inv_trace_assms _ 0 t = wellformed_trace t"
+| "pre_inv_trace_assms _ _ _ = False"
 
 definition inv_trace_assms :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event list \<Rightarrow> bool" where
-  "inv_trace_assms s t \<equiv> accessed_caps_trace_invariant s t \<and> trace_assms s t"
+  "inv_trace_assms s t \<equiv> accessed_caps_trace_invariant s t \<and> trace_assms s t \<and> wellformed_trace t"
 
 lemma inv_trace_assms_trace_assms[simp, accessible_regsE, derivable_capsE]:
   assumes "inv_trace_assms s t"
@@ -1408,49 +1420,86 @@ lemma accessed_caps_trace_invariant_append_iff:
   "accessed_caps_trace_invariant s (t @ t') \<longleftrightarrow> accessed_caps_trace_invariant s t \<and> accessed_caps_trace_invariant (run s t) t'"
   by (induction t arbitrary: s) auto
 
-lemma pre_inv_trace_assms_Nil[simp]:
-  "pre_inv_trace_assms s [] \<longleftrightarrow> accessed_caps_invariant s"
-  by (auto simp: pre_inv_trace_assms_def accessed_caps_trace_invariant_def)
+lemma pre_inv_trace_assms_iff:
+  "pre_inv_trace_assms s n t \<longleftrightarrow>
+   (n \<le> length t \<and> (n > 0 \<longrightarrow> accessed_caps_trace_invariant s (take (n - 1) t)) \<and>
+    trace_assms s (take n t) \<and> wellformed_trace t)"
+  by (induction s n t rule: pre_inv_trace_assms.induct) (auto simp: take_Cons split: nat.split)
 
-lemma pre_inv_trace_assms_Cons:
-  "pre_inv_trace_assms s (e # t) \<longleftrightarrow>
-   accessed_caps_invariant s \<and> ev_assms s e \<and> (t = [] \<or> pre_inv_trace_assms (axiom_step s e) t)"
-  by (auto simp: pre_inv_trace_assms_def)
+lemma pre_inv_trace_assms_Nil[simp]:
+  "pre_inv_trace_assms s n [] \<longleftrightarrow> n = 0"
+  by (induction s n "[] :: 'regval trace" rule: pre_inv_trace_assms.induct) auto
+
+lemma pre_inv_trace_assms_accessed_caps_invariant_or_zero:
+  "pre_inv_trace_assms s n t \<Longrightarrow> n = 0 \<or> accessed_caps_invariant s"
+  by (elim pre_inv_trace_assms.elims) auto
+
+lemma pre_inv_trace_assms_accessed_caps_invariant:
+  "pre_inv_trace_assms s n t \<Longrightarrow> n > 0 \<Longrightarrow> accessed_caps_invariant s"
+  by (auto dest: pre_inv_trace_assms_accessed_caps_invariant_or_zero)
 
 lemma pre_inv_trace_assms_append_iff:
-  "pre_inv_trace_assms s (t @ t') \<longleftrightarrow>
-   pre_inv_trace_assms s t \<and> (t' = [] \<or> pre_inv_trace_assms (run s t) t' \<and> accessed_caps_invariant (run s t))"
-  by (induction t arbitrary: s; cases t'; fastforce simp: pre_inv_trace_assms_Cons)
+  "pre_inv_trace_assms s n (t @ t') \<longleftrightarrow>
+   (pre_inv_trace_assms s (min n (length t)) t \<and> pre_inv_trace_assms (run s t) (n - length t) t' \<and>
+    (n > length t \<longrightarrow> accessed_caps_invariant (run s t)))"
+  by (induction s n t rule: pre_inv_trace_assms.induct)
+     (auto intro: pre_inv_trace_assms_accessed_caps_invariant)
+
+lemma pre_inv_trace_assms_wellformed_trace:
+  "pre_inv_trace_assms s n t \<Longrightarrow> wellformed_trace t"
+  by (induction s n t rule: pre_inv_trace_assms.induct) auto
 
 lemma inv_trace_assms_Nil[simp]:
   "inv_trace_assms s [] \<longleftrightarrow> accessed_caps_invariant s"
   by (auto simp: inv_trace_assms_def)
 
-lemma inv_trace_assms_iff:
-  "inv_trace_assms s t \<longleftrightarrow> pre_inv_trace_assms s t \<and> accessed_caps_invariant (run s t)"
-  unfolding inv_trace_assms_def pre_inv_trace_assms_def
-  by (cases t rule: rev_exhaust) (auto simp: accessed_caps_trace_invariant_append_iff)
+lemma inv_trace_assms_Cons[simp]:
+  "inv_trace_assms s (e # t) \<longleftrightarrow>
+   accessed_caps_invariant s \<and> ev_assms s e \<and> wellformed_ev e \<and> inv_trace_assms (axiom_step s e) t"
+  by (auto simp: inv_trace_assms_def)
+
+lemma inv_trace_assms_take_iff_pre_inv_trace_assms:
+  assumes "n \<le> length t" and "wellformed_trace (drop n t)"
+  shows "inv_trace_assms s (take n t) \<longleftrightarrow> pre_inv_trace_assms s n t \<and> accessed_caps_invariant (run s (take n t))"
+  using assms
+  by (induction s n t rule: pre_inv_trace_assms.induct) auto
+
+lemmas inv_trace_assms_iff_pre_inv_trace_assms =
+  inv_trace_assms_take_iff_pre_inv_trace_assms[where n = "length t" and t = t for t, simplified]
 
 lemma inv_trace_assms_append_iff[simp]:
   "inv_trace_assms s (t @ t') \<longleftrightarrow> inv_trace_assms s t \<and> inv_trace_assms (run s t) t'"
-  by (auto simp: inv_trace_assms_iff pre_inv_trace_assms_append_iff)
+  by (auto simp: inv_trace_assms_def accessed_caps_trace_invariant_append_iff)
 
 lemma pre_inv_trace_assms_append_cases:
-  assumes "pre_inv_trace_assms s (t @ t')"
-  obtains (Left) "pre_inv_trace_assms s t" and "t' = []"
-  | (Bind) "inv_trace_assms s t" and "pre_inv_trace_assms (run s t) t'"
+  assumes "pre_inv_trace_assms s n (t @ t')"
+  obtains (Left) "pre_inv_trace_assms s n t" and "n \<le> length t"
+  | (Bind) "inv_trace_assms s t" and "pre_inv_trace_assms (run s t) (n - length t) t'" and "n > length t"
   using assms
-  by (cases t')
-     (auto simp: pre_inv_trace_assms_append_iff pre_inv_trace_assms_Cons inv_trace_assms_iff)
+  by (auto simp: pre_inv_trace_assms_append_iff inv_trace_assms_iff_pre_inv_trace_assms min_def split: if_splits)
+
+lemma available_caps_invariant_Zero[simp]:
+  "available_caps_invariant use_mem_caps t 0 \<longleftrightarrow> True"
+  by (auto simp: available_caps_invariant_def)
+
+lemma available_caps_invariant_Suc[simp]:
+  "available_caps_invariant use_mem_caps t (Suc n) \<longleftrightarrow>
+   available_caps_invariant use_mem_caps t n \<and> accessed_caps_invariant (run initial (take n t))"
+  by (auto simp: available_caps_invariant_def accessed_caps_invariant_def less_Suc_eq)
+
+lemma available_caps_invariant_iff_accessed_caps_trace_invariant:
+  "available_caps_invariant use_mem_caps t n \<longleftrightarrow> (n > 0 \<longrightarrow> accessed_caps_trace_invariant initial (take (n - 1) t))"
+  by (induction n)
+     (auto simp: accessed_caps_trace_invariant_def min_absorb1 dest: le_eq_less_or_eq[THEN iffD1])
 
 lemma pre_inv_trace_assms_initialI:
   assumes "available_caps_invariant use_mem_caps t n" and "trace_assms initial (take n t)"
+    and "wellformed_trace t"
     and "n \<le> length t"
     and "n = 0 \<longrightarrow> (\<forall>c \<in> initial_caps. is_tagged_method CC c \<longrightarrow> cap_invariant c)"
-  shows "pre_inv_trace_assms initial (take n t)"
-    using assms
-    unfolding available_caps_invariant_def pre_inv_trace_assms_def accessed_caps_trace_invariant_def accessed_caps_invariant_def
-    by (cases n) (auto simp: min_absorb1 butlast_take less_Suc_eq_le accessed_caps_def)
+  shows "pre_inv_trace_assms initial n t"
+  using assms
+  by (auto simp: pre_inv_trace_assms_iff available_caps_invariant_iff_accessed_caps_trace_invariant)
 
 lemma accessed_caps_trace_invariant_take:
   assumes "accessed_caps_trace_invariant s t"
@@ -1458,28 +1507,22 @@ lemma accessed_caps_trace_invariant_take:
   using assms
   by (auto simp: accessed_caps_trace_invariant_def)
 
-lemma pre_inv_trace_assms_accessed_caps_invariant:
-  assumes "pre_inv_trace_assms s t"
-  shows "accessed_caps_invariant s"
-  using assms
-  unfolding pre_inv_trace_assms_def accessed_caps_trace_invariant_def
-  by (elim conjE allE[where x = 0]) auto
-
 lemma inv_trace_assms_accessed_caps_invariant:
   assumes "inv_trace_assms s t"
   shows "accessed_caps_invariant s" and "accessed_caps_invariant (run s t)"
   using assms
-  by (auto simp: inv_trace_assms_iff intro: pre_inv_trace_assms_accessed_caps_invariant)
+  by (cases t; auto simp: inv_trace_assms_iff_pre_inv_trace_assms intro: pre_inv_trace_assms_accessed_caps_invariant)+
 
-definition "isException m \<equiv> ((\<exists>e. m = Exception e) \<or> (\<exists>msg. m = Fail msg)) \<and> ex_traces"
+definition "finished_exception m \<equiv> (\<exists>e. m = Exception e \<and> (is_isa_exception e \<longrightarrow> ex_traces))"
 
-definition finished :: "('regval,'a,'ex) monad \<Rightarrow> bool" where
-  "finished m = ((\<exists>a. m = Done a) \<or> isException m)"
+definition finished :: "('regval,'a,'e) monad \<Rightarrow> bool" where
+  "finished m = ((\<exists>a. m = Done a) \<or> (\<exists>msg. m = Fail msg) \<or> finished_exception m)"
 
 lemma finishedE:
   assumes "finished m"
   obtains (Done) a where "m = Done a"
-  | (Ex) "isException m"
+  | (Fail) msg where "m = Fail msg"
+  | (Ex) "finished_exception m"
   using assms
   by (auto simp: finished_def)
 
@@ -1487,62 +1530,62 @@ lemma finished_cases:
   assumes "finished m"
   obtains (Done) a where "m = Done a" | (Fail) msg where "m = Fail msg" | (Ex) e where "m = Exception e"
   using assms
-  by (auto simp: finished_def isException_def)
+  by (auto simp: finished_def finished_exception_def)
 
 lemma finished_Done[intro, simp]:
   "finished (Done a)"
   by (auto simp: finished_def)
 
 lemma finished_Fail[intro, simp]:
-  "finished (Fail msg) \<Longrightarrow> finished (Fail msg')"
-  unfolding finished_def isException_def
+  "finished (Fail msg')"
+  unfolding finished_def
   by auto
 
-lemma finished_Exception[intro, simp]:
-  "finished (Exception e) \<Longrightarrow> finished (Exception e')"
-  unfolding finished_def isException_def
-  by auto
-
-lemma finished_isException[intro, simp]:
-  "isException m \<Longrightarrow> finished m"
+lemma finished_exception_finished[intro, simp]:
+  "finished_exception m \<Longrightarrow> finished m"
   by (auto simp: finished_def)
 
 lemma finished_bind_left:
   assumes "finished (m \<bind> f)"
   shows "finished m"
   using assms
-  unfolding finished_def isException_def
+  unfolding finished_def finished_exception_def
   by (cases m) auto
 
 definition
   "traces_enabled m s \<equiv>
      (\<forall>t m'. (m, t, m') \<in> Traces \<and> finished m' \<longrightarrow>
-      (\<forall>n \<le> length t. pre_inv_trace_assms s (take n t) \<longrightarrow> trace_enabled s (take n t)))"
+      (\<forall>n \<le> length t. pre_inv_trace_assms s n t \<longrightarrow> trace_enabled s (take n t)))"
+
+definition "trace_raises_isa_exception t m \<equiv> (\<exists>e. runTrace t m = Some (Exception e) \<and> is_isa_exception e)"
 
 lemma traces_enabled_accepts_from_takeI:
-  assumes "hasTrace t m" and "traces_enabled m s" and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
-    and "pre_inv_trace_assms s (take n t)" and "n \<le> length t"
+  assumes "hasTrace t m" and "traces_enabled m s"
+    and "trace_raises_isa_exception t m \<longrightarrow> ex_traces"
+    and "pre_inv_trace_assms s n t" and "n \<le> length t"
   shows "accepts_from s (take n t)"
   using assms
-  unfolding traces_enabled_def finished_def isException_def
-  unfolding hasTrace_iff_Traces_final hasException_iff_Traces_Exception hasFailure_iff_Traces_Fail
+  unfolding traces_enabled_def finished_def finished_exception_def
+  unfolding hasTrace_iff_Traces_final trace_raises_isa_exception_def
   unfolding runTrace_iff_Traces[symmetric]
   by (intro trace_enabled_acceptI) (auto elim!: final_cases)
 
 lemma traces_enabled_accepts_fromI:
-  assumes "hasTrace t m" and "traces_enabled m s" and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
-    and "pre_inv_trace_assms s t"
+  assumes "hasTrace t m" and "traces_enabled m s"
+    and "trace_raises_isa_exception t m \<longrightarrow> ex_traces"
+    and "pre_inv_trace_assms s (length t) t"
   shows "accepts_from s t"
   using assms traces_enabled_accepts_from_takeI[OF assms(1-3), where n = "length t"]
   by auto
 
 lemma traces_enabled_acceptsI:
-  assumes "hasTrace t m" and "traces_enabled m initial" and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
+  assumes "hasTrace t m" and "traces_enabled m initial"
+    and "trace_raises_isa_exception t m \<longrightarrow> ex_traces"
     and "available_caps_invariant use_mem_caps t n" and "trace_assms initial (take n t)" and "n \<le> length t"
+    and "wellformed_trace t"
   shows "accepts (take n t)"
   using assms
-  by (cases n)
-     (auto intro: traces_enabled_accepts_from_takeI traces_enabled_accepts_fromI pre_inv_trace_assms_initialI)
+  by (cases n; fastforce intro: traces_enabled_accepts_from_takeI pre_inv_trace_assms_initialI)
 
 text \<open>@{term traces_enabled} only provides guarantees if the starting state satisfies the
  capability invariants.\<close>
@@ -1550,8 +1593,8 @@ text \<open>@{term traces_enabled} only provides guarantees if the starting stat
 lemma not_accessed_caps_invariant_traces_enabled:
   assumes "\<not>accessed_caps_invariant s"
   shows "traces_enabled m s"
-  using assms pre_inv_trace_assms_accessed_caps_invariant
-  by (auto simp: traces_enabled_def)
+  using assms
+  by (auto simp: traces_enabled_def dest: pre_inv_trace_assms_accessed_caps_invariant_or_zero)
 
 named_theorems traces_enabledI
 
@@ -1562,7 +1605,7 @@ lemma traces_enabled_bind[traces_enabledI]:
 proof (unfold traces_enabled_def, intro allI impI, (elim conjE)?)
   fix t m' n
   assume t: "(m \<bind> f, t, m') \<in> Traces" and m': "finished m'" and n: "n \<le> length t"
-    and trace_assms: "pre_inv_trace_assms s (take n t)"
+    and trace_assms: "pre_inv_trace_assms s n t"
   from t show "trace_enabled s (take n t)"
   proof (cases rule: bind_Traces_cases)
     case (Left m'')
@@ -1576,17 +1619,17 @@ proof (unfold traces_enabled_def, intro allI impI, (elim conjE)?)
       case True
       then show ?thesis
         using m m' n trace_assms Bind
-        by (auto simp: traces_enabled_def dest!: finished_bind_left)
+        by (auto simp: traces_enabled_def pre_inv_trace_assms_append_iff min_absorb1 dest!: finished_bind_left)
     next
       case False
       have "trace_enabled s (take n tm)"
         using m m' n trace_assms Bind False
         unfolding traces_enabled_def
-        by (auto simp: pre_inv_trace_assms_append_iff elim!: allE[where x = tm] allE[where x = "length tm"])
+        by (auto simp: pre_inv_trace_assms_append_iff min_absorb2 elim!: allE[where x = tm] allE[where x = "length tm"])
       moreover have "trace_enabled (run s (take n tm)) (take (n - length tm) tf)"
         using f[of tm am] m' n trace_assms Bind False
         unfolding traces_enabled_def
-        by (fastforce simp: pre_inv_trace_assms_append_iff inv_trace_assms_iff)
+        by (auto simp: pre_inv_trace_assms_append_iff inv_trace_assms_iff_pre_inv_trace_assms min_absorb2)
       ultimately show ?thesis
         using Bind
         by (auto simp: trace_enabled_append_iff)
@@ -1619,20 +1662,38 @@ lemma non_cap_exp_traces_enabledI:
 proof (unfold traces_enabled_def, intro allI impI, elim conjE)
   fix t m' n
   assume "(m, t, m') \<in> Traces" and "finished m'"
-    and "pre_inv_trace_assms s (take n t)" and "n \<le> length t"
+    and "pre_inv_trace_assms s n t" and "n \<le> length t"
   then show "trace_enabled s (take n t)"
     using assms
     by (elim Traces_appendE[where t = "take n t" and t' = "drop n t", simplified])
        (auto intro: non_cap_exp_trace_enabledI)
 qed
 
-lemma exp_fails_traces_enabled:
-  assumes "exp_fails m"
+definition "exp_ends_with m P \<equiv> (\<forall>t m'. (m, t, m') \<in> Traces \<and> finished m' \<and> wellformed_trace t \<longrightarrow> P m')"
+abbreviation "exp_raises_isa_ex m \<equiv> exp_ends_with m (\<lambda>m'. \<exists>e. m' = Exception e \<and> is_isa_exception e)"
+abbreviation "exp_succeeds m \<equiv> exp_ends_with m (\<lambda>m'. \<exists>a. m' = Done a)"
+
+lemma exp_raises_ex_traces_enabled:
+  assumes "exp_raises_isa_ex m"
     and "ex_traces \<longrightarrow> traces_enabled m s"
   shows "traces_enabled m s"
+  using assms pre_inv_trace_assms_wellformed_trace
+  unfolding traces_enabled_def exp_ends_with_def finished_def finished_exception_def
+  by fastforce
+
+lemma finish_bind_cases:
+  assumes "finished (m \<bind> f)"
+  obtains (Done) a where "m = Done a" and "finished (f a)"
+  | (Fail) msg where "m = Fail msg"
+  | (Ex) e where "m = Exception e" and "finished_exception m"
+  by (rule assms[THEN finished_bind_left, THEN finishedE])
+     (use assms in \<open>auto simp: finished_exception_def\<close>)
+
+lemma exp_raises_isa_ex_bind:
+  assumes "exp_succeeds m" and "\<And>t a. Run m t a \<Longrightarrow> wellformed_trace t \<Longrightarrow> exp_raises_isa_ex (f a)"
+  shows "exp_raises_isa_ex (m \<bind> f)"
   using assms
-  unfolding traces_enabled_def finished_def isException_def
-  by blast
+  by (fastforce simp: exp_ends_with_def elim!: bind_Traces_cases finish_bind_cases)
 
 lemma traces_enabled_let[traces_enabledI]:
   assumes "traces_enabled (f y) s"
@@ -1696,7 +1757,7 @@ proof (use assms in \<open>induction "from" to step arbitrary: vars s rule: inde
     show "traces_enabled (body from vars) s"
       using body[of "from" vars "[]"] Inv_base[OF that]
       by (cases "accessed_caps_invariant s")
-         (auto simp: inv_trace_assms_iff intro: not_accessed_caps_invariant_traces_enabled)
+         (auto simp: inv_trace_assms_iff_pre_inv_trace_assms intro: not_accessed_caps_invariant_traces_enabled)
   next
     fix t vars'
     assume t: "Run (body from vars) t vars'" "inv_trace_assms s t"
@@ -1999,107 +2060,101 @@ lemma traces_enabled_try_catch:
   assumes "traces_enabled m s"
     and "\<And>tm e th m' n.
            \<lbrakk>(m, tm, Exception e) \<in> Traces; (h e, th, m') \<in> Traces; finished m'; n \<le> length (tm @ th);
-            pre_inv_trace_assms s (take n tm);
-            take (n - length tm) th = [] \<or> pre_inv_trace_assms (run s (take n tm)) (take (n - length tm) th)\<rbrakk> \<Longrightarrow>
+            pre_inv_trace_assms s n (tm @ th)\<rbrakk> \<Longrightarrow>
            trace_enabled s (take n (tm @ th))"
   shows "traces_enabled (try_catch m h) s"
 proof -
-  have *: "finished (try_catch m h) \<longleftrightarrow> (\<exists>a. m = Done a) \<or> (\<exists>msg. m = Fail msg \<and> finished m) \<or> (\<exists>e. m = Exception e \<and> (h e, [], h e) \<in> Traces \<and> finished (h e))" for m
-    by (cases m) (auto simp: finished_def isException_def)
+  have *: "finished (try_catch m h) \<longleftrightarrow> (\<exists>a. m = Done a) \<or> (\<exists>msg. m = Fail msg) \<or> (\<exists>e. m = Exception e \<and> (h e, [], h e) \<in> Traces \<and> finished (h e))" for m
+    by (cases m) (auto simp: finished_def finished_exception_def)
   show ?thesis
     using assms
     unfolding traces_enabled_def
-    by (fastforce simp: trace_enabled_append_iff pre_inv_trace_assms_append_iff *
-                  elim!: try_catch_Traces_cases)
+    by (fastforce simp: trace_enabled_append_iff * elim!: try_catch_Traces_cases)
 qed
 
-lemma traces_enabled_liftR[traces_enabledI]:
-  assumes "traces_enabled m s"
-  shows "traces_enabled (liftR m) s"
-  using assms
-  unfolding liftR_def
-  by (intro traces_enabled_try_catch) (auto simp: traces_enabled_def)
-
-lemmas traces_enabled_catch_early_return_binds[traces_enabledI] =
-  catch_early_return_bind_substs[where P = "\<lambda>m. traces_enabled m s" for s]
-
+definition "finished_early_returns m \<equiv> ((\<exists>a. m = Done a) \<or> (\<exists>a. m = Exception (Inl a)) \<or> (\<exists>msg. m = Fail msg) \<or> (\<exists>e. m = Exception (Inr e) \<and> (is_isa_exception e \<longrightarrow> ex_traces)))"
 definition
   "early_returns_enabled m s \<equiv>
-     traces_enabled m s \<and>
-     (\<forall>t a. (m, t, Exception (Inl a)) \<in> Traces \<longrightarrow>
-       (\<forall>n \<le> length t. pre_inv_trace_assms s (take n t) \<longrightarrow> trace_enabled s (take n t)))"
+     (\<forall>t m'. (m, t, m') \<in> Traces \<and> finished_early_returns m' \<longrightarrow>
+       (\<forall>n \<le> length t. pre_inv_trace_assms s n t \<longrightarrow> trace_enabled s (take n t)))"
 
-lemma traces_enabled_catch_early_return[traces_enabledI]:
-  assumes "early_returns_enabled m s"
-  shows "traces_enabled (catch_early_return m) s"
+lemma finished_early_returns_try_catch_cases:
+  assumes "finished_early_returns (try_catch m h)"
+  obtains (Done) a where "m = Done a"
+  | (Fail) msg where "m = Fail msg"
+  | (Ex) e where "m = Exception e" and "finished_early_returns (h e)"
   using assms
-  unfolding catch_early_return_def
-  by (intro traces_enabled_try_catch)
-     (auto simp: traces_enabled_def early_returns_enabled_def split: sum.splits)
+  by (cases m) (auto simp: finished_early_returns_def)
 
-lemma liftR_no_early_return[simp]:
-  shows "(liftR m, t, Exception (Inl e)) \<in> Traces \<longleftrightarrow> False"
-  by (induction m arbitrary: t) (auto simp: liftR_def elim: Traces_cases)
+lemma finished_early_returns_Inr_iff[iff]:
+  "finished_early_returns (Exception (Inr e)) \<longleftrightarrow> finished (Exception e)"
+  by (auto simp: finished_early_returns_def finished_def finished_exception_def)
+
+lemma finished_early_returnsI:
+  "finished_early_returns (Done a)"
+  "finished_early_returns (Fail msg)"
+  "finished_early_returns (Exception (Inl a))"
+  by (auto simp: finished_def finished_early_returns_def finished_exception_def)
 
 lemma early_returns_enabled_liftR[traces_enabledI]:
   assumes "traces_enabled m s"
   shows "early_returns_enabled (liftR m) s"
   using assms
-  by (auto simp: early_returns_enabled_def intro: traces_enabled_liftR)
+  unfolding liftR_def traces_enabled_def early_returns_enabled_def
+  by (fastforce elim!: try_catch_Traces_cases finished_early_returns_try_catch_cases simp: throw_def)
+
+lemma finished_try_catch_cases:
+  assumes "finished (try_catch m h)"
+  obtains (Done) a where "m = Done a"
+  | (Fail) msg where "m = Fail msg"
+  | (Ex) e where "m = Exception e" and "finished (h e)"
+  using assms
+  by (cases m) (auto simp: finished_def finished_exception_def)
+
+lemma liftR_no_early_return[simp]:
+  shows "(liftR m, t, Exception (Inl e)) \<in> Traces \<longleftrightarrow> False"
+  by (induction m arbitrary: t) (auto simp: liftR_def elim: Traces_cases)
 
 lemma early_returns_enabled_return[traces_enabledI]:
   "early_returns_enabled (return a) s"
   by (auto simp: early_returns_enabled_def traces_enabled_def)
 
-lemma early_returns_enabled_bind[traces_enabledI]:
+lemmas traces_enabled_catch_early_return_binds[traces_enabledI] =
+  catch_early_return_bind_substs[where P = "\<lambda>m. traces_enabled m s" for s]
+
+lemma early_returns_enabled_bind:
   assumes m: "early_returns_enabled m s"
     and f: "\<And>t a. Run m t a \<Longrightarrow> inv_trace_assms s t \<Longrightarrow> early_returns_enabled (f a) (run s t)"
   shows "early_returns_enabled (m \<bind> f) s"
-proof -
-  { fix t a n
-    assume "(m \<bind> f, t, Exception (Inl a)) \<in> Traces" and t: "pre_inv_trace_assms s (take n t)"
-      and n: "n \<le> length t"
-    then have "trace_enabled s (take n t)"
-    proof (cases rule: bind_Traces_cases)
-      case (Left m'')
-      then consider "m'' = Exception (Inl a)" | a' where "m'' = Done a'" and "f a' = Exception (Inl a)"
-        by (cases m'') auto
-      then show ?thesis
-        using Left m t n
-        by cases (auto simp: early_returns_enabled_def traces_enabled_def)
-    next
-      case (Bind tm am tf)
-      show ?thesis
-      proof cases
-        assume "n \<le> length tm"
-        then show ?thesis
-          using Bind m t
-          by (auto simp: trace_enabled_append_iff early_returns_enabled_def traces_enabled_def)
-      next
-        assume n': "\<not>n \<le> length tm"
-        then have "trace_enabled s (take n tm)"
-          using Bind m t
-          unfolding early_returns_enabled_def traces_enabled_def
-          by (elim conjE allE[where x = tm] allE[where x = "Done am"] allE[where x = "length tm"] impE)
-             (auto simp: pre_inv_trace_assms_append_iff)
-        moreover have "trace_enabled (run s (take n tm)) (take (n - length tm) tf)"
-          using Bind f[of tm am] t n n'
-          unfolding early_returns_enabled_def
-          by (fastforce simp: pre_inv_trace_assms_append_iff inv_trace_assms_iff)
-        ultimately show ?thesis
-          using Bind
-          by (auto simp: trace_enabled_append_iff)
-      qed
-    qed
-  }
-  then show ?thesis
-    using assms
-    by (auto intro!: traces_enabled_bind simp: early_returns_enabled_def)
+proof (unfold early_returns_enabled_def, intro allI impI, (elim conjE)?)
+  fix t m' n
+  assume "(m \<bind> f, t, m') \<in> Traces" and assms: "pre_inv_trace_assms s n t" and n: "n \<le> length t"
+    and m': "finished_early_returns m'"
+  then show "trace_enabled s (take n t)"
+  proof (cases rule: bind_Traces_cases)
+    case (Left m'')
+    then show ?thesis
+      using m m' assms n
+      by (cases m''; fastforce simp: early_returns_enabled_def finished_early_returns_def)
+  next
+    case (Bind tm am tf)
+    then show ?thesis
+      using m f[of tm am] m' assms n
+      unfolding early_returns_enabled_def
+      by (fastforce simp: trace_enabled_append_iff inv_trace_assms_iff_pre_inv_trace_assms pre_inv_trace_assms_append_iff min_def
+                    intro: finished_early_returnsI split: if_splits)
+  qed
 qed
 
 lemma early_returns_enabled_early_return[traces_enabledI]:
   "early_returns_enabled (early_return a) s"
   by (auto simp: early_returns_enabled_def early_return_def throw_def traces_enabled_def)
+
+lemma traces_enabled_catch_early_return_enabled_let[traces_enabledI]:
+  assumes "traces_enabled (catch_early_return (f y)) s"
+  shows "traces_enabled (catch_early_return (let x = y in f x)) s"
+  using assms
+  by auto
 
 lemma early_returns_enabled_let[traces_enabledI]:
   assumes "early_returns_enabled (f y) s"
@@ -2130,14 +2185,16 @@ lemma early_returns_enabled_and_boolM[traces_enabledI]:
     and "\<And>t. Run m1 t True \<Longrightarrow> early_returns_enabled m2 (run s t)"
   shows "early_returns_enabled (and_boolM m1 m2) s"
   using assms
-  by (auto simp: and_boolM_def intro!: traces_enabledI intro: non_cap_exp_traces_enabledI non_cap_expI)
+  by (auto simp: and_boolM_def intro!: early_returns_enabled_bind early_returns_enabled_return
+           intro: non_cap_exp_traces_enabledI non_cap_expI)
 
 lemma early_returns_enabled_or_boolM[traces_enabledI]:
   assumes "early_returns_enabled m1 s"
     and "\<And>t. Run m1 t False \<Longrightarrow> early_returns_enabled m2 (run s t)"
   shows "early_returns_enabled (or_boolM m1 m2) s"
   using assms
-  by (auto simp: or_boolM_def intro!: traces_enabledI intro: non_cap_exp_traces_enabledI non_cap_expI)
+  by (auto simp: or_boolM_def intro!: early_returns_enabled_bind early_returns_enabled_return
+           intro: non_cap_exp_traces_enabledI non_cap_expI)
 
 lemma early_returns_enabled_foreachM_inv:
   assumes "\<And>x vars s. P vars s \<Longrightarrow> x \<in> set xs \<Longrightarrow> early_returns_enabled (body x vars) s"
@@ -2145,7 +2202,16 @@ lemma early_returns_enabled_foreachM_inv:
     and "P vars s"
   shows "early_returns_enabled (foreachM xs vars body) s"
   by (use assms in \<open>induction xs arbitrary: vars s\<close>;
-      fastforce intro!: traces_enabledI intro: non_cap_exp_traces_enabledI non_cap_expI)
+      fastforce intro!: early_returns_enabled_bind early_returns_enabled_return
+                intro: non_cap_exp_traces_enabledI non_cap_expI)
+
+lemma traces_enabled_catch_early_return:
+  assumes "early_returns_enabled m s"
+  shows "traces_enabled (catch_early_return m) s"
+  using assms
+  unfolding catch_early_return_def traces_enabled_def early_returns_enabled_def
+  by (fastforce elim!: try_catch_Traces_cases finished_try_catch_cases intro: finished_early_returnsI
+                simp: throw_def split: sum.splits)
 
 lemma non_cap_exp_Run_inv_traces_enabled_runE:
   assumes "Run m1 t a" and "non_cap_exp m1" and "traces_enabled m2 s"
@@ -2188,10 +2254,19 @@ lemmas traces_enabled_builtin_combinatorsI =
   early_returns_enabled_bind early_returns_enabled_and_boolM early_returns_enabled_or_boolM
 
 named_theorems traces_enabled_split
-declare option.split[where P = "\<lambda>m. traces_enabled m s" for s, traces_enabled_split]
-declare prod.split[where P = "\<lambda>m. traces_enabled m s" for s, traces_enabled_split]
-declare sum.split[where P = "\<lambda>m. traces_enabled m s" for s, traces_enabled_split]
-declare bool.split[where P = "\<lambda>m. traces_enabled m s" for s, traces_enabled_split]
+
+lemmas traces_enabled_split_base[traces_enabled_split] =
+  option.split[where P = "\<lambda>m. traces_enabled m s" for s]
+  prod.split[where P = "\<lambda>m. traces_enabled m s" for s]
+  sum.split[where P = "\<lambda>m. traces_enabled m s" for s]
+  bool.split[where P = "\<lambda>m. traces_enabled m s" for s]
+
+lemmas traces_enabled_catch_early_return_split_base[traces_enabled_split] =
+  if_split[where P = "\<lambda>m. traces_enabled (catch_early_return m) s" for s]
+  option.split[where P = "\<lambda>m. traces_enabled (catch_early_return m) s" for s]
+  prod.split[where P = "\<lambda>m. traces_enabled (catch_early_return m) s" for s]
+  sum.split[where P = "\<lambda>m. traces_enabled (catch_early_return m) s" for s]
+  bool.split[where P = "\<lambda>m. traces_enabled (catch_early_return m) s" for s]
 
 method traces_enabled_foreachM_intro uses assms simp =
   (match conclusion in \<open>traces_enabled (foreachM _ _ _) _\<close> \<Rightarrow>
@@ -2208,6 +2283,7 @@ method traces_enabled_step uses simp intro elim assms =
     | (rule traces_enabledI TrueI)
     | (rule traces_enabled_split[THEN iffD2]; intro allI conjI impI)
     | (traces_enabled_foreachM_intro assms: assms simp: simp)
+    | (rule traces_enabled_catch_early_return)
     | (rule insert_subset[where B="insert y C" for y C, THEN iffD2], simp(no_asm)))
 
 method traces_enabledI_with methods solve uses simp intro elim assms =
@@ -2246,14 +2322,15 @@ locale Cap_Axiom_Inv_Automaton =
     and read_non_special_regs_enabled: "\<And>r v. r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> read_privileged_regs ISA \<Longrightarrow> enabled s (E_read_reg r v)"
 begin
 
-definition "isException m \<equiv> ((\<exists>e. m = Exception e) \<or> (\<exists>msg. m = Fail msg)) \<and> ex_traces"
+definition "isException m \<equiv> (\<exists>e. m = Exception e) \<and> ex_traces"
 
 definition finished :: "('regval,'a,'ex) monad \<Rightarrow> bool" where
-  "finished m = ((\<exists>a. m = Done a) \<or> isException m)"
+  "finished m = ((\<exists>a. m = Done a) \<or> (\<exists>msg. m = Fail msg) \<or> isException m)"
 
 lemma finishedE:
   assumes "finished m"
   obtains (Done) a where "m = Done a"
+  | (Fail) msg where "m = Fail msg"
   | (Ex) "isException m"
   using assms
   by (auto simp: finished_def)
@@ -2269,7 +2346,7 @@ lemma finished_Done[intro, simp]:
   by (auto simp: finished_def)
 
 lemma finished_Fail[intro, simp]:
-  "finished (Fail msg) \<Longrightarrow> finished (Fail msg')"
+  "finished (Fail msg')"
   unfolding finished_def isException_def
   by auto
 
@@ -2294,12 +2371,12 @@ definition
      \<forall>t m'. (m, t, m') \<in> Traces \<and> finished m' \<and> reads_regs_from inv_regs t regs \<and> invariant regs \<longrightarrow> trace_enabled s t"
 
 lemma traces_enabled_accepts_fromI:
-  assumes "hasTrace t m" and "traces_enabled m s regs" and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
+  assumes "hasTrace t m" and "traces_enabled m s regs" and "hasException t m \<longrightarrow> ex_traces"
     and "reads_regs_from inv_regs t regs" and "invariant regs"
   shows "accepts_from s t"
   using assms
   unfolding traces_enabled_def finished_def isException_def
-  unfolding hasTrace_iff_Traces_final hasException_iff_Traces_Exception hasFailure_iff_Traces_Fail
+  unfolding hasTrace_iff_Traces_final hasException_iff_Traces_Exception
   unfolding runTrace_iff_Traces[symmetric]
   by (intro trace_enabled_acceptI) (auto elim!: final_cases)
 
@@ -2310,8 +2387,10 @@ lemma traces_enabled_bind[traces_enabledI]:
     and "\<And>t a. Run_inv m t a regs \<Longrightarrow> traces_enabled (f a) (run s t) (the (updates_regs inv_regs t regs))"
   shows "traces_enabled (m \<bind> f) s regs"
   using assms
-  by (auto simp: traces_enabled_def Run_inv_def regstate_simp trace_enabled_append_iff
-           dest!: finished_bind_left elim!: bind_Traces_cases elim!: runs_preserve_invariantE; fastforce)
+  apply (auto simp: traces_enabled_def Run_inv_def regstate_simp trace_enabled_append_iff
+           dest!: finished_bind_left elim!: bind_Traces_cases elim!: runs_preserve_invariantE)
+  apply blast apply fastforce
+  done
 
 lemma non_cap_trace_enabledI:
   assumes "non_cap_trace t"
@@ -2390,7 +2469,7 @@ lemma traces_enabled_try_catch:
            trace_enabled s (tm @ th)"
   shows "traces_enabled (try_catch m h) s regs"
 proof -
-  have *: "finished (try_catch m h) \<longleftrightarrow> (\<exists>a. m = Done a) \<or> (\<exists>msg. m = Fail msg \<and> finished m) \<or> (\<exists>e. m = Exception e \<and> (h e, [], h e) \<in> Traces \<and> finished (h e))" for m
+  have *: "finished (try_catch m h) \<longleftrightarrow> (\<exists>a. m = Done a) \<or> (\<exists>msg. m = Fail msg) \<or> (\<exists>e. m = Exception e \<and> (h e, [], h e) \<in> Traces \<and> finished (h e))" for m
     by (cases m) (auto simp: finished_def isException_def)
   show ?thesis
     using assms
@@ -2615,6 +2694,8 @@ locale Write_Cap_Assm_Automaton =
   and ex_traces :: bool and use_mem_caps :: bool
   and invoked_caps :: "'cap set" and invoked_indirect_caps :: "'cap set" +
   fixes ev_assms :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool"
+  and is_isa_exception :: "'e \<Rightarrow> bool"
+  and wellformed_ev :: "'regval event \<Rightarrow> bool"
 begin
 
 sublocale Cap_Axiom_Assm_Automaton where enabled = enabled
@@ -2679,17 +2760,18 @@ lemma traces_enabled_write_memt[traces_enabledI]:
                \<and> mem_bytes_of_bits BCb data = Some bytes
                \<and> cap_of_mem_bytes_method CC bytes tag = Some c
                \<and> ev_assms s (E_write_memt wk addr' (nat sz) bytes tag r)
+               \<and> wellformed_ev (E_write_memt wk addr' (nat sz) bytes tag r)
              \<longrightarrow> c \<in> derivable_caps s"
   shows "traces_enabled (write_memt BCa BCb wk addr sz data tag) s"
   using assms
   unfolding write_memt_def maybe_fail_def derivable_caps_def
-  by (fastforce simp: traces_enabled_def pre_inv_trace_assms_def take_Cons
-                split: option.splits nat.splits elim: Traces_cases)
+  by (fastforce simp: traces_enabled_def take_Cons split: option.splits nat.splits elim: Traces_cases)
 
 lemma traces_enabled_reg_axioms:
   assumes "traces_enabled m initial" and "hasTrace t m"
     and "available_caps_invariant use_mem_caps t n" and "trace_assms initial (take n t)" and "n \<le> length t"
-    and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
+    and "wellformed_trace t"
+    and "trace_raises_isa_exception t m \<longrightarrow> ex_traces"
   shows "store_cap_reg_axiom CC ISA ex_traces initial_caps use_mem_caps invoked_caps invoked_indirect_caps (take n t)"
     and "store_cap_mem_axiom CC ISA initial_caps use_mem_caps invoked_indirect_caps (take n t)"
     and "read_reg_axiom CC ISA ex_traces (take n t)"
@@ -2757,7 +2839,7 @@ lemma traces_enabled_write_reg:
 lemma traces_enabled_reg_axioms:
   assumes "traces_enabled m initial regs" and "hasTrace t m"
     and "reads_regs_from inv_regs t regs" and "invariant regs"
-    and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
+    and "hasException t m \<longrightarrow> ex_traces"
   shows "store_cap_reg_axiom CC ISA ex_traces initial_caps use_mem_caps invoked_caps invoked_indirect_caps t"
     and "store_cap_mem_axiom CC ISA initial_caps use_mem_caps invoked_indirect_caps t"
     and "read_reg_axiom CC ISA ex_traces t"
@@ -2932,7 +3014,9 @@ locale Mem_Assm_Automaton =
     and translation_assms :: "'regval event \<Rightarrow> bool"
     and is_fetch :: bool and ex_traces :: bool and use_mem_caps :: bool
     and invoked_indirect_caps :: "'cap set" +
-  fixes ev_assms :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool"
+  fixes is_isa_exception :: "'e \<Rightarrow> bool"
+    and ev_assms :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool"
+    and wellformed_ev :: "'regval event \<Rightarrow> bool"
   assumes translation_assmsI: "\<And>s e. ev_assms s e \<Longrightarrow> translation_assms e"
 begin
 
@@ -2967,7 +3051,8 @@ lemma translation_assms_traceI:
 lemma traces_enabled_mem_axioms:
   assumes "traces_enabled m initial" and "hasTrace t m"
     and "available_caps_invariant use_mem_caps t n" and "trace_assms initial (take n t)" and "n \<le> length t"
-    and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
+    and "wellformed_trace t"
+    and "trace_raises_isa_exception t m \<longrightarrow> ex_traces"
   shows "store_mem_axiom CC ISA initial_caps use_mem_caps invoked_indirect_caps (take n t)"
     and "store_tag_axiom CC ISA (take n t)"
     and "load_mem_axiom CC ISA is_fetch initial_caps use_mem_caps invoked_indirect_caps (take n t)"
@@ -2981,7 +3066,7 @@ lemma traces_enabled_Read_mem:
     and "\<And>v. enabled s (E_read_mem rk paddr sz v)"
   shows "traces_enabled (Read_mem rk paddr sz m) s"
   using assms
-  by (fastforce simp: traces_enabled_def take_Cons pre_inv_trace_assms_Cons split: nat.splits
+  by (fastforce simp: traces_enabled_def take_Cons split: nat.splits
                 elim!: Traces_cases[where m = "Read_mem rk paddr sz m"])
 
 lemma traces_enabled_read_mem:
@@ -2997,7 +3082,7 @@ lemma traces_enabled_Read_memt:
     and "\<And>v tag. enabled s (E_read_memt rk paddr sz (v, tag))"
   shows "traces_enabled (Read_memt rk paddr sz m) s"
   using assms
-  by (fastforce simp: traces_enabled_def take_Cons pre_inv_trace_assms_Cons split: nat.splits
+  by (fastforce simp: traces_enabled_def take_Cons split: nat.splits
                 elim!: Traces_cases[where m = "Read_memt rk paddr sz m"])
 
 lemma traces_enabled_read_memt:
@@ -3049,7 +3134,7 @@ lemma non_mem_exp_traces_enabledI:
 lemma traces_enabled_mem_axioms:
   assumes "traces_enabled m initial regs" and "hasTrace t m"
     and "reads_regs_from inv_regs t regs" and "invariant regs"
-    and "hasException t m \<or> hasFailure t m \<longrightarrow> ex_traces"
+    and "hasException t m \<longrightarrow> ex_traces"
     and "translation_assms_trace t"
   shows "store_mem_axiom CC ISA initial_caps use_mem_caps invoked_indirect_caps t"
     and "store_tag_axiom CC ISA t"

@@ -6,6 +6,18 @@ section \<open>Trivia\<close>
 
 text \<open>TODO: Add this to library\<close>
 
+lemma T_bind_leftI:
+  assumes "(m, e, m') \<in> T"
+  shows "(bind m f, e, bind m' f) \<in> T"
+  using assms
+  by induction auto
+
+lemma Traces_bind_leftI:
+  assumes "(m, t, m') \<in> Traces"
+  shows "(bind m f, t, bind m' f) \<in> Traces"
+  using assms
+  by induction (auto intro: T_bind_leftI)
+
 lemma return_Traces_iff[simp]:
   "(return x, t, m') \<in> Traces \<longleftrightarrow> t = [] \<and> m' = Done x"
   by (auto simp: return_def)
