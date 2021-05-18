@@ -338,6 +338,7 @@ Section CCapabilityProperties.
 
   Local Notation "x ⊆ y" := (Included _ x y) (at level 61, right associativity).
   Local Notation "x ∪ y" := (Union _ x y) (at level 61, right associativity).
+  Local Notation "x ∩ y" := (Intersection _ x y) (at level 61, right associativity).
 
   (* "Monotonicity property *)
   Lemma derivable_mono:
@@ -416,6 +417,28 @@ Section CCapabilityProperties.
       auto.
   Qed.
 
+  (* Formely known as "derivable_Int1_subset" *)
+  Lemma derivable_IntL_subset:
+    forall a b, derivable (a ∩ b) ⊆ derivable a.
+  Proof.
+    intros a b.
+    apply derivable_mono.
+    unfold Included.
+    intros c H.
+    apply Intersection_inv in H.
+    apply H.
+  Qed.
 
+  (* Formely known as "derivable_Int2_subset" *)
+  Lemma derivable_IntR_subset:
+    forall a b, derivable (a ∩ b) ⊆ derivable b.
+  Proof.
+    intros a b.
+    apply derivable_mono.
+    unfold Included.
+    intros c H.
+    apply Intersection_inv in H.
+    apply H.
+  Qed.
 
 End CCapabilityProperties.
