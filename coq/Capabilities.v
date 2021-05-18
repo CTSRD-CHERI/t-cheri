@@ -265,7 +265,7 @@ Section CCapabilityProperties.
          /\ (is_global c1 -> is_global c2)
          /\ perms_leq (get_perms c1) (get_perms c2)).
 
-  Local Notation "x ⊆ y" := (cap_leq x y) (at level 60, right associativity).
+  Local Notation "x <= y" := (cap_leq x y).
 
   Definition invokable (cc cd: C): Prop:=
     let pc := get_perms cc in
@@ -281,9 +281,9 @@ Section CCapabilityProperties.
     (g /\ pred c1 c2) \/
     (~g /\ pred (clear_global c1) c2).
 
-  Inductive derivable (cs:cap_set) : C ->  Prop :=
+  Inductive derivable (cs:cap_set) : Ensemble C :=
   | Copy: forall c, cat_set_in c cs -> derivable cs c
-  | Restrict: forall c c', derivable cs c'  -> c ⊆ c' -> derivable cs c
+  | Restrict: forall c c', derivable cs c'  -> c <= c' -> derivable cs c
   | Unseal_global:
       forall c' c'',
         derivable cs c' ->
@@ -334,5 +334,23 @@ Section CCapabilityProperties.
          is_indirect_sentry (seal c' otype))
         ->
         derivable cs (seal c' otype).
+
+  Local Notation "x ⊆ y" := (Included _ x y) (at level 61, right associativity).
+
+  Lemma derivable_mono:
+    forall cs cs', cs ⊆ cs' -> derivable cs ⊆ derivable cs'.
+  Proof.
+    intros cs cs' H c IN.
+    induction IN; unfold In in *.
+    -
+      apply Copy.
+      apply H, H0.
+    - eapply Restrict; eauto.
+    - eapply Unseal_global; eauto.
+    - eapply Unseal_not_global; eauto.
+    - eapply Seal; eauto.
+    - eapply SealEntry; eauto.
+  Qed.
+
 
 End CCapabilityProperties.
