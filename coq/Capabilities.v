@@ -328,38 +328,6 @@ Section CCapabilityProperties.
     (g /\ pred c1 c2) \/
     (~g /\ pred (clear_global c1) c2).
 
-  (* Derivation of capabilities, bounded by derivation depth to
-     guarantee termination.
-     Q: Do we need this?
-   *)
-  Fixpoint cap_derivable_bounded (n:nat) (cs:cap_set) (c:C): Prop :=
-    match n with
-    | O => cat_set_in c cs
-    | S n =>
-      (exists c', cap_derivable_bounded n cs c' /\ c ⊆ c')
-      \/ (exists c' otype, cap_derivable_bounded n cs c'
-                     /\ is_tagged c'
-                     /\ ~ is_sealed c'
-                     /\ seal c' otype = c
-                     /\ (is_sentry c \/ is_indirect_sentry c))
-      \/ (exists c' c'',
-            cap_derivable_bounded n cs c'
-            /\ cap_derivable_bounded n cs c''
-            /\ is_tagged c'
-            /\ is_tagged c''
-            /\ ~ is_sealed c''
-            /\ address_set_in (get_address c'') (get_mem_region c'')
-            /\ (exists ot'',
-                  (otype_of_address (get_address c'') = Some ot'')
-                  /\ ((is_sealed c'
-                      /\ permits_unseal (get_perms c'')
-                      /\ get_obj_type c' = Some ot''
-                      /\ pred_clear_global_unless (is_global c'') (unseal c') c eq)
-                     \/ (~ is_sealed c'
-                        /\ permits_seal (get_perms c'')
-                        /\ seal c' ot'' = c))))
-    end.
-
   Inductive derivable (cs:cap_set) : C ->  Prop :=
   | Copy: forall c, cat_set_in c cs -> derivable cs c
   | Restrict: forall c c', derivable cs c'  -> c ⊆ c' -> derivable cs c
@@ -374,7 +342,8 @@ Section CCapabilityProperties.
         permits_unseal (get_perms c'') ->
         get_obj_type c' = otype_of_address (get_address c'') ->
         address_set_in (get_address c'') (get_mem_region c'') ->
-        is_global c'' ->
+        is_global c''
+        ->
         derivable cs (unseal c')
   | Unseal_not_global:
       forall c' c'',
