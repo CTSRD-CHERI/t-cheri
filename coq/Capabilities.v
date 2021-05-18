@@ -2,6 +2,7 @@
 
 Require Import Coq.Arith.PeanoNat.
 Require Import Coq.Relations.Relation_Definitions.
+Require Import Coq.Sets.Ensembles.
 Require Import Coq.Sets.Constructive_sets.
 
 Set Implicit Arguments.
@@ -336,12 +337,14 @@ Section CCapabilityProperties.
         derivable cs (seal c' otype).
 
   Local Notation "x ⊆ y" := (Included _ x y) (at level 61, right associativity).
+  Local Notation "x ∪ y" := (Union _ x y) (at level 61, right associativity).
 
+  (* "Monotonicity property *)
   Lemma derivable_mono:
     forall cs cs', cs ⊆ cs' -> derivable cs ⊆ derivable cs'.
   Proof.
     intros cs cs' H c IN.
-    induction IN; unfold In in *.
+    induction IN.
     -
       apply Copy.
       apply H, H0.
@@ -352,8 +355,10 @@ Section CCapabilityProperties.
     - eapply SealEntry; eauto.
   Qed.
 
-  (* TODO: better name? *)
-  Lemma derivable_refl:
+  (* "Extensive" property (as in closure operators).
+     Formely known as "derivable_refl".
+   *)
+  Lemma derivable_extensive:
     forall cs, cs ⊆ derivable cs.
   Proof.
     intros cs c H.
@@ -379,5 +384,38 @@ Section CCapabilityProperties.
     -
       apply Noone_in_empty in H; tauto.
   Qed.
+
+  Lemma derivable_union_subseteq_absorb:
+    forall cs cs',
+      cs' ⊆ derivable cs ->
+      derivable (cs ∪ cs') = derivable cs.
+  Proof.
+    intros cs cs' H.
+    apply Extensionality_Ensembles.
+    split.
+    -
+      intros c H0.
+      induction H0.
+      +
+        apply Union_inv in H0.
+        destruct H0.
+        *
+          apply Copy, H0.
+        *
+          specialize (H c).
+          apply H, H0.
+      + eapply Restrict; eauto.
+      + eapply Unseal_global; eauto.
+      + eapply Unseal_not_global; eauto.
+      + eapply Seal; eauto.
+      + eapply SealEntry; eauto.
+    -
+      apply derivable_mono.
+      intros x H0.
+      apply Union_introl.
+      auto.
+  Qed.
+
+
 
 End CCapabilityProperties.
