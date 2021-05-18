@@ -352,5 +352,14 @@ Section CCapabilityProperties.
     - eapply SealEntry; eauto.
   Qed.
 
+  (* TODO: better name? *)
+  Lemma derivable_refl:
+    forall cs, cs ⊆ derivable cs.
+  Proof.
+    intros cs c H.
+    constructor 1.
+    apply H.
+  Qed.
+
 
 End CCapabilityProperties.
