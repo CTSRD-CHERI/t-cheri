@@ -312,7 +312,7 @@ Section CCapabilityProperties.
          /\ (is_global c1 -> is_global c2)
          /\ perms_leq (get_perms c1) (get_perms c2)).
 
-  Local Notation "x <= y" := (cap_leq x y).
+  Local Notation "x ⊆ y" := (cap_leq x y) (at level 60, right associativity).
 
   Definition invokable (cc cd: C): Prop:=
     let pc := get_perms cc in
@@ -336,7 +336,7 @@ Section CCapabilityProperties.
     match n with
     | O => cat_set_in c cs
     | S n =>
-      (exists c', cap_derivable_bounded n cs c' /\ cap_leq c c')
+      (exists c', cap_derivable_bounded n cs c' /\ c ⊆ c')
       \/ (exists c' otype, cap_derivable_bounded n cs c'
                      /\ is_tagged c'
                      /\ ~ is_sealed c'
@@ -362,7 +362,7 @@ Section CCapabilityProperties.
 
   Inductive derivable (cs:cap_set) : C ->  Prop :=
   | Copy: forall c, cat_set_in c cs -> derivable cs c
-  | Restrict: forall c c', derivable cs c'  -> cap_leq c c' -> derivable cs c
+  | Restrict: forall c c', derivable cs c'  -> c ⊆ c' -> derivable cs c
   | Unseal_global:
       forall c' c'',
         derivable cs c' ->
@@ -387,7 +387,8 @@ Section CCapabilityProperties.
         permits_unseal (get_perms c'') ->
         get_obj_type c' = otype_of_address (get_address c'') ->
         address_set_in (get_address c'') (get_mem_region c'') ->
-        ~ is_global c'' ->
+        ~ is_global c''
+        ->
         derivable cs (clear_global (unseal c'))
   | Seal:
       forall c' c'' ot'', (* TODO: not sure about quantification on ot'' *)
@@ -399,7 +400,8 @@ Section CCapabilityProperties.
         ~ is_sealed c'' ->
         permits_seal (get_perms c'') ->
         address_set_in (get_address c'') (get_mem_region c'')  ->
-        otype_of_address (get_address c'') = Some ot'' ->
+        otype_of_address (get_address c'') = Some ot''
+        ->
         derivable cs (seal c' ot'')
   | SealEntry:
       forall c' otype,
