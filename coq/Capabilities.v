@@ -1,17 +1,13 @@
 (* Coq formalization on CHERI Capablities *)
 
-Require Import Coq.Lists.List.
-Require Import Coq.Vectors.Vector.
 Require Import Coq.Arith.PeanoNat.
 Require Import Coq.Relations.Relation_Definitions.
-
-Require Import bbv.Word.
+Require Import Coq.Sets.Ensembles.
 
 Set Implicit Arguments.
 Set Strict Implicit.
 Generalizable All Variables.
 
-Import ListNotations.
 Open Scope nat_scope.
 Open Scope list_scope.
 
@@ -56,13 +52,6 @@ End Interval.
 Arguments Incl_Interval {V}%type_scope {V_lt}%type_scope.
 Arguments Empty_Interval {V}%type_scope {V_lt}%type_scope.
 
-(* Various architeture-dependent definitions affecting CHERI *)
-Class CArch (A:Type) :=
-  {
-  (* Type to describe memory byte *)
-  memory_byte:Type;
-  }.
-
 Class CAddress (A:Type) :=
   {
   (* "less than" *)
@@ -73,7 +62,7 @@ Class CAddress (A:Type) :=
   address_lt_dec: forall a b : A, {address_lt a b}+{~ address_lt a b};
 
   (* Generates of set of addresses in the given range. *)
-  addresses_in_interval: (Interval address_lt)-> {l:list A| NoDup l} ;
+  addresses_in_interval: (Interval address_lt) -> Ensemble A;
   }.
 
 Section CAddressProperties.
@@ -83,14 +72,14 @@ Section CAddressProperties.
   Definition address_interval := Interval address_lt.
 
   (* Set of addresses type alias *)
-  Definition address_set := {l:list A| NoDup l} .
+  Definition address_set := Ensemble A.
 
   (* Set membership predicate *)
   Definition address_set_in (a:A) (xs:address_set) : Prop
-    := List.In a (proj1_sig xs).
+    := In _ xs a.
 
   (* Empty address set constant *)
-  Definition empty_address_set: address_set := @exist _ _ [] (NoDup_nil _).
+  Definition empty_address_set: address_set := Empty_set A.
 
   (* "less of equal" relation on on addresses *)
   Definition address_le: relation A :=
@@ -98,8 +87,7 @@ Section CAddressProperties.
 
 End CAddressProperties.
 
-Class CPermission (P:Type)
-      `{ARCH: CArch A}:=
+Class CPermission (P:Type) :=
   {
   (* Convenience functions to examine some permission bits *)
   permits_execute: P -> Prop;
@@ -112,20 +100,11 @@ Class CPermission (P:Type)
   permits_store_local_cap: P -> Prop;
   permits_system_access: P -> Prop;
   permits_unseal: P -> Prop;
-
-  (* --- Encoding permissions as a bit vector --- *)
-
-  (* Number of bits *)
-  perms_nbits: nat ;
-
-  (* Encoding function *)
-  perms_encode: P -> word (perms_nbits)
   }.
 
 Section PermissinProperties.
-  Context `{ARCH: CArch A}
-          `{ADR: CAddress Address}
-          `{PERM: @CPermission P A ARCH}.
+  Context `{ADR: CAddress A}
+          `{PERM: @CPermission P}.
 
   (* Logical comparison ofpermssions based solely on their properties
      expressed in [Permissoin] typeclass interface.  Underlying
@@ -162,26 +141,17 @@ Section PermissinProperties.
 End PermissinProperties.
 
 Class CObjectType (OT:Type)
-      `{ARCH: CArch A} :=
-  {
+  :=
+    {
   (* Decidable equality *)
   ot_eq_dec: forall a b : OT, {a = b} + {a <> b};
-
-  (* --- Encoding object types as bit vectors --- *)
-
-  (* Number of bits describing object type. *)
-  otype_nbits: nat;
-
-  (* encode object type as bit vector *)
-  ot_encode: OT -> word (otype_nbits);
-  }.
+    }.
 
 
 Section CapabilityDefinition.
-  Context `{ARCH: CArch AR}
-          `{OTYPE: @CObjectType OT AR ARCH}
-          `{ADR: CAddress A}
-          `{PERM: @CPermission P AR ARCH}.
+  Context `{OTYPE: @CObjectType OT}
+          `{ADR: CAddress}
+          `{PERM: @CPermission P}.
 
   (* Various types of seals supported *)
   Variant CapSealType :=
@@ -222,20 +192,7 @@ Section CapabilityDefinition.
     is_global: C -> Prop;
     clear_global: C -> C;
 
-    (* Partial mapping between addresses and object types.
-     TODO: Maybe should be moved elswhwere, like [CArch].
-     *)
     otype_of_address: A -> option OT;
-
-    (* --- Capability encoding in memory --- *)
-
-    (* Size of capability encoding in byttes *)
-    capability_nbytes: nat;
-
-    (* Try to decode sequence of bytes as a capability.
-       Previously "cap_of_mem_bytes".
-     *)
-    cap_decode: (Vector.t memory_byte capability_nbytes) -> bool -> option C;
 
     (* Some additional logical properties from Isabelle "locale" *)
 
@@ -245,20 +202,16 @@ Section CapabilityDefinition.
 
     is_tagged_clear_global: forall c, is_tagged (clear_global c) = is_tagged c ;
 
-    is_tagged_cap_decode: forall c bytes tag, cap_decode bytes tag = Some c ->
-                                         (is_tagged c <-> tag = true)
-
     }.
 
 End CapabilityDefinition.
 
 Section CCapabilityProperties.
 
-  Context `{ARCH: CArch AR}
-          `{OTYPE: @CObjectType OT AR ARCH}
+  Context `{OTYPE: @CObjectType OT}
           `{ADR: CAddress A}
-          `{PERM: @CPermission P AR ARCH}
-          `{CAPA: @CCapability AR ARCH OT A ADR P C}.
+          `{PERM: @CPermission P}
+          `{CAPA: @CCapability OT A ADR P C}.
 
   (* Helper function to check if capability is sealed (with any kind of seal *)
   Definition is_sealed (c:C) : Prop
@@ -289,10 +242,10 @@ Section CCapabilityProperties.
        end.
 
   (* Set of cap type alias *)
-  Definition cap_set := {l:list C| NoDup l} .
+  Definition cap_set := Ensemble C.
 
   Definition cat_set_in (x:C) (cs:cap_set) : Prop
-    := List.In x (proj1_sig cs).
+    := In _ cs x.
 
   Definition get_mem_region (c:C): address_set
     := addresses_in_interval (get_bounds c).
