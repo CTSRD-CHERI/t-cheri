@@ -2,7 +2,7 @@
 
 Require Import Coq.Arith.PeanoNat.
 Require Import Coq.Relations.Relation_Definitions.
-Require Import Coq.Sets.Ensembles.
+Require Import Coq.Sets.Constructive_sets.
 
 Set Implicit Arguments.
 Set Strict Implicit.
@@ -361,5 +361,23 @@ Section CCapabilityProperties.
     apply H.
   Qed.
 
+  Lemma derivable_empty: derivable empty_address_set = empty_address_set.
+  Proof.
+    unfold empty_address_set.
+    apply Extensionality_Ensembles.
+    unfold Same_set, Included.
+    split; intros.
+    -
+      unfold In in H.
+      induction H.
+      + apply Noone_in_empty in H; tauto.
+      + apply Noone_in_empty in IHderivable; tauto.
+      + apply Noone_in_empty in IHderivable1; tauto.
+      + apply Noone_in_empty in IHderivable1; tauto.
+      + apply Noone_in_empty in IHderivable1; tauto.
+      + apply Noone_in_empty in IHderivable; tauto.
+    -
+      apply Noone_in_empty in H; tauto.
+  Qed.
 
 End CCapabilityProperties.
