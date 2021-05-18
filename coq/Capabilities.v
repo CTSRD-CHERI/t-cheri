@@ -207,6 +207,8 @@ Section CapabilityDefinition.
     get_bounds: C -> address_interval;
 
     get_perms: C -> P;
+
+    (* Previously "get_cursor" *)
     get_address: C -> A;
 
     (* Get informaiton about "seal" on this capability *)
@@ -229,8 +231,23 @@ Section CapabilityDefinition.
 
     (* Size of capability encoding in byttes *)
     capability_nbytes: nat;
-    (* Try to decode sequence of bytes as a capability *)
+
+    (* Try to decode sequence of bytes as a capability.
+       Previously "cap_of_mem_bytes".
+     *)
     cap_decode: (Vector.t memory_byte capability_nbytes) -> bool -> option C;
+
+    (* Some additional logical properties from Isabelle "locale" *)
+
+    is_tagged_seal: forall c t, is_tagged (seal c t) = is_tagged c ;
+
+    is_tagged_unseal: forall c, is_tagged (unseal c) = is_tagged c ;
+
+    is_tagged_clear_global: forall c, is_tagged (clear_global c) = is_tagged c ;
+
+    is_tagged_cap_decode: forall c bytes tag, cap_decode bytes tag = Some c ->
+                                         (is_tagged c <-> tag = true)
+
     }.
 
 End CapabilityDefinition.
@@ -263,7 +280,7 @@ Section CCapabilityProperties.
        | Cap_Sealed Cap_Indirect_SEntry _ => True
        | _ => False
        end.
-    (* Return [None] it the capability is "unsealed" and
+  (* Return [None] it the capability is "unsealed" and
      [Some OT] otherwise *)
   Definition get_obj_type (c:C): option OT
     := match get_seal c with
@@ -307,12 +324,14 @@ Section CCapabilityProperties.
     get_obj_type cc = get_obj_type cd /\
     permits_execute pc /\ ~ permits_execute pd.
 
-  Definition eq_clear_global_unless (g:Prop) (c1 c2:C): Prop:=
-    (g /\ c1 = c2) \/
-    (~g /\ clear_global c1 = c2).
+  Definition pred_clear_global_unless (g:Prop) (c1 c2:C) (pred: C -> C -> Prop): Prop:=
+    (g /\ pred c1 c2) \/
+    (~g /\ pred (clear_global c1) c2).
 
   (* Derivation of capabilities, bounded by derivation depth to
-     guarantee termination *)
+     guarantee termination.
+     Q: Do we need this?
+   *)
   Fixpoint cap_derivable_bounded (n:nat) (cs:cap_set) (c:C): Prop :=
     match n with
     | O => cat_set_in c cs
@@ -335,10 +354,61 @@ Section CCapabilityProperties.
                   /\ ((is_sealed c'
                       /\ permits_unseal (get_perms c'')
                       /\ get_obj_type c' = Some ot''
-                      /\ eq_clear_global_unless (is_global c'') (unseal c') c)
+                      /\ pred_clear_global_unless (is_global c'') (unseal c') c eq)
                      \/ (~ is_sealed c'
                         /\ permits_seal (get_perms c'')
                         /\ seal c' ot'' = c))))
     end.
+
+  Inductive derivable (cs:cap_set) : C ->  Prop :=
+  | Copy: forall c, cat_set_in c cs -> derivable cs c
+  | Restrict: forall c c', derivable cs c'  -> cap_leq c c' -> derivable cs c
+  | Unseal_global:
+      forall c' c'',
+        derivable cs c' ->
+        derivable cs c'' ->
+        is_tagged c' ->
+        is_tagged c'' ->
+        ~ is_sealed c'' ->
+        is_sealed c' ->
+        permits_unseal (get_perms c'') ->
+        get_obj_type c' = otype_of_address (get_address c'') ->
+        address_set_in (get_address c'') (get_mem_region c'') ->
+        is_global c'' ->
+        derivable cs (unseal c')
+  | Unseal_not_global:
+      forall c' c'',
+        derivable cs c' ->
+        derivable cs c'' ->
+        is_tagged c' ->
+        is_tagged c'' ->
+        ~ is_sealed c'' ->
+        is_sealed c' ->
+        permits_unseal (get_perms c'') ->
+        get_obj_type c' = otype_of_address (get_address c'') ->
+        address_set_in (get_address c'') (get_mem_region c'') ->
+        ~ is_global c'' ->
+        derivable cs (clear_global (unseal c'))
+  | Seal:
+      forall c' c'' ot'', (* TODO: not sure about quantification on ot'' *)
+        derivable cs c' ->
+        derivable cs c'' ->
+        is_tagged c' ->
+        is_tagged c'' ->
+        ~ is_sealed c' ->
+        ~ is_sealed c'' ->
+        permits_seal (get_perms c'') ->
+        address_set_in (get_address c'') (get_mem_region c'')  ->
+        otype_of_address (get_address c'') = Some ot'' ->
+        derivable cs (seal c' ot'')
+  | SealEntry:
+      forall c' otype,
+        derivable cs c' ->
+        is_tagged c' ->
+        ~ is_sealed c' ->
+        (is_sentry (seal c' otype) \/
+         is_indirect_sentry (seal c' otype))
+        ->
+        derivable cs (seal c' otype).
 
 End CCapabilityProperties.
