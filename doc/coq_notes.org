@@ -1,0 +1,115 @@
+Notes on idiomatic Coq formalization of CHERI capabilities.
+
+* Design
+** Goals
+  The goal is to formalize "The Architecture-Neutral CHERI Protection
+  Model" in Coq. It should allow some high-level reasoning but could
+  be further specialized for concrete ISAs.
+  
+  Our definition should use idiomatic Coq without restrictions imposed
+  by Lem-generated Coq. We will use dependent types and other means to
+  make it as rigorous and non-ambiguous as possible.
+
+  It could be later on mapped to Lem-based Coq definitions to connect
+  it to Sail ISA definitions and existing proofs. Additionally, this
+  formalization should be usable with Iris as well as ITrees (Vellvm)
+  frameworks.
+
+** Typeclasses
+   Our high-level abstract formalization of CHERI we do not use any
+   concrete data types to represent any data structures. All objects
+   are formalized via their properties, expressed as
+   typeclasses. Concrete implementations can define data types
+   (e.g. records) and provide instances of appropriate typeclasses for
+   them.
+
+   Presently, the following typeclasses are used:
+   
+*** ~CAddress~
+    An abstract memory address with /irreflexive/ "less than" relation.
+    The only operation we define now is to get a /set/ of addresses in
+    given interval.
+*** ~CPermission~
+    Set of predicates representing boolean capability permissions.
+*** ~CCapability~
+    Main class representing CHERI capability. Most methods modelled
+    after existing Lem definition.
+
+    Additionally, some logical properties previously expressed in
+    Isabelle via "locales" were added to ~CCapability~
+    typeclass. Alternatively they could be moved to separate
+    typeclasses if we decide that they need to be enforced
+    selectively.
+** Prop instead of Bool
+   We use ~Prop~ instead of ~bool~. We found it is easier to work with and
+   sufficient for high level formalization. For concrete types for
+   which typeclasses will be instantiated, an additional /decidability/
+   constraint could be added for some predicates which will make them
+   equivalent to ~bool~ values.
+   
+* Differences with LEM/Isabelle
+** Inductive ~derivable~ definition
+   In Lem it is defined functionally as ~cap_derivable_bounded~. In
+   Isabelle there is an alternative inductive set ~derivable~ definition
+   which is proven to be equivalent to ~cap_derivable_bounded~. In Coq
+   we use only inductive definition, similar to Isabelle's.
+** Interval notion
+   In Lem intervals are represented as ~[base, top)~.  To be able to
+   represent arbitrary intervals it requires ~top~ to be able to hold
+   max memory address value + 1. For example, for 64-bit addresses ~top~
+   should be at least 65-bit integer. At the same time we need to be
+   able to represent an empty interval. To be able to use the same
+   address type for interval bounds while representing arbitrary
+   intervals we defined an inductive ~Interval~ type with inclusive
+   bounds which also have special constructor to represent an /empty/
+   interval. Consequently, ~get_base~ and ~get_top~ in Capabilities was
+   replaced with ~get_bounds~ which returns an ~Interval~.
+** Permissions type
+   Permission flags are represented as separate entity and predicates
+   for checking them are moved from ~CCapability~ to ~CPermission~ type
+   class. ~get_perms~ method was added to ~CCapability~ to get permissions
+   value.
+
+   This separation allowed us to add separate permissions object
+   equality and "less than or equal" predicates, separated from
+   ~CCapabilities~.
+** Renaming
+   - ~get_cursor~ renamed to ~get_address~ (the terminology already used
+     in other CHERI publications)
+   - ~derivable_refl~ is now ~derivable_extensive~.
+** Object Type vs Address
+   Capability sealing takes an /object type/. Sometimes truncated
+   address could be used as an object type, when it could be
+   guaranteed the upper bits are zeroes. To generalize this convention
+   we introduced implicit partial conversion function ~otype_of_address~
+   which could fail and return ~None~. In concrete implementations of
+   capabilities for specific ISAs and in related proofs we can reason
+   if and when this function could fail.
+** Seal types
+   In Lem model there is an ambiguity related to object type and
+   sealing property. For example if ~is_sealed~ returns ~false~, the value
+   returned by ~get_obj_type~ is undefined. This is related to how in
+   encoding seal presence is linked to object type field. An
+   additional ambiguity could be caused by the fact that ~is_sentry~ and
+   ~is_indirect_sentry~ are mutually exclusive, while this is not
+   enforced by ~Capability~ class interface.
+   
+   To provide strong "correct by construction" interface for sealing
+   we introduced new types ~CapSealType~ and ~CapSeal~. The new ~get_seal~
+   method returns ~CapSeal~ value which contains both seal type and
+   optional object type in unambiguous format.
+
+   To help working with this value and partially emulate old Lem
+   interface 3 methods are provided: ~is_sealed~, ~is_sentry~,
+   ~is_indirect_sentry~.  An additional partial function ~get_obj_type~
+   returns an object type if the capability is sealed (via either of 3
+   sealing methods).
+** Encoding/Decoding
+   Will be dealt with separately.
+
+* Status
+  - High-level formalization is in ~Capabilities.v~ but require more
+    polishing.
+  - Need to define at least one concrete instance (e.g. for Morello)
+  - Need to formalize encoding/decoding.
+  - Try to add ITrees-bases high-level abstract monotonicity proof.
