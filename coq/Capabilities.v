@@ -195,13 +195,19 @@ Section CapabilityDefinition.
 
     otype_of_address: A -> option OT;
 
-    (* Some additional logical properties from Isabelle "locale" *)
+    (* Some additional logical properties from Isabelle Capabilities "locale" *)
 
     is_tagged_seal: forall c t, is_tagged (seal c t) = is_tagged c ;
 
     is_tagged_unseal: forall c, is_tagged (unseal c) = is_tagged c ;
 
     is_tagged_clear_global: forall c, is_tagged (clear_global c) = is_tagged c ;
+
+    (* Capabilities Bounds Invariants *)
+
+    bounds_seal_eq: forall c otype, get_bounds (seal c otype) = get_bounds c ;
+
+    bounds_clear_global_eq: forall c, get_bounds (clear_global c) = get_bounds c;
 
     }.
 
