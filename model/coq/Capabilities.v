@@ -273,7 +273,6 @@ Section CCapabilityProperties.
          /\ perms_leq (get_perms c1) (get_perms c2)).
 
   Local Notation "x <= y" := (cap_leq x y).
-
   Definition invokable (cc cd: C): Prop:=
     let pc := get_perms cc in
     let pd := get_perms cd in
@@ -371,6 +370,33 @@ Section CCapabilityProperties.
     intros cs c H.
     constructor 1.
     apply H.
+  Qed.
+
+  (* idempotentence property *)
+  Lemma derivable_idemp:
+    forall cs, derivable (derivable cs) = derivable cs.
+  Proof.
+    intros cs.
+    apply Extensionality_Ensembles.
+    split.
+    -
+      intros x H.
+      induction H; unfold cat_set_in, In in *.
+      + auto.
+      + eapply Restrict; eauto.
+      + eapply Unseal_global; eauto.
+      + eapply Unseal_not_global; eauto.
+      + eapply Seal; eauto.
+      + eapply SealEntry; eauto.
+    -
+      intros x H.
+      induction H; unfold cat_set_in, In in *.
+      + apply Copy; apply Copy; auto.
+      + eapply Restrict; eauto.
+      + eapply Unseal_global; eauto.
+      + eapply Unseal_not_global; eauto.
+      + eapply Seal; eauto.
+      + eapply SealEntry; eauto.
   Qed.
 
   Lemma derivable_empty: derivable empty_address_set = empty_address_set.
