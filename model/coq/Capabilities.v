@@ -59,9 +59,6 @@ Class CAddress (A:Type) :=
   address_lt: relation A;
   address_lt_irref: forall a, ~ address_lt a a;
 
-  address_eq_dec: forall a b : A, {a = b} + {a <> b};
-  address_lt_dec: forall a b : A, {address_lt a b}+{~ address_lt a b};
-
   (* Generates of set of addresses in the given range. *)
   addresses_in_interval: (Interval address_lt) -> Ensemble A;
   }.
@@ -144,8 +141,6 @@ End PermissinProperties.
 Class CObjectType (OT:Type)
   :=
     {
-  (* Decidable equality *)
-  ot_eq_dec: forall a b : OT, {a = b} + {a <> b};
     }.
 
 
@@ -166,9 +161,6 @@ Section CapabilityDefinition.
 
   Class CCapability (C:Type) :=
     {
-
-    (* Decidable equality *)
-    cap_eq_dec: forall a b : C, {a = b} + {a <> b};
 
     (* TODO: "is_valid" is perhaps more friendly name ? *)
     is_tagged: C -> Prop;
