@@ -1,2 +1,2 @@
--R coq Cheri
+-R . Cheri
 #-R ./lib/bit Bits
