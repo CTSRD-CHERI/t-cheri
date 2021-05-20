@@ -77,6 +77,8 @@ Notes on idiomatic Coq formalization of CHERI capabilities.
    - ~get_cursor~ renamed to ~get_address~ (the terminology already used
      in other CHERI publications)
    - ~derivable_refl~ is now ~derivable_extensive~.
+   - ~is_tagged~ is now ~is_valid~. Justification: in Morello Architecture spec it is
+     referred as *validity tag*.
 ** Object Type vs Address
    Capability sealing takes an /object type/. Sometimes truncated
    address could be used as an object type, when it could be

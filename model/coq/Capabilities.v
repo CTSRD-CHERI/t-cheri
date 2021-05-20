@@ -162,8 +162,8 @@ Section CapabilityDefinition.
   Class CCapability (C:Type) :=
     {
 
-    (* TODO: "is_valid" is perhaps more friendly name ? *)
-    is_tagged: C -> Prop;
+    (* Formerly "is_tagged" *)
+    is_valid: C -> Prop;
 
     (* Returns either inclusive bounds for covered
      memory region *)
@@ -189,11 +189,11 @@ Section CapabilityDefinition.
 
     (* Some additional logical properties from Isabelle Capabilities "locale" *)
 
-    is_tagged_seal: forall c t, is_tagged (seal c t) = is_tagged c ;
+    is_valid_seal: forall c t, is_valid (seal c t) = is_valid c ;
 
-    is_tagged_unseal: forall c, is_tagged (unseal c) = is_tagged c ;
+    is_valid_unseal: forall c, is_valid (unseal c) = is_valid c ;
 
-    is_tagged_clear_global: forall c, is_tagged (clear_global c) = is_tagged c ;
+    is_valid_clear_global: forall c, is_valid (clear_global c) = is_valid c ;
 
     (* Capabilities Bounds Invariants *)
 
@@ -212,7 +212,7 @@ Section CCapabilityProperties.
           `{PERM: @CPermission P}
           `{CAPA: @CCapability OT A ADR P C}.
 
-  (* Helper function to check if capability is sealed (with any kind of seal *)
+  (* Helper function to check if capability is sealed (with any kind of seal) *)
   Definition is_sealed (c:C) : Prop
     := match get_seal c with
        | Cap_Sealed _ _ => True
@@ -257,8 +257,8 @@ Section CCapabilityProperties.
   Definition cap_leq: relation C :=
     fun c1 c2 =>
       c1 = c2
-      \/ ~ is_tagged c1
-      \/ (is_tagged c2
+      \/ ~ is_valid c1
+      \/ (is_valid c2
          /\ ~ is_sealed c1 /\ ~ is_sealed c2
          /\ bounds_leq c1 c2
          /\ (is_global c1 -> is_global c2)
@@ -268,7 +268,7 @@ Section CCapabilityProperties.
   Definition invokable (cc cd: C): Prop:=
     let pc := get_perms cc in
     let pd := get_perms cd in
-    is_tagged cc /\ is_tagged cd /\
+    is_valid cc /\ is_valid cd /\
     is_sealed cc /\ is_sealed cd /\
     ~ is_sentry cc /\ ~ is_sentry cd /\
     permits_ccall pc /\ permits_ccall pd /\
@@ -286,8 +286,8 @@ Section CCapabilityProperties.
       forall c' c'',
         derivable cs c' ->
         derivable cs c'' ->
-        is_tagged c' ->
-        is_tagged c'' ->
+        is_valid c' ->
+        is_valid c'' ->
         ~ is_sealed c'' ->
         is_sealed c' ->
         permits_unseal (get_perms c'') ->
@@ -300,8 +300,8 @@ Section CCapabilityProperties.
       forall c' c'',
         derivable cs c' ->
         derivable cs c'' ->
-        is_tagged c' ->
-        is_tagged c'' ->
+        is_valid c' ->
+        is_valid c'' ->
         ~ is_sealed c'' ->
         is_sealed c' ->
         permits_unseal (get_perms c'') ->
@@ -314,8 +314,8 @@ Section CCapabilityProperties.
       forall c' c'' ot'', (* TODO: not sure about quantification on ot'' *)
         derivable cs c' ->
         derivable cs c'' ->
-        is_tagged c' ->
-        is_tagged c'' ->
+        is_valid c' ->
+        is_valid c'' ->
         ~ is_sealed c' ->
         ~ is_sealed c'' ->
         permits_seal (get_perms c'') ->
@@ -326,7 +326,7 @@ Section CCapabilityProperties.
   | SealEntry:
       forall c' otype,
         derivable cs c' ->
-        is_tagged c' ->
+        is_valid c' ->
         ~ is_sealed c' ->
         (is_sentry (seal c' otype) \/
          is_indirect_sentry (seal c' otype))
@@ -337,7 +337,7 @@ Section CCapabilityProperties.
   Local Notation "x ∪ y" := (Union _ x y) (at level 61, right associativity).
   Local Notation "x ∩ y" := (Intersection _ x y) (at level 61, right associativity).
 
-  (* "Monotonicity property *)
+  (* "Monotonicity" property *)
   Lemma derivable_mono:
     forall cs cs', cs ⊆ cs' -> derivable cs ⊆ derivable cs'.
   Proof.
