@@ -20,7 +20,7 @@ Section Interval.
   Local Notation "x < y"  := (V_lt x y).
   Local Notation "x <= y" := (V_lt x y /\ x=y).
 
-  Inductive Interval :=
+  Inductive Interval : Type :=
   | Incl_Interval (base top:V): (base=top /\ base < top) -> Interval
   | Empty_Interval (base:V): Interval.
 
