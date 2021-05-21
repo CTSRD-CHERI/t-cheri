@@ -102,15 +102,22 @@ Definition CAP_SEAL_TYPE_LPB:otype      := $2.
 Definition CAP_SEAL_TYPE_LB:otype       := $3.
 
 Definition is_Reserved_OT (v:otype) :=
-  v=CAP_SEAL_TYPE_UNSEALED \/
-  v=CAP_SEAL_TYPE_RB \/
-  v=CAP_SEAL_TYPE_LPB \/
-  v=CAP_SEAL_TYPE_LB.
+  v = CAP_SEAL_TYPE_UNSEALED \/
+  v = CAP_SEAL_TYPE_RB       \/
+  v = CAP_SEAL_TYPE_LPB      \/
+  v = CAP_SEAL_TYPE_LB       .
 
-Definition is_Reserved_dec (v:otype) : {is_Reserved_OT v}+{~is_Reserved_OT v}.
+Definition is_Reserved_dec (x:otype) : {is_Reserved_OT x}+{~is_Reserved_OT x}.
 Proof.
-  (* TODO: *)
-Admitted.
+  unfold otype, is_Reserved_OT in *.
+  destruct (weq x CAP_SEAL_TYPE_UNSEALED ); auto.
+  destruct (weq x CAP_SEAL_TYPE_RB       ); auto.
+  destruct (weq x CAP_SEAL_TYPE_LPB      ); auto.
+  destruct (weq x CAP_SEAL_TYPE_LB       ); auto.
+  right.
+  intros H.
+  repeat destruct H;auto.
+Qed.
 
 (* Logical object type, exlcuding special values *)
 Definition MObjectType := {v:otype | ~ is_Reserved_OT v}.
