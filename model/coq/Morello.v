@@ -1,6 +1,7 @@
 (* Specialization of Morello CHERI *)
 
 Require Import Cheri.Capabilities.
+Require Import StructTact.StructTactics.
 
 Require Import bbv.Word.
 
@@ -139,7 +140,20 @@ Program Definition otype_of_w64 (ot:w64): option MObjectType
      | right p => Some (@exist _ _ (w64_to_ot_cast ot) _)
      end.
 
-Instance CCapability_MCapability :
+
+(*
+    is_valid_seal : forall (c : C) (t : OT), is_valid (seal c t) = is_valid c;
+    is_valid_unseal : forall c : C, is_valid (unseal c) = is_valid c;
+    is_valid_clear_global : forall c : C, is_valid (clear_global c) = is_valid c;
+    bounds_seal_eq : forall (c : C) (otype : OT),
+                     get_bounds (seal c otype) = get_bounds c;
+    bounds_clear_global_eq : forall c : C,
+                             get_bounds (clear_global c) = get_bounds c }
+ *)
+
+
+
+Program Instance CCapability_MCapability :
   @CCapability MObjectType w64 CAddress_w64 MPermission (MCapability) :=
   {|
   Capabilities.is_valid := fun c => is_valid c = true ;

@@ -12,15 +12,6 @@ repositories:
 dependencies:
   - coq.8.13.2
   - coq-bbv
-#  - coq-mathcomp-algebra
-
-# There is a package `coq-bits` in OPAM but it currently
-# does not support Coq-8.13. There is a pull request pending
-# to fix that. Meanwhile we will use this patched copy instead.
-# It is to be replaced by `coq-bits` dependency once the PR
-# https://github.com/coq-community/bits/pull/14 is merged.
-#extra-deps:
-#  - git: git@github.com:vzaliva/bits.git
-#    recurse-submodules: no
-#    commit: coq813
-#    path: lib/bits
+  - name: coq-struct-tact
+    kind: git
+    target: https://github.com/uwplse/StructTact.git
