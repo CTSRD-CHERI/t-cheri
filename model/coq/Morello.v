@@ -21,9 +21,11 @@ Proof.
   reflexivity.
 Qed.
 
-Definition w64_in_interval : w64_interval -> Ensembles.Ensemble w64.
-  (* TODO *)
-Admitted.
+Definition w64_in_interval (r:w64_interval): Ensembles.Ensemble w64 :=
+  match r with
+  | Empty_Interval _ => Ensembles.Empty_set w64
+  | Incl_Interval base top H => fun x => x <= top /\ base <= x
+  end.
 
 Instance CAddress_w64 : CAddress(w64) :=
   {|

@@ -18,11 +18,11 @@ Section Interval.
   Variable V_lt_irref: forall a, ~ V_lt a a.
 
   Local Notation "x < y"  := (V_lt x y).
-  Local Notation "x <= y" := (V_lt x y /\ x=y).
+  Local Notation "x <= y" := (V_lt x y \/ x=y).
 
   Inductive Interval : Type :=
-  | Incl_Interval (base top:V): (base=top /\ base < top) -> Interval
-  | Empty_Interval (base:V): Interval.
+  | Incl_Interval (base top:V): (base <= top) -> Interval (* inclusive *)
+  | Empty_Interval (base:V): Interval. (* empty with base *)
 
   (* [<=] relation on intervals *)
   Definition interval_leq: relation (Interval) :=
@@ -33,21 +33,6 @@ Section Interval.
       | Empty_Interval b1, @Incl_Interval b2 t2 _ =>  b2 <= b1 /\ b1 <= t2
       | @Incl_Interval b1 t1 _, Empty_Interval b2 =>  False
       end.
-
-  Fact interval_leq_dec:
-    (forall x y : V, {x = y} + {x <> y}) ->
-    (forall x y, {V_lt x y}+{~ V_lt x y}) ->
-    forall a b, {interval_leq a b}+{~ interval_leq a b}.
-  Proof.
-    intros EQDEC LTDEC a b.
-    destruct a as [b1 t1 [b1t1e b1t1l] | b1], b as [b2 t2 [b2t2e b2t2l] | b2]; subst;cbn;auto.
-    -
-      apply V_lt_irref in b1t1l.
-      tauto.
-    -
-      apply V_lt_irref in b2t2l.
-      tauto.
-  Qed.
 
 End Interval.
 Arguments Incl_Interval {V}%type_scope {V_lt}%type_scope.
