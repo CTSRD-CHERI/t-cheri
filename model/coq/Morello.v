@@ -4,6 +4,9 @@ Require Import Cheri.Capabilities.
 Require Import StructTact.StructTactics.
 
 Require Import bbv.Word.
+Import bbv.Word.Notations.
+
+Local Open Scope word_scope.
 
 Definition w64_size: nat := 64.
 Definition w64 := word w64_size.
@@ -12,8 +15,11 @@ Definition w64_interval : Type := Interval w64_lt.
 
 Lemma w64_lt_irref: forall x:w64, ~ w64_lt x x.
 Proof.
-  (* TODO *)
-Admitted.
+  intros x.
+  unfold w64_lt.
+  apply eq_le.
+  reflexivity.
+Qed.
 
 Definition w64_in_interval : w64_interval -> Ensembles.Ensemble w64.
   (* TODO *)
@@ -90,11 +96,10 @@ Record MCapability :=
   obj_type : otype;
   }.
 
-(* TODO: use BBV notation *)
-Definition CAP_SEAL_TYPE_UNSEALED:otype := natToWord _ 0.
-Definition CAP_SEAL_TYPE_RB:otype       := natToWord _ 1.
-Definition CAP_SEAL_TYPE_LPB:otype      := natToWord _ 2.
-Definition CAP_SEAL_TYPE_LB:otype       := natToWord _ 3.
+Definition CAP_SEAL_TYPE_UNSEALED:otype := $0.
+Definition CAP_SEAL_TYPE_RB:otype       := $1.
+Definition CAP_SEAL_TYPE_LPB:otype      := $2.
+Definition CAP_SEAL_TYPE_LB:otype       := $3.
 
 Definition is_Reserved_OT (v:otype) :=
   v=CAP_SEAL_TYPE_UNSEALED \/
@@ -140,18 +145,38 @@ Program Definition otype_of_w64 (ot:w64): option MObjectType
      | right p => Some (@exist _ _ (w64_to_ot_cast ot) _)
      end.
 
+Definition clear_global (c:MCapability): MCapability :=
+  {|
+  is_valid := is_valid c;
+  address := address c;
+  bounds := bounds c;
+  perms := perms c;
+  is_global := false ;
+  is_execuvite := is_execuvite c;
+  obj_type := obj_type c
+  |}.
 
-(*
-    is_valid_seal : forall (c : C) (t : OT), is_valid (seal c t) = is_valid c;
-    is_valid_unseal : forall c : C, is_valid (unseal c) = is_valid c;
-    is_valid_clear_global : forall c : C, is_valid (clear_global c) = is_valid c;
-    bounds_seal_eq : forall (c : C) (otype : OT),
-                     get_bounds (seal c otype) = get_bounds c;
-    bounds_clear_global_eq : forall c : C,
-                             get_bounds (clear_global c) = get_bounds c }
- *)
+Definition unseal (c:MCapability): MCapability :=
+  {|
+  is_valid := is_valid c;
+  address := address c;
+  bounds := bounds c;
+  perms := perms c;
+  is_global := is_global c;
+  is_execuvite := is_execuvite c;
+  obj_type := CAP_SEAL_TYPE_UNSEALED
+  |}.
 
-
+Definition seal (c:MCapability) (ot:MObjectType): MCapability :=
+  {|
+  is_valid := is_valid c;
+  address := address c;
+  bounds := bounds c;
+  perms := perms c;
+  is_global := is_global c;
+  is_execuvite := is_execuvite c;
+  obj_type := proj1_sig ot
+  |}.
 
 Program Instance CCapability_MCapability :
   @CCapability MObjectType w64 CAddress_w64 MPermission (MCapability) :=
@@ -161,12 +186,11 @@ Program Instance CCapability_MCapability :
   Capabilities.get_perms := fun c => perms c ;
   Capabilities.get_address := fun c => address c ;
   Capabilities.get_seal := fun c => Seal_of_otype (obj_type c) ;
-  Capabilities.seal := fun c ot => c (* TODO: placeholder *);
-  Capabilities.unseal := fun c => c (* TODO: placeholder *);
+  Capabilities.seal := seal ;
+  Capabilities.unseal := unseal ;
   Capabilities.is_global := fun c => is_global c = true ;
-  Capabilities.clear_global := fun c => c (* TODO: placeholder *);
+  Capabilities.clear_global := clear_global;
   Capabilities.otype_of_address := otype_of_w64 ;
-
   |}.
 
 (* --- Decoding/Encoding --- *)
