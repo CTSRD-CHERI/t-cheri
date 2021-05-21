@@ -149,15 +149,11 @@ Section CapabilityDefinition.
           `{ADR: CAddress}
           `{PERM: @CPermission P}.
 
-  (* Various types of seals supported *)
-  Variant CapSealType :=
-  | Cap_Seal
-  | Cap_SEntry
-  | Cap_Indirect_SEntry.
-
   Variant CapSeal :=
   | Cap_Unsealed
-  | Cap_Sealed (sealtype:CapSealType) (otype:OT).
+  | Cap_SEntry
+  | Cap_Indirect_SEntry
+  | Cap_Sealed (otype:OT).
 
   Class CCapability (C:Type) :=
     {
@@ -215,28 +211,29 @@ Section CCapabilityProperties.
   (* Helper function to check if capability is sealed (with any kind of seal) *)
   Definition is_sealed (c:C) : Prop
     := match get_seal c with
-       | Cap_Sealed _ _ => True
-       | _ => False
+       | Cap_Unsealed => False
+       | _ => True
        end.
 
   (* Helper function to check if sealed entry capability *)
   Definition is_sentry (c:C) : Prop
     := match get_seal c with
-       | Cap_Sealed Cap_SEntry _ => True
+       | Cap_SEntry => True
        | _ => False
        end.
 
   (* Helper function to check if indirect entry capability *)
   Definition is_indirect_sentry (c:C) : Prop
     := match get_seal c with
-       | Cap_Sealed Cap_Indirect_SEntry _ => True
+       | Cap_Indirect_SEntry => True
        | _ => False
        end.
+
   (* Return [None] it the capability is "unsealed" and
      [Some OT] otherwise *)
   Definition get_obj_type (c:C): option OT
     := match get_seal c with
-       | Cap_Sealed _ otype => Some otype
+       | Cap_Sealed otype => Some otype
        | _ => None
        end.
 
