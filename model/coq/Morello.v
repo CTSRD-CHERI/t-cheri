@@ -144,9 +144,9 @@ Next Obligation.
   destruct H3; try congruence.
 Defined.
 
-Definition w64_to_ot_cast: w64 -> otype.
-  (* TODO: zero padding *)
-Admitted.
+(* take [otype_size] least significant bits of [w64] *)
+Definition w64_to_ot_cast (x:w64): otype :=
+  split1 15 49 (eq_rec_r word x eq_refl).
 
 Program Definition otype_of_w64 (ot:w64): option MObjectType
   := match is_Reserved_dec (w64_to_ot_cast ot) with
