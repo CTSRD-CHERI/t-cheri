@@ -280,6 +280,11 @@ lemma no_reg_writes_to_undefined_value[simp, no_reg_writes_toI]:
   unfolding choose_convert_def maybe_fail_def
   by (auto simp: no_reg_writes_to_def elim: Traces_cases split: option.splits)
 
+lemma no_reg_writes_to_choose_convert_default[simp, no_reg_writes_toI]:
+  "no_reg_writes_to Rs (choose_convert_default of_rv x desc)"
+  unfolding choose_convert_default_def maybe_fail_def
+  by (auto simp: no_reg_writes_to_def elim: Traces_cases split: option.splits)
+
 lemma no_reg_writes_to_choose_bool[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (choose_bool RV desc)"
   by (auto simp: choose_bool_def)

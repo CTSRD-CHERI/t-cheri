@@ -70,21 +70,21 @@ let get_kid_itself typ = match unaux_typ typ with
   | _ -> None
 
 let format_fun_name arch id = mangle_fun_name arch id
-let format_fun_args ?annot_kids:(annot_kids=false) arch f =
+let format_fun_args ?annot_kids:(annot_kids=false) arch args =
   let format_arg i (id, typ) =
     let arg = mangle_arg_name arch id in
     match get_kid_itself typ with
     | Some kid -> "(" ^ arg ^ " :: " ^ string_of_kid kid ^ "::len itself)"
     | None -> arg
   in
-  String.concat " " (List.mapi format_arg f.args)
+  String.concat " " (List.mapi format_arg args)
 let format_fun_call ?annot_kids:(annot_kids=false) arch id f =
   let tannot = match Type_check.destruct_bitvector arch.type_env f.ret_typ with
     | Some (Nexp_aux (Nexp_var kid, _), _) when annot_kids ->
        " :: " ^ string_of_kid kid ^ "::len word M"
     | _ -> ""
   in
-  format_fun_name arch id ^ " " ^ format_fun_args ~annot_kids arch f ^ tannot
+  format_fun_name arch id ^ " " ^ format_fun_args ~annot_kids arch f.args ^ tannot
 
 let apply_lemma_override arch id lemma_type lemma =
   match Bindings.find_opt id arch.lemma_overrides with
@@ -96,8 +96,9 @@ let apply_lemma_override arch id lemma_type lemma =
   | None -> lemma
 
 let get_fun_info ?annot_kids:(annot_kids=false) isa id =
-  let f = Bindings.find id isa.fun_infos in
-  (f, format_fun_name isa id, format_fun_call ~annot_kids isa id f)
+  match Bindings.find_opt id isa.fun_infos with
+  | Some f -> (f, format_fun_name isa id, format_fun_call ~annot_kids isa id f)
+  | None -> raise (Reporting.err_general Parse_ast.Unknown ("id not found: " ^ string_of_id id))
 
 let non_cap_exp_lemma isa id : lemma =
   let (f, name, call) = get_fun_info isa id in
@@ -141,18 +142,20 @@ let no_reg_writes_to_lemma no_exc isa id =
     proof = "(unfold " ^ name ^ "_def bind_assoc, no_reg_writes_toI)" }
   |> apply_lemma_override isa id (exc_prefix ^ "no_reg_writes_to")
 
-let non_failure_lemma isa id =
+let non_failure_lemma isa precond_funs id =
   let (f, name, call) = get_fun_info isa id in
-  let uses_regs = not (IdSet.is_empty f.trans_regs_written && IdSet.is_empty f.trans_regs_read) in
-  let assm = if uses_regs then "regs_ok registers tr \\<Longrightarrow> " else "" in
-  let cond = "False" in
-  { name = "non_failure_" ^ name;
-    attrs = "[failureD]"; assms = [];
-    stmts = ["Failed (" ^ call ^ ") tr msg \\<Longrightarrow> " ^ assm ^ cond];
+  let pre = begin match get_precond_args precond_funs id f.args with
+    | None -> "True"
+    | Some (id2, args2) -> "(" ^ format_fun_name isa id2 ^ " " ^
+        format_fun_args isa args2 ^ ")"
+  end in
+  let assm = "regs_ok registers" in
+  { name = "success_" ^ name;
+    attrs = "[exec_success]"; assms = [];
+    stmts = ["exec_success (" ^ call ^ ") (" ^ assm ^ ") " ^ pre];
     unfolding = []; using = [];
-    proof = "(unfold " ^ name ^ "_def; non_failure)" }
+    proof = "(unfold " ^ name ^ "_def; exec_success)" }
   |> apply_lemma_override isa id ("non_failure")
-
 
 (* We (currently) only need register write footprints of functions that have
    some capability effects and are called in a block before reads of specific
@@ -621,19 +624,36 @@ let output_mem_props chan (isa : isa) =
   output_line chan  "";
   output_line chan  "end"
 
-let output_non_failure_props chan (isa : isa) =
+let output_non_failure_props chan (isa : isa) precond_funs =
   output_line chan  "theory CHERI_Non_Failure";
-  output_line chan  "imports CHERI_Instantiation";
-  output_line chan  "  \"Sail-T-CHERI.Non_Failure\"";
+  output_line chan  "";
+  output_line chan  "imports CHERI_Non_Failure_Setup CHERI_Instantiation";
+  output_line chan  "";
   output_line chan  "begin";
   output_line chan  "";
 
   output_line chan
-    "lemmas read_reg_safe_inst[failureD] = read_reg_non_failure[where regs=registers]";
+    "lemmas exec_success_datatype_splits[exec_success_intro] =";
+  output_line chan
+    "    datatype_splits[where P=\"λm. exec_success_inner _ m _ \", THEN iffD2]";
+  output_line chan  "";
+
+  output_line chan
+    "lemmas non_failure_extra_defs =";
+  IdSet.elements isa.non_failure_unfolds
+    |> List.map (get_fun_info isa)
+    |> List.iter (fun (_, name, _) -> output_line chan ("    " ^ name ^ "_def"));
+  output_line chan  "";
+
+  output_line chan
+    "lemmas non_failure_extra_defs_unfolds[exec_success_intro] =";
+  output_line chan
+    "    non_failure_extra_defs[THEN ssubst[where P=\"λm. exec_success_inner _ m _ \"]]";
   output_line chan  "";
 
   filter_funs isa (fun id f -> effectful f)
-    |> List.map (non_failure_lemma isa)
+    |> List.filter (fun id -> not (IdSet.mem id isa.non_failure_unfolds))
+    |> List.map (non_failure_lemma isa precond_funs)
     |> List.map format_lemma |> List.iter (output_line chan);
 
   output_line chan  "";
@@ -642,6 +662,9 @@ let output_non_failure_props chan (isa : isa) =
 let process_isa file =
   let isa = load_isa file !opt_src_dir in
   let out_file name = Filename.concat !opt_out_dir name in
+
+  let (precond_env, precond_defs, precond_funs) =
+    get_preconds isa.type_env isa.ast in
 
   let chan = open_out (out_file "CHERI_Gen_Lemmas.thy") in
   output_cap_lemmas chan isa;
@@ -653,8 +676,11 @@ let process_isa file =
   flush chan;
   close_out chan;
 
+  Process_file.output "" (Process_file.Lem_out [isa.name])
+    [(out_file "preconditions.lem", precond_env, {defs = precond_defs; comments = []})];
+
   let chan = open_out (out_file "CHERI_Non_Failure.thy") in
-  output_non_failure_props chan isa;
+  output_non_failure_props chan isa precond_funs;
   flush chan;
   close_out chan;
 

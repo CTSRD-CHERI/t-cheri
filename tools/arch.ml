@@ -25,6 +25,7 @@ type isa =
     fun_renames : string Bindings.t;
     arg_renames : string Bindings.t;
     lemma_overrides : lemma_override StringMap.t Bindings.t;
+    non_failure_unfolds : IdSet.t;
     reg_ref_renames : string Bindings.t;
     skip_funs : IdSet.t;
     needed_footprints : IdSet.t;
@@ -171,6 +172,7 @@ let load_isa file src_dir =
     fun_renames;
     arg_renames;
     lemma_overrides;
+    non_failure_unfolds = optional_idset (member "non_failure_unfolds" arch);
     reg_ref_renames = Bindings.map to_string (optional_bindings (member "reg_ref_renames" arch));
     skip_funs = optional_idset (member "skips" arch);
     needed_footprints = optional_idset (member "needed_footprints" arch);

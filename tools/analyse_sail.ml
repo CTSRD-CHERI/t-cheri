@@ -93,6 +93,228 @@ let add_exception_fun exception_funs = function
 
 let exception_funs ast = List.fold_left add_exception_fun IdSet.empty ast.defs
 
+
+let false_exp = mk_exp (E_lit (L_aux (L_false, Parse_ast.Unknown)))
+let true_exp = mk_exp (E_lit (L_aux (L_true, Parse_ast.Unknown)))
+let mk_conj a b = mk_exp (E_app (mk_id "and_bool_no_flow", [a; b]))
+let mk_disj a b = mk_exp (E_app (mk_id "or_bool_no_flow", [a; b]))
+
+let rec mk_conjs = function
+  | [] -> true_exp
+  | [x] -> x
+  | (x :: xs) -> mk_conj x (mk_conjs xs)
+
+let throw_is_failure = function
+  | E_aux (E_app (id, _), _) -> string_of_id id = "Error_Undefined"
+  | _ -> false
+
+let mk_t_e x = E_aux (x, (Parse_ast.Unknown, Type_check.empty_tannot))
+let mk_t_eq x y = mk_t_e (E_app (mk_id "eq", [x; y]))
+
+let case_pat_exp_to_cond x = function
+  | Pat_exp (P_aux (P_lit l, _), rhs) -> Some (mk_t_eq x (mk_t_e (E_lit l)), rhs)
+  | Pat_when (P_aux (P_wild, _), c, rhs) -> Some (c, rhs)
+  | Pat_when (P_aux (P_id id, _), c, rhs) -> Some (subst id x c, subst id x rhs)
+  | _ -> None
+
+let rec case_to_if_worker (x, ps) = match ps with
+  | Pat_aux (Pat_exp (P_aux (P_wild, _), E_aux (rhs, _)), _) :: _ -> rhs
+  | Pat_aux (p_exp, _) :: ps_tail -> begin match case_pat_exp_to_cond x p_exp with
+    | None -> E_case (x, ps)
+    | Some (c, rhs) -> E_if (c, rhs, mk_t_e (case_to_if_worker (x, ps_tail)))
+  end
+  | _ -> E_case (x, ps)
+
+let case_to_if = fold_exp { id_exp_alg with e_case = case_to_if_worker}
+
+let ids_present ids =
+  fold_exp { (pure_exp_alg false (||)) with
+    e_id = fun id -> IdSet.mem id ids
+  }
+
+let ids_not_present ids exp = not (ids_present ids exp)
+
+let let_rhs_triv exp =
+  fold_exp { (pure_exp_alg false (&&)) with
+    e_id = (fun _ -> true);
+    e_lit = (fun _ -> true)
+  } exp
+
+let drop_tannot exp = map_exp_annot (fun (l, _) -> (l, ())) exp
+
+let filter_for_let fun_id ids assertions =
+  let xs = List.filter (ids_not_present ids) assertions in
+  let n = List.length assertions - List.length xs in
+  if n > 0
+  then prerr_endline ("dropped " ^ string_of_int n ^
+    " assertions (" ^
+    Util.string_of_list ", " string_of_id (IdSet.elements ids) ^ ") in " ^
+    string_of_id fun_id)
+  else ();
+  xs
+
+let apply_let_bind fun_id p body assertions = match p with
+  | P_aux (P_id id, _) -> if let_rhs_triv body
+    then List.map (subst id (drop_tannot body)) assertions
+    else filter_for_let fun_id (pat_ids p) assertions
+  | _ -> filter_for_let fun_id (pat_ids p) assertions
+
+let preconds_verbose = true
+
+let log_msg s = if preconds_verbose
+  then prerr_endline s else ()
+
+let precond_suffix = "_precondition"
+let precond_name id = append_id id precond_suffix
+
+let get_precond_args precond_funs id args = match Bindings.find_opt id precond_funs with
+  | None -> None
+  | Some None -> Some (precond_name id, args)
+  | Some (Some []) -> Some (precond_name id, [])
+  | Some (Some present) -> Some (precond_name id, List.map fst (List.filter snd
+    (List.map2 (fun a b -> (a, b)) args present)))
+
+let get_precond_app precond_funs id args =
+  match get_precond_args precond_funs id args with
+  | Some (id2, []) -> (log_msg ("including precond from " ^ string_of_id id2);
+        [mk_exp (E_app (id2, [mk_lit_exp L_unit]))])
+  | Some (id2, args2) -> (log_msg ("including precond from " ^ string_of_id id2);
+        [mk_exp (E_app (id2, List.map drop_tannot args2))])
+  | None -> []
+
+let rec scan_assertions_aux nm precond_funs x =
+  let scan = scan_assertions nm precond_funs in
+  match x with
+  | E_block es -> List.concat (List.map scan es)
+  | E_assert (e, msg) -> [drop_tannot e]
+  | E_if (c, x, y) -> begin match scan y with
+    | [] -> []
+    | xs -> [mk_disj (drop_tannot c) (mk_conjs xs)]
+    end
+  | E_cast (_, e) -> scan e
+  | E_throw e -> if throw_is_failure e then [false_exp] else []
+  | E_let (LB_aux (LB_val (p, e1), _), e2) ->
+        scan e1 @ apply_let_bind nm p e1 (scan e2)
+  | E_internal_plet (p, e1, e2) ->
+        scan e1 @ apply_let_bind nm p e1 (scan e2)
+  | E_app (id, args) -> get_precond_app precond_funs id args
+  | E_app_infix (lhs, id, rhs) -> get_precond_app precond_funs id [lhs; rhs]
+  | e -> []
+  and scan_assertions nm fun_assertions (E_aux (exp, _)) =
+    scan_assertions_aux nm fun_assertions exp
+
+let rec pat_id_list = function
+  | P_aux (P_id id, _) :: ps -> begin match pat_id_list ps with
+    | None -> None
+    | Some ids -> Some (id :: ids)
+  end
+  | [] -> Some []
+  | _ -> None
+
+let simplify_binding (p, body) = match p with
+  | P_aux (P_tup xs, _) -> begin match pat_id_list xs with
+    | None -> (p, None)
+    | Some ys ->
+      let ys_present = List.map (fun id -> (id,
+            ids_present (IdSet.singleton id) body)) ys in
+      let zs = List.map (fun (id, _) -> mk_pat (P_id id)) (List.filter snd ys_present) in
+      let p2 = match zs with
+        | [] -> mk_pat P_wild
+        | [p] -> p
+        | ps -> mk_pat (P_tup ps)
+      in
+      (p2, Some (List.map snd ys_present))
+  end
+  | P_aux (P_id id, _) -> if ids_present (IdSet.singleton id) body
+    then (p, None)
+    else (mk_pat P_wild, Some [])
+  | P_aux (P_lit (L_aux (L_unit, _)), _) -> (p, None)
+  | P_aux (_, (l, _)) ->
+  raise (Reporting.err_general l ("fundef pattern not tup or id " ^ string_of_pat p))
+
+let add_funcl_assertions env (precond_defs, precond_funs) = function
+  | FCL_aux (FCL_Funcl (id, Pat_aux (Pat_exp (p, body), _)), (l, _)) ->
+    log_msg ("scanning " ^ string_of_id id ^ " for preconditions");
+    let body2 = case_to_if body in
+    log_msg ("converted body");
+    begin match scan_assertions id precond_funs body2 with
+    | [] -> (precond_defs, precond_funs)
+    | assns ->
+      prerr_endline ("got a precondition for " ^ (string_of_id id));
+      let assn = mk_conjs assns in
+      let p2 = map_pat_annot (fun _ -> no_annot) p in
+      let (q, typ) = Type_check.Env.get_val_spec_orig id env in
+      let q_params = quant_items q in
+      if List.length q_params > 0
+      then
+        (prerr_endline ("dropping precondition for " ^ string_of_id id ^
+            ": type quantifiers: " ^
+            Util.string_of_list ", " string_of_quant_item q_params);
+            (precond_defs, precond_funs))
+      else
+      let (p3, adj_args) = simplify_binding (p2, assn) in
+      let pid = precond_name id in
+      let fund = mk_fundef [mk_funcl pid p3 assn] in
+      let ty_args = match unaux_typ typ with
+        | Typ_fn (ty_args, _, _) -> ty_args
+        | _ -> raise (Reporting.err_general Parse_ast.Unknown
+                ("unexpected non-function type of " ^ string_of_id id))
+      in
+      let precond_funs2 = Bindings.add id adj_args precond_funs in
+      let (_, ty_args2) = Option.get (get_precond_args precond_funs2 id ty_args) in
+      let ty_args3 = match ty_args2 with
+        | [] -> [unit_typ]
+        | _ -> ty_args2
+      in
+      let typ2 = mk_typ (Typ_fn (ty_args3, bool_typ, no_effect)) in
+      let spec = mk_val_spec (VS_val_spec (mk_typschm q typ2, pid, [], false)) in
+      (fund :: spec :: precond_defs, precond_funs2)
+    end
+  | FCL_aux (FCL_Funcl (id, pp), (l, _)) ->
+    raise (Reporting.err_general l ("unexpected pat_exp shape of " ^ string_of_id id))
+
+let add_fun_assertions env data = function
+  | DEF_fundef (FD_aux (FD_function (_, _, _, funcls), _)) ->
+     List.fold_left (add_funcl_assertions env) data funcls
+ | _ -> data
+
+let quote_funcl_def = function
+  | FCL_aux (FCL_Funcl (id, pexp), (l, _)) ->
+    prerr_endline ("def of " ^ string_of_id id ^ ": " ^ string_of_pexp pexp)
+
+let quote_fundef_defs = function
+  | DEF_fundef (FD_aux (FD_function (_, _, _, funcls), _)) ->
+     List.iter quote_funcl_def funcls
+  | _ -> ()
+
+let rec tcheck env cdefs = function
+  | [] -> (List.concat (List.concat (List.rev cdefs)), env)
+  | (def :: defs) ->
+  begin match def with
+    | DEF_fundef fundef ->
+        prerr_endline ("type checking fundef of " ^ string_of_id (id_of_fundef fundef))
+    | _ -> ()
+  end;
+  quote_fundef_defs def;
+  let env_defs = try Type_check.check_with_envs env [def]
+    with Type_check.Type_error (_, l, err) ->
+     raise (Reporting.err_typ l (Type_error.string_of_type_error err))
+  in
+  let def_cdefs = List.map fst env_defs in
+  let env2 = snd (List.hd (List.rev env_defs)) in
+  tcheck env2 (def_cdefs :: cdefs) defs
+
+let get_preconds env ast =
+  Reporting.opt_warnings := true;
+  prerr_endline ("getting preconds for " ^ (string_of_int (List.length ast.defs)) ^ " ast elems");
+  let (precond_defs1, precond_funs) = List.fold_left (add_fun_assertions env)
+    ([], Bindings.empty) ast.defs in
+  prerr_endline ("got " ^ string_of_int (List.length precond_defs1) ^ " precond ast elems");
+  prerr_endline ("type checking ..");
+  let (checked_defs, env2) = tcheck env [] (List.rev precond_defs1) in
+  prerr_endline ("done with preconds.");
+  (env2, checked_defs, precond_funs)
+
 let add_fun_infos_of_def env exception_funs fun_infos = function
   | DEF_fundef (FD_aux (FD_function (_, _, _, funcls), _) as fd) ->
      let id = id_of_fundef fd in

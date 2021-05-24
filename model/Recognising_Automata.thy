@@ -622,6 +622,11 @@ lemma non_cap_exp_undefined_value[non_cap_expI]:
   unfolding choose_convert_def maybe_fail_def
   by (auto simp: non_cap_exp_def elim: Traces_cases split: option.splits)
 
+lemma non_cap_exp_choose_convert_default[non_cap_expI]:
+  "non_cap_exp (choose_convert_default of_rv x descr)"
+  unfolding choose_convert_default_def maybe_fail_def
+  by (auto simp: non_cap_exp_def elim: Traces_cases split: option.splits)
+
 lemma non_cap_exp_choose_bool[non_cap_expI]:
   "non_cap_exp (choose_bool RV desc)"
   by (auto simp: choose_bool_def intro: non_cap_expI)
