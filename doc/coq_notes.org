@@ -97,15 +97,16 @@ Notes on idiomatic Coq formalization of CHERI capabilities.
    enforced by ~Capability~ class interface.
    
    To provide strong "correct by construction" interface for sealing
-   we introduced new types ~CapSealType~ and ~CapSeal~. The new ~get_seal~
-   method returns ~CapSeal~ value which contains both seal type and
-   optional object type in unambiguous format.
+   we introduced the new type ~CapSeal~. The new ~get_seal~ method returns
+   ~CapSeal~ value which contains both seal type and optional object
+   type in unambiguous format.
 
    To help working with this value and partially emulate old Lem
    interface 3 methods are provided: ~is_sealed~, ~is_sentry~,
    ~is_indirect_sentry~.  An additional partial function ~get_obj_type~
    returns an object type if the capability is sealed (via either of 3
    sealing methods).
+   
 ** Encoding/Decoding
    Will be dealt with separately.
 
@@ -114,6 +115,5 @@ Notes on idiomatic Coq formalization of CHERI capabilities.
 * Status
   - High-level formalization is in ~Capabilities.v~ but require more
     polishing.
-  - Need to define at least one concrete instance (e.g. for Morello)
   - Need to formalize encoding/decoding.
   - Try to add ITrees-bases high-level abstract monotonicity proof.
