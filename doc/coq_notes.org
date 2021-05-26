@@ -117,3 +117,11 @@ Notes on idiomatic Coq formalization of CHERI capabilities.
     polishing.
   - Need to formalize encoding/decoding.
   - Try to add ITrees-bases high-level abstract monotonicity proof.
+  - @thomas "It might also be good to prove some sanity check theorems
+    about derivability on the abstract level, e.g. if you start with a
+    set of capabilities where none has system access permission, then
+    you won't be able to derive one with that permission"
+  - I think it is a good theorem to try to prove of what could be
+    derived from "root" capability as defined in Morello spec ~RESET~
+    section.
+

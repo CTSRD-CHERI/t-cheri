@@ -89,7 +89,7 @@ Instance CPermissoin_MPermission: CPermission(MPermission) :=
 Record MCapability :=
   {
   is_valid: bool;
-  address: w64;
+  value: w64;
   bounds: w64_interval;
   perms: MPermission;
   is_global: bool;
@@ -146,7 +146,7 @@ Defined.
 
 (* take [otype_size] least significant bits of [w64] *)
 Definition w64_to_ot_cast (x:w64): otype :=
-  split1 15 49 (eq_rec_r word x eq_refl).
+  split1 otype_size (w64_size-otype_size) (eq_rec_r word x eq_refl).
 
 Program Definition otype_of_w64 (ot:w64): option MObjectType
   := match is_Reserved_dec (w64_to_ot_cast ot) with
@@ -154,10 +154,13 @@ Program Definition otype_of_w64 (ot:w64): option MObjectType
      | right p => Some (@exist _ _ (w64_to_ot_cast ot) _)
      end.
 
+Program Definition address_of_otype (ot:MObjectType): w64
+  := zext (proj1_sig ot) (w64_size-otype_size).
+
 Definition clear_global (c:MCapability): MCapability :=
   {|
   is_valid := is_valid c;
-  address := address c;
+  value := value c;
   bounds := bounds c;
   perms := perms c;
   is_global := false ;
@@ -168,7 +171,7 @@ Definition clear_global (c:MCapability): MCapability :=
 Definition unseal (c:MCapability): MCapability :=
   {|
   is_valid := is_valid c;
-  address := address c;
+  value := value c;
   bounds := bounds c;
   perms := perms c;
   is_global := is_global c;
@@ -179,7 +182,7 @@ Definition unseal (c:MCapability): MCapability :=
 Definition seal (c:MCapability) (ot:MObjectType): MCapability :=
   {|
   is_valid := is_valid c;
-  address := address c;
+  value := value c;
   bounds := bounds c;
   perms := perms c;
   is_global := is_global c;
@@ -187,19 +190,28 @@ Definition seal (c:MCapability) (ot:MObjectType): MCapability :=
   obj_type := proj1_sig ot
   |}.
 
+Program Definition get_value (c:MCapability) : @CapValue MObjectType w64 :=
+  if orb (permits_seal (perms c)) (permits_unseal (perms c))
+  then @CapToken MObjectType w64 (@exist _ _  (w64_to_ot_cast (value c)) _ )
+  else CapAddress (value c).
+Next Obligation.
+  (* How can we be sure that "value" is not "reserved"? *)
+Admitted.
+
+
 Program Instance CCapability_MCapability :
-  @CCapability MObjectType w64 CAddress_w64 MPermission (MCapability) :=
+  @CCapability MObjectType w64 CAddress_w64 MPermission _ (MCapability) :=
   {|
   Capabilities.is_valid := fun c => is_valid c = true ;
   Capabilities.get_bounds := fun c => bounds c ;
   Capabilities.get_perms := fun c => perms c ;
-  Capabilities.get_address := fun c => address c ;
+  Capabilities.get_value := fun c => get_value c;
   Capabilities.get_seal := fun c => Seal_of_otype (obj_type c) ;
   Capabilities.seal := seal ;
   Capabilities.unseal := unseal ;
   Capabilities.is_global := fun c => is_global c = true ;
   Capabilities.clear_global := clear_global;
-  Capabilities.otype_of_address := otype_of_w64 ;
+  Capabilities.address_of_otype := address_of_otype ;
   |}.
 
 (* --- Decoding/Encoding --- *)
