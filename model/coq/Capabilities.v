@@ -207,6 +207,14 @@ Section CCapabilityProperties.
           `{PERM: @CPermission P}
           `{CAPA: @CCapability OT A ADR P PERM C}.
 
+
+  (* Helper function to get address *)
+  Definition get_address (c:C) : A :=
+    match get_value c with
+    | CapAddress a => a
+    | CapToken t => address_of_otype t
+    end.
+
   (* Helper function to check if capability is sealed (with any kind of seal) *)
   Definition is_sealed (c:C) : Prop
     := match get_seal c with
