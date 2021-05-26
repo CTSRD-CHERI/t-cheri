@@ -142,6 +142,16 @@ Section CapabilityDefinition.
     is_global: C -> Prop;
     clear_global: C -> C;
 
+    (* Returns either inclusive bounds for covered
+     memory region *)
+    get_bounds: C -> address_interval;
+
+    (* Capabilities Bounds Invariants *)
+
+    bounds_seal_eq: forall c otype, get_bounds (seal c otype) = get_bounds c ;
+
+    bounds_clear_global_eq: forall c, get_bounds (clear_global c) = get_bounds c;
+
     (* Some additional logical properties from Isabelle Capabilities "locale" *)
 
     is_valid_seal: forall c t, is_valid (seal c t) = is_valid c ;
@@ -189,15 +199,6 @@ Section CapabilityDefinition.
     (* Previously "get_cursor" *)
     get_address: C -> A;
 
-    (* Returns either inclusive bounds for covered
-     memory region *)
-    get_bounds: C -> address_interval;
-
-    (* Capabilities Bounds Invariants *)
-
-    bounds_seal_eq: forall c otype, get_bounds (seal c otype) = get_bounds c ;
-
-    bounds_clear_global_eq: forall c, get_bounds (clear_global c) = get_bounds c;
     }.
 
 End CapabilityDefinition.
