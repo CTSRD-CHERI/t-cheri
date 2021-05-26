@@ -70,24 +70,9 @@ Section CAddressProperties.
 
 End CAddressProperties.
 
-Class CPermission (P:Type) :=
-  {
-  (* Convenience functions to examine some permission bits *)
-  permits_execute: P -> Prop;
-  permits_ccall: P -> Prop;
-  permits_load: P -> Prop;
-  permits_load_cap: P -> Prop;
-  permits_seal: P -> Prop;
-  permits_store: P -> Prop;
-  permits_store_cap: P -> Prop;
-  permits_store_local_cap: P -> Prop;
-  permits_system_access: P -> Prop;
-  permits_unseal: P -> Prop;
-  }.
-
+(*
 Section PermissinProperties.
-  Context `{ADR: CAddress A}
-          `{PERM: @CPermission P}.
+  Context `{ADR: CAddress A}.
 
   (* Logical comparison ofpermssions based solely on their properties
      expressed in [Permissoin] typeclass interface.  Underlying
@@ -122,17 +107,17 @@ Section PermissinProperties.
     ((permits_unseal p1          ) -> (permits_unseal p2)).
 
 End PermissinProperties.
+ *)
 
 Class CObjectType (OT:Type)
   :=
     {
     }.
 
-
 Section CapabilityDefinition.
+
   Context `{OTYPE: @CObjectType OT}
-          `{ADR: CAddress}
-          `{PERM: @CPermission P}.
+          `{ADR: CAddress}.
 
   Variant CapSeal :=
   | Cap_Unsealed
@@ -140,20 +125,11 @@ Section CapabilityDefinition.
   | Cap_Indirect_SEntry
   | Cap_Sealed (otype:OT).
 
+  (* Abstract generic capability. *)
   Class CCapability (C:Type) :=
     {
-
     (* Formerly "is_tagged" *)
     is_valid: C -> Prop;
-
-    (* Returns either inclusive bounds for covered
-     memory region *)
-    get_bounds: C -> address_interval;
-
-    get_perms: C -> P;
-
-    (* Previously "get_cursor" *)
-    get_address: C -> A;
 
     (* Get informaiton about "seal" on this capability *)
     get_seal: C -> CapSeal;
@@ -166,8 +142,6 @@ Section CapabilityDefinition.
     is_global: C -> Prop;
     clear_global: C -> C;
 
-    otype_of_address: A -> option OT;
-
     (* Some additional logical properties from Isabelle Capabilities "locale" *)
 
     is_valid_seal: forall c t, is_valid (seal c t) = is_valid c ;
@@ -176,12 +150,54 @@ Section CapabilityDefinition.
 
     is_valid_clear_global: forall c, is_valid (clear_global c) = is_valid c ;
 
+    }.
+
+  (* Capability associated with memory address *)
+  Class CSealingCapability (C:Type) :=
+    {
+    sealing_ccapbility :> CCapability(C);
+
+    (* Sealin permissions. TODO: exclusive *)
+    permits_seal: C -> Prop;
+    permits_unseal: C -> Prop;
+    }.
+
+  (* Capability for "integer type tokens" *)
+  Class CTokenCapability (C:Type) :=
+    {
+    token_ccapbility :> CCapability(C);
+
+    (* Previously "get_cursor" *)
+    get_value: C -> OT;
+    }.
+
+  (* Capability associated with memory address *)
+  Class CMemoryCapability (C:Type) :=
+    {
+    memory_ccapbility :> CCapability(C);
+
+    (* Memory-related permissions: TODO: at least one must be set *)
+    permits_execute: C -> Prop;
+    permits_ccall: C -> Prop;
+    permits_load: C -> Prop;
+    permits_load_cap: C -> Prop;
+    permits_store: C -> Prop;
+    permits_store_cap: C -> Prop;
+    permits_store_local_cap: C -> Prop;
+    permits_system_access: C -> Prop;
+
+    (* Previously "get_cursor" *)
+    get_address: C -> A;
+
+    (* Returns either inclusive bounds for covered
+     memory region *)
+    get_bounds: C -> address_interval;
+
     (* Capabilities Bounds Invariants *)
 
     bounds_seal_eq: forall c otype, get_bounds (seal c otype) = get_bounds c ;
 
     bounds_clear_global_eq: forall c, get_bounds (clear_global c) = get_bounds c;
-
     }.
 
 End CapabilityDefinition.
@@ -190,8 +206,7 @@ Section CCapabilityProperties.
 
   Context `{OTYPE: @CObjectType OT}
           `{ADR: CAddress A}
-          `{PERM: @CPermission P}
-          `{CAPA: @CCapability OT A ADR P C}.
+          `{CAPA: @CCapability OT C}.
 
   (* Helper function to check if capability is sealed (with any kind of seal) *)
   Definition is_sealed (c:C) : Prop
@@ -228,12 +243,17 @@ Section CCapabilityProperties.
   Definition cat_set_in (x:C) (cs:cap_set) : Prop
     := In _ cs x.
 
-  Definition get_mem_region (c:C): address_set
-    := addresses_in_interval (get_bounds c).
+  Section CMemoryCapabilityProperties.
+    Context `{CM: @CMemoryCapability OT A ADR C}.
 
-  (* "<=" relation on bounds *)
-  Definition bounds_leq: relation C :=
-    fun c1 c2 => interval_leq (get_bounds c1) (get_bounds c2).
+    Definition get_mem_region (c:C): address_set
+      := addresses_in_interval (get_bounds c).
+
+    (* "<=" relation on bounds *)
+    Definition bounds_leq: relation C :=
+      fun c1 c2 => interval_leq (get_bounds c1) (get_bounds c2).
+
+  End CMemoryCapabilityProperties.
 
   (* "<=" relation on Capabilities *)
   Definition cap_leq: relation C :=
