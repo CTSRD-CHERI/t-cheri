@@ -140,6 +140,11 @@ Section CapabilityDefinition.
   | Cap_Indirect_SEntry
   | Cap_Sealed (otype:OT).
 
+
+  Variant CapValue :=
+  | CapAddress (a:A)
+  | CapToken (ot:OT).
+
   Class CCapability (C:Type) :=
     {
 
@@ -153,7 +158,7 @@ Section CapabilityDefinition.
     get_perms: C -> P;
 
     (* Previously "get_cursor" *)
-    get_address: C -> A;
+    get_value: C -> CapValue;
 
     (* Get informaiton about "seal" on this capability *)
     get_seal: C -> CapSeal;
@@ -166,7 +171,16 @@ Section CapabilityDefinition.
     is_global: C -> Prop;
     clear_global: C -> C;
 
-    otype_of_address: A -> option OT;
+    (* Boldly assuming this one never fails *)
+    address_of_otype: OT -> A;
+
+
+    (* Syncing permissoins with value *)
+
+    sel_perms_value_type:
+      forall c, (permits_seal (get_perms c) \/ permits_unseal (get_perms c))
+           <->
+           exists t, get_value c = CapToken t;
 
     (* Some additional logical properties from Isabelle Capabilities "locale" *)
 
@@ -191,7 +205,7 @@ Section CCapabilityProperties.
   Context `{OTYPE: @CObjectType OT}
           `{ADR: CAddress A}
           `{PERM: @CPermission P}
-          `{CAPA: @CCapability OT A ADR P C}.
+          `{CAPA: @CCapability OT A ADR P PERM C}.
 
   (* Helper function to check if capability is sealed (with any kind of seal) *)
   Definition is_sealed (c:C) : Prop
@@ -273,9 +287,11 @@ Section CCapabilityProperties.
         ~ is_sealed c'' ->
         is_sealed c' ->
         permits_unseal (get_perms c'') ->
-        get_obj_type c' = otype_of_address (get_address c'') ->
-        address_set_in (get_address c'') (get_mem_region c'') ->
-        is_global c''
+        (exists ot'',
+            (get_value c'' = CapToken ot'' ->
+             get_obj_type c' = Some ot'' ->
+             address_set_in (address_of_otype ot'') (get_mem_region c'')))
+        -> is_global c''
         ->
         derivable cs (unseal c')
   | Unseal_not_global:
@@ -287,13 +303,15 @@ Section CCapabilityProperties.
         ~ is_sealed c'' ->
         is_sealed c' ->
         permits_unseal (get_perms c'') ->
-        get_obj_type c' = otype_of_address (get_address c'') ->
-        address_set_in (get_address c'') (get_mem_region c'') ->
-        ~ is_global c''
+        (exists ot'',
+            (get_value c'' = CapToken ot'' ->
+             get_obj_type c' = Some ot'' ->
+             address_set_in (address_of_otype ot'') (get_mem_region c'')))
+        ->  ~ is_global c''
         ->
         derivable cs (clear_global (unseal c'))
   | Seal:
-      forall c' c'' ot'', (* TODO: not sure about quantification on ot'' *)
+      forall c' c'' ot'',
         derivable cs c' ->
         derivable cs c'' ->
         is_valid c' ->
@@ -301,8 +319,8 @@ Section CCapabilityProperties.
         ~ is_sealed c' ->
         ~ is_sealed c'' ->
         permits_seal (get_perms c'') ->
-        address_set_in (get_address c'') (get_mem_region c'')  ->
-        otype_of_address (get_address c'') = Some ot''
+        get_value c'' = CapToken ot'' ->
+        address_set_in (address_of_otype ot'') (get_mem_region c'')
         ->
         derivable cs (seal c' ot'')
   | SealEntry:
@@ -310,8 +328,7 @@ Section CCapabilityProperties.
         derivable cs c' ->
         is_valid c' ->
         ~ is_sealed c' ->
-        (is_sentry (seal c' otype) \/
-         is_indirect_sentry (seal c' otype))
+        (is_sentry (seal c' otype) \/ is_indirect_sentry (seal c' otype))
         ->
         derivable cs (seal c' otype).
 
