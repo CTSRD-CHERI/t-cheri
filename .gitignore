@@ -22,3 +22,9 @@ Makefile.coq.conf
 .Makefile.coq.d
 nohup.out
 .coqdeps.d
+doc/working-note/t-cheri.bbl
+doc/working-note/t-cheri.blg
+doc/working-note/t-cheri.log
+doc/working-note/t-cheri.out
+doc/working-note/t-cheri.pdf
+
