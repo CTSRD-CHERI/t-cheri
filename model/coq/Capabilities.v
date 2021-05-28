@@ -174,10 +174,9 @@ Section CapabilityDefinition.
     (* Boldly assuming this one never fails *)
     address_of_otype: OT -> A;
 
-
     (* Syncing permissoins with value *)
 
-    sel_perms_value_type:
+    seal_perms_value_type:
       forall c, (permits_seal (get_perms c) \/ permits_unseal (get_perms c))
            <->
            exists t, get_value c = CapToken t;

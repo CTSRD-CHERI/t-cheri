@@ -86,18 +86,6 @@ Instance CPermissoin_MPermission: CPermission(MPermission) :=
     fun p : MPermission => permits_unseal p = true
   |}.
 
-Record MCapability :=
-  {
-  is_valid: bool;
-  value: w64;
-  bounds: w64_interval;
-  perms: MPermission;
-  is_global: bool;
-  is_execuvite : bool; (* Morello-spefic? *)
-
-  obj_type : otype;
-  }.
-
 Definition CAP_SEAL_TYPE_UNSEALED:otype := $0.
 Definition CAP_SEAL_TYPE_RB:otype       := $1.
 Definition CAP_SEAL_TYPE_LPB:otype      := $2.
@@ -126,6 +114,23 @@ Definition MObjectType := {v:otype | ~ is_Reserved_OT v}.
 Instance CObjectType_MObjectType:
   CObjectType(MObjectType).
 Qed.
+
+
+Record MCapability :=
+  {
+  is_valid: bool;
+
+  (* "Union" type of two values *)
+  value_addr: w64;
+  value_otype: MObjectType;
+
+  bounds: w64_interval;
+  perms: MPermission;
+  is_global: bool;
+  is_execuvite : bool; (* Morello-spefic? *)
+
+  obj_type : otype;
+  }.
 
 (* @thomas "In the Morello proof we treat RB as sentry and {LPB,LB} as indirect sentries."
    TODO: probably we can do this more elegantly w/o using Program.
@@ -160,7 +165,8 @@ Program Definition address_of_otype (ot:MObjectType): w64
 Definition clear_global (c:MCapability): MCapability :=
   {|
   is_valid := is_valid c;
-  value := value c;
+  value_addr := value_addr c;
+  value_otype := value_otype c;
   bounds := bounds c;
   perms := perms c;
   is_global := false ;
@@ -171,7 +177,8 @@ Definition clear_global (c:MCapability): MCapability :=
 Definition unseal (c:MCapability): MCapability :=
   {|
   is_valid := is_valid c;
-  value := value c;
+  value_addr := value_addr c;
+  value_otype := value_otype c;
   bounds := bounds c;
   perms := perms c;
   is_global := is_global c;
@@ -182,7 +189,8 @@ Definition unseal (c:MCapability): MCapability :=
 Definition seal (c:MCapability) (ot:MObjectType): MCapability :=
   {|
   is_valid := is_valid c;
-  value := value c;
+  value_addr := value_addr c;
+  value_otype := value_otype c;
   bounds := bounds c;
   perms := perms c;
   is_global := is_global c;
@@ -192,12 +200,28 @@ Definition seal (c:MCapability) (ot:MObjectType): MCapability :=
 
 Program Definition get_value (c:MCapability) : @CapValue MObjectType w64 :=
   if orb (permits_seal (perms c)) (permits_unseal (perms c))
-  then @CapToken MObjectType w64 (@exist _ _  (w64_to_ot_cast (value c)) _ )
-  else CapAddress (value c).
-Next Obligation.
-  (* How can we be sure that "value" is not "reserved"? *)
-Admitted.
+  then CapToken (value_otype c)
+  else CapAddress (value_addr c).
 
+Lemma seal_perms_value_type (c: MCapability):
+  permits_seal (perms c) = true \/ permits_unseal (perms c) = true
+  <->
+  (exists t : MObjectType, get_value  c = CapToken t).
+Proof.
+  split; unfold get_value; intros.
+  -
+    rewrite <- Bool.orb_true_iff in H.
+    rewrite H.
+    eauto.
+  -
+    destruct H.
+    break_if.
+    +
+      apply Bool.orb_true_iff.
+      auto.
+    +
+      inversion H.
+Qed.
 
 Program Instance CCapability_MCapability :
   @CCapability MObjectType w64 CAddress_w64 MPermission _ (MCapability) :=
@@ -212,6 +236,7 @@ Program Instance CCapability_MCapability :
   Capabilities.is_global := fun c => is_global c = true ;
   Capabilities.clear_global := clear_global;
   Capabilities.address_of_otype := address_of_otype ;
+  Capabilities.seal_perms_value_type := seal_perms_value_type;
   |}.
 
 (* --- Decoding/Encoding --- *)
