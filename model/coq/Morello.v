@@ -223,7 +223,7 @@ Proof.
       inversion H.
 Qed.
 
-Program Instance CCapability_MCapability :
+Instance CCapability_MCapability :
   @CCapability MObjectType w64 CAddress_w64 MPermission _ (MCapability) :=
   {|
   Capabilities.is_valid := fun c => is_valid c = true ;
@@ -231,13 +231,19 @@ Program Instance CCapability_MCapability :
   Capabilities.get_perms := fun c => perms c ;
   Capabilities.get_value := fun c => get_value c;
   Capabilities.get_seal := fun c => Seal_of_otype (obj_type c) ;
-  Capabilities.seal := seal ;
-  Capabilities.unseal := unseal ;
   Capabilities.is_global := fun c => is_global c = true ;
-  Capabilities.clear_global := clear_global;
   Capabilities.address_of_otype := address_of_otype ;
   Capabilities.seal_perms_value_type := seal_perms_value_type;
   |}.
+
+Program Instance CCapabilityOps_MCapability :
+  @CCapabilityOps _ _ _ _ _ _ CCapability_MCapability :=
+  {|
+  Capabilities.seal := seal ;
+  Capabilities.unseal := unseal ;
+  Capabilities.clear_global := clear_global;
+  |}.
+
 
 (* --- Decoding/Encoding --- *)
 

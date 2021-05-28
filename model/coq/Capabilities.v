@@ -145,9 +145,9 @@ Section CapabilityDefinition.
   | CapAddress (a:A)
   | CapToken (ot:OT).
 
+  (* Capability data type *)
   Class CCapability (C:Type) :=
     {
-
     (* Formerly "is_tagged" *)
     is_valid: C -> Prop;
 
@@ -163,13 +163,7 @@ Section CapabilityDefinition.
     (* Get informaiton about "seal" on this capability *)
     get_seal: C -> CapSeal;
 
-    (* TODO: these are for setting "simple" sealing.
-       Do we need similar for sentry and indirect sentry ? *)
-    seal: C -> OT -> C;
-    unseal: C -> C;
-
     is_global: C -> Prop;
-    clear_global: C -> C;
 
     (* Boldly assuming this one never fails *)
     address_of_otype: OT -> A;
@@ -180,6 +174,17 @@ Section CapabilityDefinition.
       forall c, (permits_seal (get_perms c) \/ permits_unseal (get_perms c))
            <->
            exists t, get_value c = CapToken t;
+
+    }.
+
+  (* Operations on capabilities *)
+  Class CCapabilityOps (C:Type) `{CAPS:CCapability C} :=
+    {
+    (* TODO: these are for setting "simple" sealing.
+       Do we need similar for sentry and indirect sentry ? *)
+    seal: C -> OT -> C;
+    unseal: C -> C;
+    clear_global: C -> C;
 
     (* Some additional logical properties from Isabelle Capabilities "locale" *)
 
@@ -194,8 +199,8 @@ Section CapabilityDefinition.
     bounds_seal_eq: forall c otype, get_bounds (seal c otype) = get_bounds c ;
 
     bounds_clear_global_eq: forall c, get_bounds (clear_global c) = get_bounds c;
-
     }.
+
 
 End CapabilityDefinition.
 
@@ -204,7 +209,8 @@ Section CCapabilityProperties.
   Context `{OTYPE: @CObjectType OT}
           `{ADR: CAddress A}
           `{PERM: @CPermission P}
-          `{CAPA: @CCapability OT A ADR P PERM C}.
+          `{CAPS: @CCapability OT A ADR P PERM C}
+          `{COPS: @CCapabilityOps OT A ADR P PERM C CAPS}.
 
 
   (* Helper function to get address *)
