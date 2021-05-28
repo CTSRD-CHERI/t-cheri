@@ -80,13 +80,10 @@ Notes on idiomatic Coq formalization of CHERI capabilities.
    - ~is_tagged~ is now ~is_valid~. Justification: in Morello Architecture spec it is
      referred as *validity tag*.
 ** Object Type vs Address
-   Capability sealing takes an /object type/. Sometimes truncated
-   address could be used as an object type, when it could be
-   guaranteed the upper bits are zeroes. To generalize this convention
-   we introduced implicit partial conversion function ~otype_of_address~
-   which could fail and return ~None~. In concrete implementations of
-   capabilities for specific ISAs and in related proofs we can reason
-   if and when this function could fail.
+   The capability ~value~ field can have different bounds depending on
+   permission flags. This idea is summarized in Table 3.1 in
+   UCAM-CL-TR-951. Basically it could contain either an /addrees/ or
+   an /object type/. We modelled this via ~CapValue~ variant type.
 ** Seal types
    In Lem model there is an ambiguity related to object type and
    sealing property. For example if ~is_sealed~ returns ~false~, the value
@@ -97,16 +94,15 @@ Notes on idiomatic Coq formalization of CHERI capabilities.
    enforced by ~Capability~ class interface.
    
    To provide strong "correct by construction" interface for sealing
-   we introduced the new type ~CapSeal~. The new ~get_seal~ method returns
-   ~CapSeal~ value which contains both seal type and optional object
-   type in unambiguous format.
+   we introduced new types ~CapSealType~ and ~CapSeal~. The new ~get_seal~
+   method returns ~CapSeal~ value which contains both seal type and
+   optional object type in unambiguous format.
 
    To help working with this value and partially emulate old Lem
    interface 3 methods are provided: ~is_sealed~, ~is_sentry~,
    ~is_indirect_sentry~.  An additional partial function ~get_obj_type~
    returns an object type if the capability is sealed (via either of 3
    sealing methods).
-   
 ** Encoding/Decoding
    Will be dealt with separately.
 
@@ -115,6 +111,7 @@ Notes on idiomatic Coq formalization of CHERI capabilities.
 * Status
   - High-level formalization is in ~Capabilities.v~ but require more
     polishing.
+  - Need to define at least one concrete instance (e.g. for Morello)
   - Need to formalize encoding/decoding.
   - Try to add ITrees-bases high-level abstract monotonicity proof.
   - @thomas "It might also be good to prove some sanity check theorems
