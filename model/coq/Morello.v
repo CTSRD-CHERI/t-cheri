@@ -124,7 +124,7 @@ Record MCapability :=
   value_addr: w64;
   value_otype: MObjectType;
 
-  bounds: w64_interval;
+  bounds: w64_interval; (* TODO: alignment *)
   perms: MPermission;
   is_global: bool;
   is_execuvite : bool; (* Morello-spefic? *)

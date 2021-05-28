@@ -180,25 +180,34 @@ Section CapabilityDefinition.
   (* Operations on capabilities *)
   Class CCapabilityOps (C:Type) `{CAPS:CCapability C} :=
     {
-    (* TODO: these are for setting "simple" sealing.
-       Do we need similar for sentry and indirect sentry ? *)
-    seal: C -> OT -> C;
+    seal: C -> C -> option C;
+    seal_entry: C -> C -> option C;
     unseal: C -> C;
+
+
+    (* TODO: could not find instruction for this *)
     clear_global: C -> C;
 
-    (* Some additional logical properties from Isabelle Capabilities "locale" *)
+    (* Narrow permissions *)
+    narrow_perms: C -> P -> option C ;
 
-    is_valid_seal: forall c t, is_valid (seal c t) = is_valid c ;
+    invalidate: C -> C ;
 
-    is_valid_unseal: forall c, is_valid (unseal c) = is_valid c ;
+    (* NULL capability *)
+    C0 : C ;
 
-    is_valid_clear_global: forall c, is_valid (clear_global c) = is_valid c ;
+    set_addr: C -> option C;
 
-    (* Capabilities Bounds Invariants *)
+    narrow_bounds: C -> address_interval -> option C;
 
-    bounds_seal_eq: forall c otype, get_bounds (seal c otype) = get_bounds c ;
+    (* subtract capabilities *)
+    sub: C -> C -> C ;
 
-    bounds_clear_global_eq: forall c, get_bounds (clear_global c) = get_bounds c;
+
+    copy_type: C -> C -> option C ;
+
+    build_cap: C -> C -> option C ;
+
     }.
 
 
@@ -211,7 +220,6 @@ Section CCapabilityProperties.
           `{PERM: @CPermission P}
           `{CAPS: @CCapability OT A ADR P PERM C}
           `{COPS: @CCapabilityOps OT A ADR P PERM C CAPS}.
-
 
   (* Helper function to get address *)
   Definition get_address (c:C) : A :=
