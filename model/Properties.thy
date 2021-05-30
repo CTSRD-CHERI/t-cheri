@@ -101,22 +101,17 @@ lemma Run_hasTrace: "Run m t a \<Longrightarrow> hasTrace t m"
 
 section \<open>Single-instruction monotonicity\<close>
 
-locale CHERI_ISA = Capability_Invariant_ISA CC ISA initial_caps cap_invariant
-  for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
-    and cap_invariant :: "'cap \<Rightarrow> bool" and initial_caps :: "'cap set" +
-  fixes fetch_assms :: "'regval trace \<Rightarrow> bool" and instr_assms :: "'instr \<Rightarrow> 'regval trace \<Rightarrow> bool"
-  assumes instr_cheri_axioms: "\<And>t n instr. hasTrace t \<lbrakk>instr\<rbrakk> \<Longrightarrow> n \<le> length t \<Longrightarrow> instr_available_caps_invariant instr t n \<Longrightarrow> instr_assms instr t \<Longrightarrow> instr_cheri_axioms instr t n"
-    and fetch_cheri_axioms: "\<And>t n. hasTrace t (instr_fetch ISA) \<Longrightarrow> n \<le> length t \<Longrightarrow> fetch_available_caps_invariant t n \<Longrightarrow> fetch_assms t \<Longrightarrow> fetch_cheri_axioms t n"
-
 locale CHERI_ISA_State =
-  CHERI_ISA CC ISA cap_invariant initial_caps fetch_assms instr_assms +
+  Capability_Invariant_ISA CC ISA initial_caps cap_invariant +
   Register_State get_regval set_regval
   for CC :: "'cap Capability_class"
   and ISA :: "('cap, 'regval, 'instr, 'e) isa"
   and cap_invariant :: "'cap \<Rightarrow> bool"
   and initial_caps :: "'cap set"
-  and fetch_assms :: "'regval trace \<Rightarrow> bool"
-  and instr_assms :: "'instr \<Rightarrow> 'regval trace \<Rightarrow> bool"
+  and fetch_trace_assms :: "'regval trace \<Rightarrow> bool"
+  and fetch_state_assms :: "'regs sequential_state \<Rightarrow> bool"
+  and instr_trace_assms :: "'instr \<Rightarrow> 'regval trace \<Rightarrow> bool"
+  and instr_state_assms :: "'instr \<Rightarrow> 'regs sequential_state \<Rightarrow> bool"
   and get_regval :: "register_name \<Rightarrow> 'regs \<Rightarrow> 'regval option"
   and set_regval :: "register_name \<Rightarrow> 'regval \<Rightarrow> 'regs \<Rightarrow> 'regs option" +
   (* State versions of ISA model parameters *)
@@ -128,6 +123,8 @@ locale CHERI_ISA_State =
     and translate_address_tag_aligned_iff: "\<And>s vaddr paddr load.
           s_translate_address vaddr load s = Some paddr \<Longrightarrow>
           address_tag_aligned ISA paddr \<longleftrightarrow> address_tag_aligned ISA vaddr"
+    and instr_cheri_axioms: "\<And>t n instr s. hasTrace t \<lbrakk>instr\<rbrakk> \<Longrightarrow> n \<le> length t \<Longrightarrow> s_allows_trace t s \<Longrightarrow> instr_available_caps_invariant instr t n \<Longrightarrow> instr_trace_assms instr t \<Longrightarrow> instr_state_assms instr s \<Longrightarrow> instr_cheri_axioms instr t n"
+    and fetch_cheri_axioms: "\<And>t n s. hasTrace t (instr_fetch ISA) \<Longrightarrow> n \<le> length t \<Longrightarrow> s_allows_trace t s \<Longrightarrow> fetch_available_caps_invariant t n \<Longrightarrow> fetch_trace_assms t \<Longrightarrow> fetch_state_assms s \<Longrightarrow> fetch_cheri_axioms t n"
 begin
 
 fun get_reg_caps :: "register_name \<Rightarrow> 'regs sequential_state \<Rightarrow> 'cap set" where
@@ -1012,28 +1009,42 @@ qed
 
 abbreviation "invoked_instr_caps instr t \<equiv> invokes_caps ISA instr t \<union> invokes_indirect_caps ISA instr t"
 
+
+lemma runTraceS_take:
+  assumes "runTraceS ra t s = Some s'" and n: "n \<le> length t"
+  obtains s1 where "runTraceS ra (take n t) s = Some s1"
+proof -
+  have "runTraceS ra (take n t @ drop n t) s = Some s'"
+    using assms
+    by auto
+  then show thesis by (blast elim: runTraceS_appendE runTraceS_ConsE intro: that)
+qed
+
 lemma hasTrace_instr_cheri_axioms:
   assumes t: "hasTrace t (instr_sem ISA instr)"
     and ci: "\<forall>c \<in> reachable_caps_plus C' s. is_tagged_method CC c \<longrightarrow> cap_invariant c"
     and initial_caps: "initial_caps \<subseteq> C'"
-    and ta: "instr_assms instr t"
-    and s': "s_run_trace (take n t) s = Some s'"
+    and ta: "instr_trace_assms instr t"
+    and sa: "instr_state_assms instr s"
+    and s': "s_run_trace t s = Some s'"
     and n: "n \<le> length t"
   shows "instr_cheri_axioms instr t n \<and> instr_available_caps_invariant instr t n"
-proof (use s' n in \<open>induction n arbitrary: s'\<close>)
+proof (use n in \<open>induction n arbitrary: s'\<close>)
   case 0
   then show ?case
-    using instr_cheri_axioms[OF t _ _ ta, where n = 0]
+    using instr_cheri_axioms[OF t _ _ _ ta sa, where n = 0] s'
     by (auto simp: available_caps_invariant_def)
 next
   case (Suc n)
   then obtain s'' where s'': "s_run_trace (take n t) s = Some s''" and n: "n \<le> length t"
-    by (auto simp: take_Suc_conv_app_nth runTraceS_append_iff)
+    using s'
+    by (auto elim: runTraceS_take[where n = n])
+  find_theorems runTraceS take
   let ?C = "available_caps CC ISA (invokes_indirect_caps ISA instr t = {} \<and> uses_mem_caps ISA instr t) n (take n t)"
   have "initial_caps \<union> ?C \<subseteq> derivable (initial_caps \<union> ?C)"
     by (rule derivable_refl)
   also have "\<dots> \<subseteq> reachable_caps_plus initial_caps s"
-    using Suc.IH[OF s'' n] s''
+    using Suc.IH[OF n] s''
     by (intro derivable_available_caps_subseteq_reachable_caps) auto
   also have "\<dots> \<subseteq> reachable_caps_plus C' s"
     by (rule reachable_caps_plus_mono[OF initial_caps])
@@ -1041,10 +1052,10 @@ next
     using that ci
     by auto
   then have inv: "instr_available_caps_invariant instr t (Suc n)"
-    using Suc.IH[OF s'' n]
+    using Suc.IH[OF n]
     by (auto simp: available_caps_invariant_def less_Suc_eq)
   moreover have "instr_cheri_axioms instr t (Suc n)"
-    using inv Suc.prems t ta
+    using inv Suc.prems t ta sa s'
     by (intro instr_cheri_axioms) auto
   ultimately show ?case
     by auto
@@ -1054,7 +1065,8 @@ lemma reachable_caps_plus_instr_trace_intradomain_monotonicity:
   assumes t: "hasTrace t (instr_sem ISA instr)"
     and ci: "\<forall>c \<in> reachable_caps_plus C'' s. is_tagged_method CC c \<longrightarrow> cap_invariant c"
     and initial_caps: "initial_caps \<subseteq> C''"
-    and ta: "instr_assms instr t"
+    and ta: "instr_trace_assms instr t"
+    and sa: "instr_state_assms instr s"
     and s': "s_run_trace t s = Some s'"
     and no_exception: "\<not>instr_raises_ex ISA instr t"
     and addr_trans_inv: "s_invariant_holds (addr_trans_invariant_plus C' False s) t s"
@@ -1065,7 +1077,7 @@ proof -
     using addr_trans_inv addr_trans_invariant_plus_antimono[OF _ C']
     by (elim s_invariant_holds_weaken) auto
   then have "reachable_caps_plus C s' \<subseteq> reachable_caps_plus (C \<union> initial_caps \<union> invoked_instr_caps instr t) s"
-    using assms hasTrace_instr_cheri_axioms[OF t ci initial_caps ta, where n = "length t"]
+    using assms hasTrace_instr_cheri_axioms[OF t ci initial_caps ta sa, where n = "length t"]
     by (intro reachable_caps_plus_trace_intradomain_monotonicity) auto
   then show ?thesis
     using reachable_caps_plus_mono[OF C']
@@ -1075,7 +1087,8 @@ qed
 lemma reachable_caps_instr_trace_intradomain_monotonicity:
   assumes t: "hasTrace t (instr_sem ISA instr)"
     and ci: "\<forall>c \<in> reachable_caps s. is_tagged_method CC c \<longrightarrow> cap_invariant c"
-    and ta: "instr_assms instr t"
+    and ta: "instr_trace_assms instr t"
+    and sa: "instr_state_assms instr s"
     and s': "s_run_trace t s = Some s'"
     and no_exception: "\<not>instr_raises_ex ISA instr t"
     and invoked_caps_reachable: "invoked_instr_caps instr t \<subseteq> reachable_caps s"
@@ -1087,7 +1100,7 @@ proof -
     using invoked_caps_reachable initial_caps_reachable
     by simp
   have "reachable_caps_plus {} s' \<subseteq> reachable_caps_plus ({} \<union> initial_caps \<union> invoked_instr_caps instr t) s"
-    using t ci ta s' no_exception addr_trans_inv
+    using t ci ta sa s' no_exception addr_trans_inv
     by (intro reachable_caps_plus_instr_trace_intradomain_monotonicity[where C'' = "initial_caps"])
        (auto simp: addr_trans_invariant_plus_subset_reachable_caps_eq[OF *]
                    reachable_caps_plus_subset_eq[OF initial_caps_reachable])
@@ -1099,24 +1112,26 @@ lemma hasTrace_fetch_cheri_axioms:
   assumes t: "hasTrace t (instr_fetch ISA)"
     and ci: "\<forall>c \<in> reachable_caps_plus C' s. is_tagged_method CC c \<longrightarrow> cap_invariant c"
     and initial_caps: "initial_caps \<subseteq> C'"
-    and ta: "fetch_assms t"
-    and s': "s_run_trace (take n t) s = Some s'"
+    and ta: "fetch_trace_assms t"
+    and sa: "fetch_state_assms s"
+    and s': "s_run_trace t s = Some s'"
     and n: "n \<le> length t"
   shows "fetch_cheri_axioms t n \<and> fetch_available_caps_invariant t n"
-proof (use s' n in \<open>induction n arbitrary: s'\<close>)
+proof (use n in \<open>induction n arbitrary: s'\<close>)
   case 0
   then show ?case
-    using fetch_cheri_axioms[OF t _ _ ta, where n = 0]
+    using fetch_cheri_axioms[OF t _ _ _ ta sa, where n = 0] s'
     by (auto simp: available_caps_invariant_def)
 next
   case (Suc n)
   then obtain s'' where s'': "s_run_trace (take n t) s = Some s''" and n: "n \<le> length t"
-    by (auto simp: take_Suc_conv_app_nth runTraceS_append_iff)
+    using s'
+    by (auto elim: runTraceS_take[where n = n])
   let ?C = "available_caps CC ISA ({} = ({} :: 'cap set) \<and> True) n (take n t)"
   have "initial_caps \<union> ?C \<subseteq> derivable (initial_caps \<union> ?C)"
     by (rule derivable_refl)
   also have "\<dots> \<subseteq> reachable_caps_plus initial_caps s"
-    using Suc.IH[OF s'' n] s''
+    using Suc.IH[OF n] s''
     by (intro derivable_available_caps_subseteq_reachable_caps) auto
   also have "\<dots> \<subseteq> reachable_caps_plus C' s"
     by (rule reachable_caps_plus_mono[OF initial_caps])
@@ -1124,10 +1139,10 @@ next
     using that ci
     by auto
   then have inv: "fetch_available_caps_invariant t (Suc n)"
-    using Suc.IH[OF s'' n]
+    using Suc.IH[OF n]
     by (auto simp: available_caps_invariant_def less_Suc_eq)
   moreover have "fetch_cheri_axioms t (Suc n)"
-    using inv Suc.prems t ta
+    using inv Suc.prems t ta sa s'
     by (intro fetch_cheri_axioms) auto
   ultimately show ?case
     by auto
@@ -1137,7 +1152,8 @@ lemma reachable_caps_plus_fetch_trace_intradomain_monotonicity:
   assumes t: "hasTrace t (instr_fetch ISA)"
     and ci: "\<forall>c \<in> reachable_caps_plus C'' s. is_tagged_method CC c \<longrightarrow> cap_invariant c"
     and initial_caps: "initial_caps \<subseteq> C''"
-    and ta: "fetch_assms t"
+    and ta: "fetch_trace_assms t"
+    and sa: "fetch_state_assms s"
     and s': "s_run_trace t s = Some s'"
     and no_exception: "\<not>fetch_raises_ex ISA t"
     and addr_trans_inv: "s_invariant_holds (addr_trans_invariant_plus C' False s) t s"
@@ -1159,7 +1175,8 @@ lemma reachable_caps_fetch_trace_intradomain_monotonicity:
   assumes t: "hasTrace t (instr_fetch ISA)"
     and ci: "\<forall>c \<in> reachable_caps s. is_tagged_method CC c \<longrightarrow> cap_invariant c"
     and initial_caps: "initial_caps \<subseteq> reachable_caps s"
-    and ta: "fetch_assms t"
+    and ta: "fetch_trace_assms t"
+    and sa: "fetch_state_assms s"
     and s': "s_run_trace t s = Some s'"
     and no_exception: "\<not>fetch_raises_ex ISA t"
     and addr_trans_inv: "s_invariant_holds (addr_trans_invariant False s) t s"
@@ -1277,14 +1294,14 @@ declare instrs_raise_ex.simps[simp del]
 context CHERI_ISA_State
 begin
 
-fun instrs_assms :: "nat \<Rightarrow> 'regval trace \<Rightarrow> bool" where
-  "instrs_assms (Suc n) t =
+fun instrs_trace_assms :: "nat \<Rightarrow> 'regval trace \<Rightarrow> bool" where
+  "instrs_trace_assms (Suc n) t =
      (\<forall>nf. consumesTrace (instr_fetch ISA) t = Some nf
-       \<longrightarrow> fetch_assms (take nf t)
+       \<longrightarrow> fetch_trace_assms (take nf t)
          \<and> (\<forall>instr ni. runTrace (take nf t) (instr_fetch ISA) = Some (Done instr)
                      \<and> consumesTrace (instr_sem ISA instr) (drop nf t) = Some ni
-                    \<longrightarrow> instr_assms instr (take ni (drop nf t)) \<and> instrs_assms n (drop (nf + ni) t)))"
-| "instrs_assms 0 t = True"
+                    \<longrightarrow> instr_trace_assms instr (take ni (drop nf t)) \<and> instrs_trace_assms n (drop (nf + ni) t)))"
+| "instrs_trace_assms 0 t = True"
 
 abbreviation "invoked_instrs_caps n t \<equiv> instrs_invoke_caps ISA n t \<union> instrs_invoke_indirect_caps ISA n t"
 
@@ -1295,13 +1312,50 @@ lemma invoked_instrs_caps_Suc:
   using assms
   by (auto simp: instrs_invoke_caps_Suc instrs_invoke_indirect_caps_Suc)
 
+definition instrs_preserve_state_assms_plus where
+  "instrs_preserve_state_assms_plus C s0 \<equiv>
+     (\<forall>t instr s s'.
+        Run (instr_sem ISA instr) t () \<and> s_run_trace t s = Some s' \<and>
+        instr_trace_assms instr t \<and> instr_state_assms instr s \<and>
+        reachable_caps s' \<subseteq> reachable_caps_plus C s0
+      \<longrightarrow> fetch_state_assms s')"
+
+abbreviation "instrs_preserve_state_assms s0 \<equiv> instrs_preserve_state_assms_plus {} s0"
+
+lemma instrs_preserve_state_assms_plus_subset:
+  assumes "reachable_caps_plus C s0 \<subseteq> reachable_caps_plus C' s0'"
+    and "instrs_preserve_state_assms_plus C' s0'"
+  shows "instrs_preserve_state_assms_plus C s0"
+  using assms
+  by (fastforce simp: instrs_preserve_state_assms_plus_def)
+
+definition fetch_preserves_state_assms_plus where
+  "fetch_preserves_state_assms_plus C s0 \<equiv>
+     (\<forall>t instr s s'.
+        Run (instr_fetch ISA) t instr \<and> s_run_trace t s = Some s' \<and>
+        fetch_trace_assms t \<and> fetch_state_assms s \<and>
+        reachable_caps s' \<subseteq> reachable_caps_plus C s0
+      \<longrightarrow> instr_state_assms instr s')"
+
+abbreviation "fetch_preserves_state_assms s0 \<equiv> fetch_preserves_state_assms_plus {} s0"
+
+lemma fetch_preserves_state_assms_plus_subset:
+  assumes "reachable_caps_plus C s0 \<subseteq> reachable_caps_plus C' s0'"
+    and "fetch_preserves_state_assms_plus C' s0'"
+  shows "fetch_preserves_state_assms_plus C s0"
+  using assms
+  by (fastforce simp: fetch_preserves_state_assms_plus_def)
+
 lemma reachable_caps_plus_instrs_trace_intradomain_monotonicity:
   assumes t: "hasTrace t (fetch_execute_loop ISA n)"
     and ci: "\<forall>c \<in> reachable_caps_plus (initial_caps \<union> invoked_instrs_caps n t) s. is_tagged_method CC c \<longrightarrow> cap_invariant c"
-    and ta: "instrs_assms n t"
+    and ta: "instrs_trace_assms n t"
+    and sa: "fetch_state_assms s"
     and s': "s_run_trace t s = Some s'"
     and no_exception: "\<not>instrs_raise_ex ISA n t"
     and addr_trans_inv: "s_invariant_holds (addr_trans_invariant_plus (initial_caps \<union> invoked_instrs_caps n t) False s) t s"
+    and "instrs_preserve_state_assms_plus (initial_caps \<union> invoked_instrs_caps n t) s"
+    and "fetch_preserves_state_assms_plus (initial_caps \<union> invoked_instrs_caps n t) s"
   shows "reachable_caps s' \<subseteq> reachable_caps_plus (initial_caps \<union> invoked_instrs_caps n t) s"
 proof (use assms in \<open>induction n arbitrary: s t\<close>)
   case 0
@@ -1343,8 +1397,8 @@ next
     have no_fetch_ex: "\<not>fetch_raises_ex ISA tf"
       using Suc.prems \<open>t = tf @ t'\<close>
       by auto
-    have ta': "fetch_assms tf"
-      using Bind \<open>instrs_assms (Suc n) t\<close>
+    have ta': "fetch_trace_assms tf"
+      using Bind \<open>instrs_trace_assms (Suc n) t\<close>
       by (auto simp: Run_hasTrace[THEN hasTrace_consumesTrace])
     have fetch_mono: "reachable_caps_plus (initial_caps \<union> invoked_instrs_caps (Suc n) t) s'' \<subseteq> reachable_caps_plus (initial_caps \<union> invoked_instrs_caps (Suc n) t) s"
       using tf s'' Bind Suc.prems ta'
@@ -1358,6 +1412,12 @@ next
       using hasTrace_fetch_cheri_axioms[OF tf, where n = "length tf" and C' = "initial_caps \<union> invoked_instrs_caps (Suc n) (tf @ t')" and s = s]
       unfolding \<open>t = tf @ t'\<close>
       by (elim s_invariant_holds_addr_trans_append_right; auto simp: Un_commute)
+    have "instr_state_assms instr s''"
+      using \<open>fetch_preserves_state_assms_plus (initial_caps \<union> invoked_instrs_caps (Suc n) t) s\<close>
+      using \<open>Run (instr_fetch ISA) tf instr\<close> s'' ta' \<open>fetch_state_assms s\<close>
+      using subset_trans[OF reachable_caps_subset_plus fetch_mono]
+      unfolding fetch_preserves_state_assms_plus_def
+      by auto
     from \<open>(\<lbrakk>instr\<rbrakk> \<then> fetch_execute_loop ISA n, t', m') \<in> Traces\<close>
     have "reachable_caps s' \<subseteq> reachable_caps_plus (initial_caps \<union> invoked_instrs_caps (Suc n) t) s''"
     proof (cases rule: bind_Traces_cases)
@@ -1365,8 +1425,8 @@ next
       then have *: "hasTrace t' \<lbrakk>instr\<rbrakk>"
         using m'
         by (auto elim!: final_bind_cases) (auto simp: hasTrace_iff_Traces_final final_def)
-      have ta'': "instr_assms instr t'"
-        using Bind \<open>instrs_assms (Suc n) t\<close> hasTrace_consumesTrace[where t' = "[]", OF *]
+      have ta'': "instr_trace_assms instr t'"
+        using Bind \<open>instrs_trace_assms (Suc n) t\<close> hasTrace_consumesTrace[where t' = "[]", OF *]
         by (auto simp: Run_hasTrace[THEN hasTrace_consumesTrace])
       have inv'': "s_invariant_holds (addr_trans_invariant_plus ({} \<union> initial_caps \<union> invoked_instr_caps instr t') False s'') t' s''"
         using inv' \<open>t = tf @ t'\<close>
@@ -1374,7 +1434,7 @@ next
         using instrs_invoke_indirect_caps_Suc[OF \<open>Run (instr_fetch ISA) tf instr\<close> *, where t' = "[]"]
         by (elim s_invariant_holds_weaken addr_trans_invariant_plus_antimono) auto
       have "reachable_caps_plus {} s' \<subseteq> reachable_caps_plus ({} \<union> initial_caps \<union> invoked_instr_caps instr t') s''"
-        using * tf t' s'' Bind Suc.prems inv'' ta'' fetch_cap_inv
+        using * tf t' s'' Bind Suc.prems inv'' ta'' fetch_cap_inv \<open>instr_state_assms instr s''\<close>
         using instrs_raise_ex_Suc[OF \<open>Run (instr_fetch ISA) tf instr\<close> *, where t' = "[]"]
         by (intro reachable_caps_plus_instr_trace_intradomain_monotonicity)
            (auto simp add: runTrace_iff_Traces)
@@ -1391,8 +1451,8 @@ next
       have ti: "hasTrace ti \<lbrakk>instr\<rbrakk>"
         using Bind
         by (auto simp: hasTrace_iff_Traces_final final_def)
-      have ta'': "instr_assms instr ti" "instrs_assms n t''"
-        using Bind \<open>Run (instr_fetch ISA) tf instr\<close> \<open>t = tf @ t'\<close> \<open>instrs_assms (Suc n) t\<close>
+      have ta'': "instr_trace_assms instr ti" "instrs_trace_assms n t''"
+        using Bind \<open>Run (instr_fetch ISA) tf instr\<close> \<open>t = tf @ t'\<close> \<open>instrs_trace_assms (Suc n) t\<close>
         by (auto simp: Run_hasTrace[THEN hasTrace_consumesTrace])
       have no_exception': "\<not>fetch_raises_ex ISA tf" "\<not>instr_raises_ex ISA instr ti"
         and no_exception'': "\<not>instrs_raise_ex ISA n t''"
@@ -1404,7 +1464,7 @@ next
         unfolding \<open>t = tf @ t'\<close> \<open>t' = ti @ t''\<close>
         by auto
       have instr_mono: "reachable_caps_plus (initial_caps \<union> invoked_instrs_caps n t'') s''' \<subseteq> reachable_caps_plus (initial_caps \<union> invoked_instrs_caps (Suc n) t) s''"
-        using ti s''' no_exception' inv' ta'' fetch_cap_inv
+        using ti s''' no_exception' inv' ta'' fetch_cap_inv \<open>instr_state_assms instr s''\<close>
         using inv'[unfolded \<open>t' = ti @ t''\<close> inv_caps, THEN s_invariant_holds_addr_trans_append_left]
         unfolding inv_caps
         by (intro reachable_caps_plus_instr_trace_intradomain_monotonicity, blast+)
@@ -1412,11 +1472,25 @@ next
         using fetch_cap_inv
         by auto
       have inv'': "s_invariant_holds (addr_trans_invariant_plus (initial_caps \<union> invoked_instrs_caps n t'') False s''') t'' s'''"
-        using inv' s''' Bind ta'' no_exception' instr_mono fetch_cap_inv
+        using inv' s''' Bind ta'' no_exception' instr_mono fetch_cap_inv \<open>instr_state_assms instr s''\<close>
         using hasTrace_instr_cheri_axioms[OF ti fetch_cap_inv, where n = "length ti"]
         unfolding \<open>t' = ti @ t''\<close>
-        by (elim s_invariant_holds_addr_trans_append_right) (auto intro: instr_cheri_axioms)
-      have "reachable_caps s' \<subseteq> reachable_caps_plus (initial_caps \<union> invoked_instrs_caps n t'') s'''"
+        by (elim s_invariant_holds_addr_trans_append_right) auto
+      have "fetch_state_assms s'''"
+        using \<open>instrs_preserve_state_assms_plus (initial_caps \<union> invoked_instrs_caps (Suc n) t) s\<close>
+        using \<open>Run \<lbrakk>instr\<rbrakk> ti am\<close> s''' ta'' \<open>instr_state_assms instr s''\<close>
+        using subset_trans[OF subset_trans[OF reachable_caps_subset_plus instr_mono] fetch_mono]
+        unfolding instrs_preserve_state_assms_plus_def
+        by auto
+      moreover have "instrs_preserve_state_assms_plus (initial_caps \<union> invoked_instrs_caps n t'') s'''"
+        using \<open>instrs_preserve_state_assms_plus (initial_caps \<union> invoked_instrs_caps (Suc n) t) s\<close>
+        using instr_mono fetch_mono
+        by (auto intro: instrs_preserve_state_assms_plus_subset)
+      moreover have "fetch_preserves_state_assms_plus (initial_caps \<union> invoked_instrs_caps n t'') s'''"
+        using \<open>fetch_preserves_state_assms_plus (initial_caps \<union> invoked_instrs_caps (Suc n) t) s\<close>
+        using instr_mono fetch_mono
+        by (auto intro: fetch_preserves_state_assms_plus_subset)
+      ultimately have "reachable_caps s' \<subseteq> reachable_caps_plus (initial_caps \<union> invoked_instrs_caps n t'') s'''"
         using Bind m' t'' inv'' ta'' no_exception'' instr_cap_inv
         by (intro Suc.IH) (auto simp: hasTrace_iff_Traces_final final_def)
       with instr_mono show ?thesis
@@ -1430,24 +1504,32 @@ qed
 lemma reachable_caps_instrs_trace_intradomain_monotonicity:
   assumes t: "hasTrace t (fetch_execute_loop ISA n)"
     and ci: "\<forall>c \<in> reachable_caps s. is_tagged_method CC c \<longrightarrow> cap_invariant c"
-    and ta: "instrs_assms n t"
+    and ta: "instrs_trace_assms n t"
+    and sa: "fetch_state_assms s"
     and s': "s_run_trace t s = Some s'"
     and no_exception: "\<not>instrs_raise_ex ISA n t"
     and invoked_caps_reachable: "invoked_instrs_caps n t \<subseteq> reachable_caps s"
     and initial_caps_reachable: "initial_caps \<subseteq> reachable_caps s"
     and addr_trans_inv: "s_invariant_holds (addr_trans_invariant False s) t s"
+    and "instrs_preserve_state_assms s"
+    and "fetch_preserves_state_assms s"
   shows "reachable_caps s' \<subseteq> reachable_caps s"
 proof -
   have *: "initial_caps \<union> invoked_instrs_caps n t \<subseteq> reachable_caps s"
     using invoked_caps_reachable initial_caps_reachable
     by simp
-  note [simp] = reachable_caps_plus_subset_eq[OF this] addr_trans_invariant_plus_subset_reachable_caps_eq[OF this]
+  note [simp] = reachable_caps_plus_subset_eq[OF *] addr_trans_invariant_plus_subset_reachable_caps_eq[OF *]
   from assms have "reachable_caps s' \<subseteq> reachable_caps_plus (initial_caps \<union> invoked_instrs_caps n t) s"
-    by (intro reachable_caps_plus_instrs_trace_intradomain_monotonicity) auto
+    by (intro reachable_caps_plus_instrs_trace_intradomain_monotonicity)
+       (auto elim: fetch_preserves_state_assms_plus_subset[rotated]
+                   instrs_preserve_state_assms_plus_subset[rotated])
   then show ?thesis
     by simp
 qed
 
 end
+
+locale CHERI_ISA = CHERI_ISA_State
+  where fetch_state_assms = "\<lambda>_. True" and instr_state_assms = "\<lambda>_ _. True"
 
 end
