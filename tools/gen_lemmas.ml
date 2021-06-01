@@ -663,6 +663,8 @@ let process_isa file =
   let isa = load_isa file !opt_src_dir in
   let out_file name = Filename.concat !opt_out_dir name in
 
+  let _ = pt_preconds isa.type_env isa.ast in
+
   let (precond_env, precond_defs, precond_funs) =
     get_preconds isa.type_env isa.ast in
 

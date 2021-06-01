@@ -93,7 +93,6 @@ let add_exception_fun exception_funs = function
 
 let exception_funs ast = List.fold_left add_exception_fun IdSet.empty ast.defs
 
-
 let false_exp = mk_exp (E_lit (L_aux (L_false, Parse_ast.Unknown)))
 let true_exp = mk_exp (E_lit (L_aux (L_true, Parse_ast.Unknown)))
 let mk_conj a b = mk_exp (E_app (mk_id "and_bool_no_flow", [a; b]))
@@ -108,8 +107,16 @@ let throw_is_failure = function
   | E_aux (E_app (id, _), _) -> string_of_id id = "Error_Undefined"
   | _ -> false
 
+let ids_present ids =
+  fold_exp { (pure_exp_alg false (||)) with
+    e_id = fun id -> IdSet.mem id ids
+  }
+
+let ids_not_present ids exp = not (ids_present ids exp)
+
 let mk_t_e x = E_aux (x, (Parse_ast.Unknown, Type_check.empty_tannot))
 let mk_t_eq x y = mk_t_e (E_app (mk_id "eq", [x; y]))
+let mk_t_not a = mk_t_e (E_app (mk_id "not_bool", [a]))
 
 let case_pat_exp_to_cond x = function
   | Pat_exp (P_aux (P_lit l, _), rhs) -> Some (mk_t_eq x (mk_t_e (E_lit l)), rhs)
@@ -119,20 +126,67 @@ let case_pat_exp_to_cond x = function
 
 let rec case_to_if_worker (x, ps) = match ps with
   | Pat_aux (Pat_exp (P_aux (P_wild, _), E_aux (rhs, _)), _) :: _ -> rhs
+  | Pat_aux (Pat_exp (P_aux (P_id id, _), rhs), _) :: _ -> unaux_exp (subst id x rhs)
   | Pat_aux (p_exp, _) :: ps_tail -> begin match case_pat_exp_to_cond x p_exp with
     | None -> E_case (x, ps)
     | Some (c, rhs) -> E_if (c, rhs, mk_t_e (case_to_if_worker (x, ps_tail)))
   end
   | _ -> E_case (x, ps)
 
-let case_to_if = fold_exp { id_exp_alg with e_case = case_to_if_worker}
+let rec lit_bits = function
+  | (E_aux (E_lit l, _)) -> vector_string_to_bit_list l
+  | (E_aux (E_cast (_, x), _)) -> lit_bits x
+  | _ -> []
 
-let ids_present ids =
-  fold_exp { (pure_exp_alg false (||)) with
-    e_id = fun id -> IdSet.mem id ids
-  }
+let vector_eq_lit_worker id args default =
+  try
+  let s_flip = if String.equal (string_of_id id) "eq_bits"
+    then false
+    else if String.equal (string_of_id id) "neq_bits"
+    then true
+    else invalid_arg "not eq_bits"
+  in
+  let v = function
+    | (E_aux (E_vector [x], _)) -> Some x
+    | _ -> None
+  in
+  let (x, y) = match List.map v args with
+    | [Some x; None] -> (x, List.hd (List.rev args))
+    | [None; Some x] -> (x, List.hd args)
+    | _ -> invalid_arg "not vec"
+  in
+  let rec b = function
+    | (E_aux (E_lit l, _)) -> begin match vector_string_to_bit_list l with
+      | [L_aux (L_zero, _)] -> Some true
+      | [L_aux (L_one, _)] -> Some false
+      | _ -> None
+    end
+    | (E_aux (E_cast (_, x), _)) -> b x
+    | _ -> None
+  in
+  let b_flip = Option.get (b y : bool option) in
+  if Bool.equal s_flip b_flip
+    then unaux_exp x
+    else E_app (mk_id "not_bool", [x])
+  with Invalid_argument _ -> default
 
-let ids_not_present ids exp = not (ids_present ids exp)
+let plet_id_worker = function
+  | (P_aux (P_id id, _), (E_aux (E_id id2, _) as v), body) ->
+    unaux_exp (subst id v body)
+  | (p, exp, body) -> E_internal_plet (p, exp, body)
+
+let let_id_worker = function
+  | (LB_aux (LB_val (P_aux (P_id id, _), (E_aux (E_id id2, _) as v)), _), body) ->
+    unaux_exp (subst id v body)
+  | (lb, body) -> E_let (lb, body)
+
+let case_if_simp = fold_exp { id_exp_alg with
+    e_case = case_to_if_worker;
+    e_app = (fun (id, args) -> vector_eq_lit_worker id args (E_app (id, args)));
+    e_app_infix = (fun (lhs, id, rhs) -> vector_eq_lit_worker id
+        [lhs; rhs] (E_app_infix (lhs, id, rhs)));
+    e_let = let_id_worker;
+    e_internal_plet = plet_id_worker }
 
 let let_rhs_triv exp =
   fold_exp { (pure_exp_alg false (&&)) with
@@ -203,6 +257,39 @@ let rec scan_assertions_aux nm precond_funs x =
   and scan_assertions nm fun_assertions (E_aux (exp, _)) =
     scan_assertions_aux nm fun_assertions exp
 
+let def_note = function
+  | DEF_fundef fd -> "fundef_of " ^ string_of_id (id_of_fundef fd)
+  | DEF_spec spec -> "val spec of " ^ string_of_id (id_of_val_spec spec)
+  | _ -> "other def"
+
+(* sending preconds as smt queries *)
+let rec smt_result chan = try
+  let line = String.trim (input_line chan) in
+  begin
+  if String.equal line "unsat"
+  then true
+  else if String.equal line "sat"
+  then false
+  else if String.equal line "unsupported"
+  then smt_result chan
+  else (prerr_endline ("smt_result: unexpected: " ^ line); false)
+  end
+  with End_of_file ->
+  (prerr_endline "smt_result: unexpected end of file"; false)
+
+let precond_smt_check env ast fn_name ty_args =
+  let pname = precond_name fn_name in
+  let ast = Slice.filter_ast_ids (IdSet.singleton pname) IdSet.empty ast in
+  let (ast, env) = Process_file.rewrite_ast_target "c" env ast in
+  let (jdefs, jctxt, smt_ctxt) = Jib_smt.compile env ast in
+  let file_name = "test_" ^ string_of_id pname ^ ".smt2" in
+  Jib_smt.smt_query_to_file file_name jctxt smt_ctxt pname (ty_args, mk_id_typ (mk_id "bool"))
+    "property" (Property.Q_all Property.Return) jdefs;
+  let smt_in = Unix.open_process_in ("z3 -smt2 -T:2 " ^ file_name) in
+  let res = smt_result smt_in in
+  let _ = Unix.close_process_in smt_in in
+  res
+
 let rec pat_id_list = function
   | P_aux (P_id id, _) :: ps -> begin match pat_id_list ps with
     | None -> None
@@ -232,13 +319,14 @@ let simplify_binding (p, body) = match p with
   | P_aux (_, (l, _)) ->
   raise (Reporting.err_general l ("fundef pattern not tup or id " ^ string_of_pat p))
 
-let add_funcl_assertions env (precond_defs, precond_funs) = function
+let add_funcl_assertions ast data = function
   | FCL_aux (FCL_Funcl (id, Pat_aux (Pat_exp (p, body), _)), (l, _)) ->
     log_msg ("scanning " ^ string_of_id id ^ " for preconditions");
-    let body2 = case_to_if body in
+    let (env, precond_defs, precond_funs) = data in
+    let body2 = case_if_simp body in
     log_msg ("converted body");
     begin match scan_assertions id precond_funs body2 with
-    | [] -> (precond_defs, precond_funs)
+    | [] -> data
     | assns ->
       prerr_endline ("got a precondition for " ^ (string_of_id id));
       let assn = mk_conjs assns in
@@ -250,7 +338,7 @@ let add_funcl_assertions env (precond_defs, precond_funs) = function
         (prerr_endline ("dropping precondition for " ^ string_of_id id ^
             ": type quantifiers: " ^
             Util.string_of_list ", " string_of_quant_item q_params);
-            (precond_defs, precond_funs))
+            data)
       else
       let (p3, adj_args) = simplify_binding (p2, assn) in
       let pid = precond_name id in
@@ -268,14 +356,20 @@ let add_funcl_assertions env (precond_defs, precond_funs) = function
       in
       let typ2 = mk_typ (Typ_fn (ty_args3, bool_typ, no_effect)) in
       let spec = mk_val_spec (VS_val_spec (mk_typschm q typ2, pid, [], false)) in
-      (fund :: spec :: precond_defs, precond_funs2)
+      let (defs, env2) = try Type_check.check_defs env [spec; fund]
+        with Type_check.Type_error (_, l, err) ->
+         raise (Reporting.err_typ l (Type_error.string_of_type_error err))
+      in
+      let precond_defs2 = precond_defs @ defs in
+      let _ = precond_smt_check env2 (append_ast_defs ast precond_defs2) id ty_args3 in
+      (env2, precond_defs2, precond_funs2)
     end
   | FCL_aux (FCL_Funcl (id, pp), (l, _)) ->
     raise (Reporting.err_general l ("unexpected pat_exp shape of " ^ string_of_id id))
 
-let add_fun_assertions env data = function
+let add_fun_assertions ast data = function
   | DEF_fundef (FD_aux (FD_function (_, _, _, funcls), _)) ->
-     List.fold_left (add_funcl_assertions env) data funcls
+     List.fold_left (add_funcl_assertions ast) data funcls
  | _ -> data
 
 let quote_funcl_def = function
@@ -307,13 +401,192 @@ let rec tcheck env cdefs = function
 let get_preconds env ast =
   Reporting.opt_warnings := true;
   prerr_endline ("getting preconds for " ^ (string_of_int (List.length ast.defs)) ^ " ast elems");
-  let (precond_defs1, precond_funs) = List.fold_left (add_fun_assertions env)
-    ([], Bindings.empty) ast.defs in
+  let (env2, precond_defs1, precond_funs) = List.fold_left (add_fun_assertions ast)
+        (env, [], Bindings.empty) ast.defs in
   prerr_endline ("got " ^ string_of_int (List.length precond_defs1) ^ " precond ast elems");
   prerr_endline ("type checking ..");
-  let (checked_defs, env2) = tcheck env [] (List.rev precond_defs1) in
   prerr_endline ("done with preconds.");
-  (env2, checked_defs, precond_funs)
+  (env2, List.rev precond_defs1, precond_funs)
+
+let count_asserts exp = fold_exp
+  { (pure_exp_alg 0 (+)) with e_assert = (fun _ -> 1) } exp
+
+let rec simple_summary_aux ids = function
+  | E_app (id, args) -> IdSet.add id (List.fold_left simple_summary ids args)
+  | E_app_infix (lhs, id, rhs) -> IdSet.add id (List.fold_left simple_summary ids [lhs; rhs])
+  | E_lit _ -> ids
+  | E_cast (_, e) -> simple_summary ids e
+  | E_id id -> ids
+  | E_if (c, x, y) -> List.fold_left simple_summary ids [c; x; y]
+  | E_ref id -> (prerr_endline ("simple summary: ref: " ^ string_of_id id); ids)
+  | E_vector xs -> (prerr_endline ("simple summary: vec: " ^ Util.string_of_list ", " string_of_exp xs); ids)
+  | E_internal_plet (p, exp, body) -> (prerr_endline ("simple summary: plet: " ^ string_of_exp exp); ids)
+  | E_let (lb, body) -> (prerr_endline ("simple summary: let: " ^ string_of_letbind lb); ids)
+  | e -> (prerr_endline ("simple summary: unexpected: " ^ string_of_exp (mk_t_e e)); ids)
+  and simple_summary ids (E_aux (aux, _)) = simple_summary_aux ids aux
+
+let rec assert_summary_aux (n, ids) =
+  let summ_xs = List.fold_left assert_summary (n, ids) in
+  function
+  | E_block es -> summ_xs es
+  | E_assert (e, msg) -> (n + 1, simple_summary ids e)
+  | E_if (c, x, y) -> List.fold_left assert_summary (n, simple_summary ids c) [x; y]
+  | E_cast (_, e) -> summ_xs [e]
+  | E_throw e -> summ_xs [e]
+  | E_let (LB_aux (LB_val (p, e1), _), e2) -> summ_xs [e1; e2]
+  | E_internal_plet (p, e1, e2) -> summ_xs [e1; e2]
+  | E_app (id, args) -> summ_xs args
+  | E_app_infix (lhs, id, rhs) -> summ_xs [lhs; rhs]
+  | _ -> (n, ids)
+  and assert_summary data (E_aux (e, _)) = assert_summary_aux data e
+
+let do_assert_summary id exp =
+  let e = case_if_simp exp in
+  prerr_endline ("simplified body: " ^ string_of_id id ^ ": " ^ string_of_exp e);
+  let i = count_asserts e in
+  let (j, ids) = assert_summary (0, IdSet.empty) e in
+  if i == j then () else
+    prerr_endline ("assert num mismatch in " ^ string_of_id id);
+  if IdSet.is_empty ids then () else
+    prerr_endline ("got ids in " ^ string_of_id id ^ ": " ^
+        Util.string_of_list ", " string_of_id (IdSet.elements ids))
+
+let note_funcl_asserts = function
+  | FCL_aux (FCL_Funcl (id, Pat_aux (Pat_exp (p, body), _)), (l, _)) ->
+    do_assert_summary id body
+  | FCL_aux (FCL_Funcl (id, _), (l, _)) ->
+    raise (Reporting.err_general l ("unexpected pat_exp shape of " ^ string_of_id id))
+
+let note_def_asserts = function
+  | DEF_fundef (FD_aux (FD_function (_, _, _, funcls), _)) ->
+     List.iter note_funcl_asserts funcls
+ | _ -> ()
+
+type precond_term =
+  | PT_var of id
+  | PT_op of (id * precond_term list)
+  | PT_lit of lit_aux
+
+let rec pt_term_aux = function
+  | E_app (id, args) -> PT_op (id, List.map pt_term args)
+  | E_app_infix (lhs, id, rhs) -> PT_op (id, List.map pt_term [lhs; rhs])
+  | E_id id -> PT_var id
+  | E_if (c, x, y) -> PT_op (mk_id "If", List.map pt_term [c; x; y])
+  | E_lit (L_aux (l, _)) -> PT_lit l
+  | E_cast (_, e) -> pt_term e
+  | tm -> (prerr_endline ("pt_term_aux: cannot convert " ^ string_of_exp (mk_exp tm));
+    invalid_arg "pt_term_aux")
+  and pt_term (E_aux (e, _)) = pt_term_aux e
+
+let pt_true = PT_op (mk_id "true", [])
+let pt_false = PT_op (mk_id "true", [])
+let mk_pt_disj x y = PT_op (mk_id "disj", [x; y])
+let mk_pt_conj x y = PT_op (mk_id "conj", [x; y])
+let rec mk_pt_conjs = function
+  | [] -> pt_true
+  | [x] -> x
+  | (x :: xs) -> mk_pt_conj x (mk_pt_conjs xs)
+
+let rec subst_pt id x = function
+  | PT_var id2 -> if Id.compare id id2 = 0 then x else PT_var id2
+  | PT_op (id2, args) -> PT_op (id2, List.map (subst_pt id x) args)
+  | PT_lit l -> PT_lit l
+
+let rec pt_ids_present ids = function
+  | PT_var id -> IdSet.mem id ids
+  | PT_op (_, args) -> List.exists (pt_ids_present ids) args
+  | PT_lit _ -> false
+
+let apply_pt_let_bind fun_id p body assertions = match p with
+  | P_aux (P_id id, _) -> begin try
+    let pt_body = pt_term body in
+    List.map (subst_pt id pt_body) assertions
+    with Invalid_argument _ ->
+      List.filter (fun x -> not (pt_ids_present (IdSet.singleton id) x)) assertions
+    end
+  | _ -> List.filter (fun x -> not (pt_ids_present (pat_ids p) x)) assertions
+
+let get_pt_precond_app precond_funs id args =
+  match get_precond_args precond_funs id args with
+  | Some (id2, args2) -> begin try
+        let pt_args = List.map pt_term args2 in
+        log_msg ("including precond from " ^ string_of_id id2);
+        [PT_op (id2, pt_args)]
+        with Invalid_argument _ ->
+        (prerr_endline ("dropping precond for " ^ string_of_id id ^
+            ", conv args"); [])
+        end
+  | None -> []
+
+let rec pt_assertions_aux nm precond_funs x =
+  let loop = pt_assertions nm precond_funs in
+  match x with
+  | E_block es -> List.concat (List.map loop es)
+  | E_assert (e, msg) -> begin try [pt_term e] with Invalid_argument _ -> [] end
+  | E_if (c, x, y) -> begin match loop y with
+    | [] -> []
+    | xs -> begin try [mk_pt_disj (pt_term c) (mk_pt_conjs xs)]
+        with Invalid_argument _ -> xs end
+    end
+  | E_cast (_, e) -> loop e
+  | E_throw e -> if throw_is_failure e then [pt_false] else []
+  | E_let (LB_aux (LB_val (p, e1), _), e2) ->
+        loop e1 @ apply_pt_let_bind nm p e1 (loop e2)
+  | E_internal_plet (p, e1, e2) ->
+        loop e1 @ apply_pt_let_bind nm p e1 (loop e2)
+  | E_app (id, args) -> get_pt_precond_app precond_funs id args
+  | E_app_infix (lhs, id, rhs) -> get_pt_precond_app precond_funs id [lhs; rhs]
+  | e -> []
+  and pt_assertions nm fun_assertions (E_aux (exp, _)) =
+    pt_assertions_aux nm fun_assertions exp
+
+let mk_pt_assertion p body =
+  let vars = match p with
+    | P_aux (P_tup xs, _) -> begin match pat_id_list xs with
+      | None -> raise (Reporting.err_general (pat_loc p)
+        ("fundef pat tup not vars " ^ string_of_pat p))
+      | Some ys -> ys
+      end
+    | P_aux (P_id id, _) -> [id]
+    | P_aux (P_lit (L_aux (L_unit, _)), _) -> []
+    | _ -> raise (Reporting.err_general (pat_loc p)
+        ("fundef pattern not tup or id " ^ string_of_pat p))
+  in
+  let vars_here = List.map (fun id -> (id,
+        pt_ids_present (IdSet.singleton id) body)) vars in
+  let assn = (List.filter snd vars_here |> List.map fst, body) in
+  (assn, Some (List.map snd vars_here))
+
+let pt_funcl_assertions env (precond_defs, precond_funs) = function
+  | FCL_aux (FCL_Funcl (id, Pat_aux (Pat_exp (p, body), _)), (l, _)) ->
+    log_msg ("scanning " ^ string_of_id id ^ " for preconditions");
+    let body2 = case_if_simp body in
+    log_msg ("converted body");
+    begin match pt_assertions id precond_funs (drop_tannot body2) with
+    | [] -> (precond_defs, precond_funs)
+    | assns ->
+      prerr_endline ("got a pt precondition for " ^ (string_of_id id));
+      let assn = mk_pt_conjs assns in
+      let (def, adj_args) = mk_pt_assertion p assn in
+      let pid = precond_name id in
+      let precond_funs2 = Bindings.add id adj_args precond_funs in
+      ((pid, def) :: precond_defs, precond_funs2)
+    end
+  | FCL_aux (FCL_Funcl (id, pp), (l, _)) ->
+    raise (Reporting.err_general l ("unexpected pat_exp shape of " ^ string_of_id id))
+
+let pt_fun_assertions env data = function
+  | DEF_fundef (FD_aux (FD_function (_, _, _, funcls), _)) ->
+     List.fold_left (pt_funcl_assertions env) data funcls
+ | _ -> data
+
+let pt_preconds env ast =
+  Reporting.opt_warnings := true;
+  prerr_endline ("getting pt preconds for " ^ (string_of_int (List.length ast.defs)) ^ " ast elems");
+  let (precond_defs1, precond_funs) = List.fold_left (pt_fun_assertions env)
+    ([], Bindings.empty) ast.defs in
+  prerr_endline ("got " ^ string_of_int (List.length precond_defs1) ^ " precond defs");
+  (List.rev precond_defs1, precond_funs)
 
 let add_fun_infos_of_def env exception_funs fun_infos = function
   | DEF_fundef (FD_aux (FD_function (_, _, _, funcls), _) as fd) ->
@@ -415,4 +688,5 @@ let load_files ?mutrecs:(mutrecs=IdSet.empty) files =
   in
   let (ast, env) = rewrite_ast_target "lem" env ast in
   Constraint.save_digests ();
+  List.iter note_def_asserts ast.defs;
   (ast, env)
