@@ -28,3 +28,4 @@ doc/working-note/t-cheri.log
 doc/working-note/t-cheri.out
 doc/working-note/t-cheri.pdf
 
+/model/coq/.depend
