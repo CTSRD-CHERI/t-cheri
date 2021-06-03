@@ -168,6 +168,8 @@ Section CapabilityDefinition.
     (* Boldly assuming this one never fails *)
     address_of_otype: OT -> A;
 
+    (* NULL capability *)
+    C0 : C ;
     (* Syncing permissoins with value *)
 
     seal_perms_value_type:
@@ -180,36 +182,46 @@ Section CapabilityDefinition.
   (* Operations on capabilities *)
   Class CCapabilityOps (C:Type) `{CAPS:CCapability C} :=
     {
+    (* `CSeal` in RISC V. *)
     seal: C -> C -> option C;
-    seal_entry: C -> C -> option C;
-    unseal: C -> C;
 
+    (* `CSealEntry` in RISC V. *)
+    seal_entry: C -> C -> option C;
+
+    (* `CUnseal in RISCV *)
+    unseal: C -> C -> C;
+
+    (* `CFromPtr`,`CSetAddr` in RISC V. *)
+    from_address: C -> A -> option C;
 
     (* TODO: could not find instruction for this *)
     clear_global: C -> C;
 
-    (* Narrow permissions *)
+    (* Narrow permissions.
+       similar to `CAndPerm` in RISC V
+     *)
     narrow_perms: C -> P -> option C ;
 
+    (* "Clear tag" *)
     invalidate: C -> C ;
 
-    (* NULL capability *)
-    C0 : C ;
-
-    set_addr: C -> option C;
-
+    (* Similar to `CSetBounds` in RISCV *)
     narrow_bounds: C -> address_interval -> option C;
 
-    (* subtract capabilities *)
+    (* Similar to `CSetBoundsExact` in RISCV *)
+    narrow_bounds_exact: C -> address_interval -> option C;
+
+    (* `CSub` in RISCV *)
     sub: C -> C -> C ;
 
-
+    (* `CCopyType` in RISC V. *)
     copy_type: C -> C -> option C ;
 
+    (* `CBuildCap` in RISC V.
+       TODO: better name? "merge"?
+     *)
     build_cap: C -> C -> option C ;
-
     }.
-
 
 End CapabilityDefinition.
 
@@ -314,7 +326,7 @@ Section CCapabilityProperties.
              address_set_in (address_of_otype ot'') (get_mem_region c'')))
         -> is_global c''
         ->
-        derivable cs (unseal c')
+        derivable cs (unseal c' c'')
   | Unseal_not_global:
       forall c' c'',
         derivable cs c' ->
@@ -330,9 +342,9 @@ Section CCapabilityProperties.
              address_set_in (address_of_otype ot'') (get_mem_region c'')))
         ->  ~ is_global c''
         ->
-        derivable cs (clear_global (unseal c'))
+        derivable cs (clear_global (unseal c' c''))
   | Seal:
-      forall c' c'' ot'',
+      forall c' c'' c''' ot'',
         derivable cs c' ->
         derivable cs c'' ->
         is_valid c' ->
@@ -341,9 +353,10 @@ Section CCapabilityProperties.
         ~ is_sealed c'' ->
         permits_seal (get_perms c'') ->
         get_value c'' = CapToken ot'' ->
-        address_set_in (address_of_otype ot'') (get_mem_region c'')
+        address_set_in (address_of_otype ot'') (get_mem_region c'') ->
+        seal c' c'' = Some c'''
         ->
-        derivable cs (seal c' ot'')
+        derivable cs c'''
   | SealEntry:
       forall c' otype,
         derivable cs c' ->
