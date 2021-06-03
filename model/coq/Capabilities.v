@@ -183,16 +183,16 @@ Section CapabilityDefinition.
   Class CCapabilityOps (C:Type) `{CAPS:CCapability C} :=
     {
     (* `CSeal` in RISC V. *)
-    seal: C -> C -> option C;
+    seal: C -> C -> C;
 
     (* `CSealEntry` in RISC V. *)
-    seal_entry: C -> C -> option C;
+    seal_entry: C -> C -> C;
 
     (* `CUnseal in RISCV *)
     unseal: C -> C -> C;
 
     (* `CFromPtr`,`CSetAddr` in RISC V. *)
-    from_address: C -> A -> option C;
+    from_address: C -> A -> C;
 
     (* TODO: could not find instruction for this *)
     clear_global: C -> C;
@@ -200,27 +200,27 @@ Section CapabilityDefinition.
     (* Narrow permissions.
        similar to `CAndPerm` in RISC V
      *)
-    narrow_perms: C -> P -> option C ;
+    narrow_perms: C -> P -> C ;
 
     (* "Clear tag" *)
     invalidate: C -> C ;
 
     (* Similar to `CSetBounds` in RISCV *)
-    narrow_bounds: C -> address_interval -> option C;
+    narrow_bounds: C -> address_interval -> C;
 
     (* Similar to `CSetBoundsExact` in RISCV *)
-    narrow_bounds_exact: C -> address_interval -> option C;
+    narrow_bounds_exact: C -> address_interval -> C;
 
     (* `CSub` in RISCV *)
     sub: C -> C -> C ;
 
     (* `CCopyType` in RISC V. *)
-    copy_type: C -> C -> option C ;
+    copy_type: C -> C -> C ;
 
     (* `CBuildCap` in RISC V.
        TODO: better name? "merge"?
      *)
-    build_cap: C -> C -> option C ;
+    build_cap: C -> C -> C ;
     }.
 
 End CapabilityDefinition.
@@ -308,6 +308,23 @@ Section CCapabilityProperties.
     (g /\ pred c1 c2) \/
     (~g /\ pred (clear_global c1) c2).
 
+  (* Transition function between Capabilities state space *)
+  Inductive CapStateStep (c:C) : C -> Prop  :=
+  | Seal (k:C): CapStateStep c (seal c k)
+  | SealEntry (k:C): CapStateStep c (seal_entry c k)
+  | UnSeal (k:C): CapStateStep c (unseal c k)
+  | FromAddress (a:A): CapStateStep c (from_address c a)
+  | ClearGlobal: CapStateStep c (clear_global c)
+  | NarrowPerms (p:P): CapStateStep c (narrow_perms c p)
+  | Invalidate: CapStateStep c (invalidate c) (* is it a step? *)
+  | NarrowBounds (b:address_interval): CapStateStep c (narrow_bounds c b)
+  | NarrowBoundsExact (b:address_interval): CapStateStep c (narrow_bounds_exact c b)
+  | Sub (c':C): CapStateStep c (sub c c')
+  | CopyType (k:C): CapStateStep c (copy_type c k)
+  | BuildCap (k:C): CapStateStep c (build_cap c k)
+  .
+
+  (* This to be replaced with closure on `CapStateStep` *)
   Inductive derivable (cs:cap_set) : Ensemble C :=
   | Copy: forall c, cat_set_in c cs -> derivable cs c
   | Restrict: forall c c', derivable cs c'  -> c <= c' -> derivable cs c
