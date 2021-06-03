@@ -128,7 +128,6 @@ Class CObjectType (OT:Type)
     {
     }.
 
-
 Section CapabilityDefinition.
   Context `{OTYPE: @CObjectType OT}
           `{ADR: CAddress}
@@ -182,11 +181,24 @@ Section CapabilityDefinition.
   (* Operations on capabilities *)
   Class CCapabilityOps (C:Type) `{CAPS:CCapability C} :=
     {
-    (* `CSeal` in RISC V. *)
+
+    (*
+       `CSeal` in RISC V.
+       `SEAL (capabilitiy` in Morello
+     *)
     seal: C -> C -> C;
 
-    (* `CSealEntry` in RISC V. *)
-    seal_entry: C -> C -> C;
+    (*
+       `CSealEntry` in RISC V.
+       'SEAL (immediatete)` in Morello
+     *)
+    seal_entry: C -> C;
+
+    (*
+       TODO: Anything similar in RISC V ?
+       'SEAL (immediatete) in Morello
+     *)
+    seal_indirect_entry: C -> C;
 
     (* `CUnseal in RISCV *)
     unseal: C -> C -> C;
@@ -304,15 +316,40 @@ Section CCapabilityProperties.
     get_obj_type cc = get_obj_type cd /\
     permits_execute pc /\ ~ permits_execute pd.
 
-  Definition pred_clear_global_unless (g:Prop) (c1 c2:C) (pred: C -> C -> Prop): Prop:=
-    (g /\ pred c1 c2) \/
-    (~g /\ pred (clear_global c1) c2).
+  Definition CapIsInBounds(c:C): Prop
+    := address_set_in (get_address c) (get_mem_region c).
 
   (* Transition function between Capabilities state space *)
   Inductive CapStateStep (c:C) : C -> Prop  :=
-  | Seal (k:C): CapStateStep c (seal c k)
-  | SealEntry (k:C): CapStateStep c (seal_entry c k)
-  | UnSeal (k:C): CapStateStep c (unseal c k)
+  | Seal (k:C):
+      is_valid c ->
+      is_valid k ->
+      ~ is_sealed c ->
+      ~ is_sealed k ->
+      permits_seal (get_perms k) ->
+      CapIsInBounds k
+      ->
+      CapStateStep c (seal c k)
+  | SealEntry:
+      is_valid c
+      ->
+      CapStateStep c (seal_entry c)
+  | SealIndirectEntry:
+      is_valid c
+      ->
+      CapStateStep c (seal_indirect_entry c)
+  | UnSeal (k:C):
+      is_valid c ->
+      is_valid k ->
+      is_sealed c ->
+      ~ is_sealed k ->
+      permits_unseal (get_perms k) ->
+      CapIsInBounds k ->
+      (exists ot,
+          get_value k = CapToken ot /\
+          get_obj_type c = Some ot)
+      ->
+      CapStateStep c (unseal c k)
   | FromAddress (a:A): CapStateStep c (from_address c a)
   | ClearGlobal: CapStateStep c (clear_global c)
   | NarrowPerms (p:P): CapStateStep c (narrow_perms c p)
@@ -327,61 +364,7 @@ Section CCapabilityProperties.
   (* This to be replaced with closure on `CapStateStep` *)
   Inductive derivable (cs:cap_set) : Ensemble C :=
   | Copy: forall c, cat_set_in c cs -> derivable cs c
-  | Restrict: forall c c', derivable cs c'  -> c <= c' -> derivable cs c
-  | Unseal_global:
-      forall c' c'',
-        derivable cs c' ->
-        derivable cs c'' ->
-        is_valid c' ->
-        is_valid c'' ->
-        ~ is_sealed c'' ->
-        is_sealed c' ->
-        permits_unseal (get_perms c'') ->
-        (exists ot'',
-            (get_value c'' = CapToken ot'' ->
-             get_obj_type c' = Some ot'' ->
-             address_set_in (address_of_otype ot'') (get_mem_region c'')))
-        -> is_global c''
-        ->
-        derivable cs (unseal c' c'')
-  | Unseal_not_global:
-      forall c' c'',
-        derivable cs c' ->
-        derivable cs c'' ->
-        is_valid c' ->
-        is_valid c'' ->
-        ~ is_sealed c'' ->
-        is_sealed c' ->
-        permits_unseal (get_perms c'') ->
-        (exists ot'',
-            (get_value c'' = CapToken ot'' ->
-             get_obj_type c' = Some ot'' ->
-             address_set_in (address_of_otype ot'') (get_mem_region c'')))
-        ->  ~ is_global c''
-        ->
-        derivable cs (clear_global (unseal c' c''))
-  | Seal:
-      forall c' c'' c''' ot'',
-        derivable cs c' ->
-        derivable cs c'' ->
-        is_valid c' ->
-        is_valid c'' ->
-        ~ is_sealed c' ->
-        ~ is_sealed c'' ->
-        permits_seal (get_perms c'') ->
-        get_value c'' = CapToken ot'' ->
-        address_set_in (address_of_otype ot'') (get_mem_region c'') ->
-        seal c' c'' = Some c'''
-        ->
-        derivable cs c'''
-  | SealEntry:
-      forall c' otype,
-        derivable cs c' ->
-        is_valid c' ->
-        ~ is_sealed c' ->
-        (is_sentry (seal c' otype) \/ is_indirect_sentry (seal c' otype))
-        ->
-        derivable cs (seal c' otype).
+  | Restrict: forall c c', derivable cs c'  -> c <= c' -> derivable cs c.
 
   Local Notation "x ⊆ y" := (Included _ x y) (at level 61, right associativity).
   Local Notation "x ∪ y" := (Union _ x y) (at level 61, right associativity).
