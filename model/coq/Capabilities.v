@@ -178,7 +178,10 @@ Section CapabilityDefinition.
 
     }.
 
-  (* Operations on capabilities *)
+  (* Operations on capabilities.
+     See also:
+     - Section "2.6 Manipulating Capabilities" in Morello spec.
+   *)
   Class CCapabilityOps (C:Type) `{CAPS:CCapability C} :=
     {
 
@@ -225,7 +228,15 @@ Section CapabilityDefinition.
     (* Similar to `CSetBoundsExact` in RISCV *)
     narrow_bounds_exact: C -> address_interval -> C;
 
-    (* `CCopyType` in RISC V. *)
+    (* `CCopyType` in RISC V.
+       `CPYTYPE` in Morello
+
+       Arguments order:
+       1. key - valid capability which will be copied/updated.
+       2. data - capaility from which "object type" is copied.
+                 it dos not have to be valid.
+
+     *)
     copy_type: C -> C -> C ;
 
     (* `CBuildCap` in RISC V.
@@ -355,7 +366,10 @@ Section CCapabilityProperties.
   | Invalidate: CapStateStep c (invalidate c) (* is it a step? *)
   | NarrowBounds (b:address_interval): CapStateStep c (narrow_bounds c b)
   | NarrowBoundsExact (b:address_interval): CapStateStep c (narrow_bounds_exact c b)
-  | CopyType (k:C): CapStateStep c (copy_type c k)
+  | CopyType (data:C):
+      ~ is_sealed c
+      ->
+      CapStateStep c (copy_type c data)
   | BuildCap (k:C): CapStateStep c (build_cap c k)
   .
 
