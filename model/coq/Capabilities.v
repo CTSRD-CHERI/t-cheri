@@ -179,6 +179,7 @@ Section CapabilityDefinition.
     }.
 
   (* Operations on capabilities.
+
      See also:
      - Section "2.6 Manipulating Capabilities" in Morello spec.
    *)
@@ -240,7 +241,7 @@ Section CapabilityDefinition.
     copy_type: C -> C -> C ;
 
     (* `CBuildCap` in RISC V.
-       TODO: better name? "merge"?
+       `BUILD` in Morello
      *)
     build_cap: C -> C -> C ;
     }.
@@ -329,7 +330,7 @@ Section CCapabilityProperties.
   Definition CapIsInBounds(c:C): Prop
     := address_set_in (get_address c) (get_mem_region c).
 
-  (* Transition function between Capabilities state space *)
+  (* Transition function between "valid" Capabilities state space *)
   Inductive CapStateStep (c:C) : C -> Prop  :=
   | Seal (k:C):
       is_valid c ->
@@ -360,13 +361,32 @@ Section CCapabilityProperties.
           get_obj_type c = Some ot)
       ->
       CapStateStep c (unseal c k)
-  | SetAddress (a:A): CapStateStep c (set_address c a)
-  | ClearGlobal: CapStateStep c (clear_global c)
-  | NarrowPerms (p:P): CapStateStep c (narrow_perms c p)
-  | Invalidate: CapStateStep c (invalidate c) (* is it a step? *)
-  | NarrowBounds (b:address_interval): CapStateStep c (narrow_bounds c b)
-  | NarrowBoundsExact (b:address_interval): CapStateStep c (narrow_bounds_exact c b)
+  | SetAddress (a:A):
+      is_valid c
+      ->
+      CapStateStep c (set_address c a)
+  | ClearGlobal:
+      is_valid c
+      ->
+      CapStateStep c (clear_global c)
+  | NarrowPerms (p:P):
+      is_valid c
+      ->
+      CapStateStep c (narrow_perms c p)
+  | Invalidate:
+      is_valid c
+      ->
+      CapStateStep c (invalidate c) (* is it a step? *)
+  | NarrowBounds (b:address_interval):
+      is_valid c
+      ->
+      CapStateStep c (narrow_bounds c b)
+  | NarrowBoundsExact (b:address_interval):
+      is_valid c
+      ->
+      CapStateStep c (narrow_bounds_exact c b)
   | CopyType (data:C):
+      is_valid c ->
       ~ is_sealed c
       ->
       CapStateStep c (copy_type c data)
