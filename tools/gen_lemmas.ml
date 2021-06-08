@@ -142,20 +142,46 @@ let no_reg_writes_to_lemma no_exc isa id =
     proof = "(unfold " ^ name ^ "_def bind_assoc, no_reg_writes_toI)" }
   |> apply_lemma_override isa id (exc_prefix ^ "no_reg_writes_to")
 
-let non_failure_lemma isa precond_funs id =
+let non_failure_precond_app preconds isa id f =
+  match get_precond_args preconds id f.args with
+  | None -> None
+  | Some (id2, args2) ->
+    let args = match preconds.extra_params @ args2 with
+      | [] -> "()"
+      | xs -> format_fun_args isa xs
+    in
+    Some (id2, "(" ^ format_fun_name isa id2 ^ " " ^ args ^ ")")
+
+let non_failure_lemma isa preconds id =
   let (f, name, call) = get_fun_info isa id in
-  let pre = begin match get_precond_args precond_funs id f.args with
-    | None -> "True"
-    | Some (id2, args2) -> "(" ^ format_fun_name isa id2 ^ " " ^
-        format_fun_args isa args2 ^ ")"
-  end in
-  let assm = "regs_ok registers" in
+  let (pre_def, pre) = match non_failure_precond_app preconds isa id f with
+    | None -> ("", "True")
+    | Some (id2, app) -> (format_fun_name isa id2 ^ "_def ", app)
+  in
+  let assm = match preconds.extra_params with
+    | [] -> "regs_ok registers"
+    | xs -> "regs_ok_and registers (extra_params_match " ^ format_fun_args isa xs ^ ")"
+  in
   { name = "success_" ^ name;
     attrs = "[exec_success]"; assms = [];
     stmts = ["exec_success (" ^ call ^ ") (" ^ assm ^ ") " ^ pre];
     unfolding = []; using = [];
-    proof = "(unfold " ^ name ^ "_def; exec_success)" }
+    proof = "(unfold " ^ pre_def ^ name ^ "_def; exec_success)" }
   |> apply_lemma_override isa id ("non_failure")
+
+let triv_precond_lemma isa preconds id =
+  let (f, name, call) = get_fun_info isa id in
+  let (def_name, app) = match non_failure_precond_app preconds isa id f with
+    | None -> raise (Reporting.err_general Parse_ast.Unknown
+        ("no precond for triv id: " ^ string_of_id id))
+    | Some (id2, app) -> (format_fun_name isa id2 ^ "_def", app)
+  in
+  { name = "triv_precond_" ^ name;
+    attrs = "[simp]"; assms = [];
+    stmts = [app ^ " = True"];
+    unfolding = [def_name]; using = [];
+    proof = "prove_triv" }
+  |> apply_lemma_override isa id ("triv_precond")
 
 (* We (currently) only need register write footprints of functions that have
    some capability effects and are called in a block before reads of specific
@@ -512,8 +538,17 @@ let output_cap_lemmas chan (isa : isa) =
   output_line chan  "imports CHERI_Instantiation";
   output_line chan  "begin";
   output_line chan  "";
-  output_line chan  "declare register_defs[simp_rules_add subset_assms_simp]";
+
+  output_line chan "lemmas register_names[simp] =";
+  output_line chan "    register_ref_defs[THEN arg_cong[where f=name], simplified]";
   output_line chan  "";
+
+  filter_funs isa (fun id f -> not (IdSet.subset (write_checked_regs isa) f.trans_regs_written) && IdSet.mem id needed_fps)
+    |> List.map (no_reg_writes_to_lemma false isa)
+    |> List.map format_lemma |> List.iter (output_line chan);
+
+  output_line chan  "";
+
   output_line chan ("context " ^ isa.name ^ "_Axiom_Automaton");
   output_line chan  "begin";
   output_line chan  "";
@@ -536,12 +571,6 @@ let output_cap_lemmas chan (isa : isa) =
 
   filter_funs isa (fun id f -> IdSet.mem id exc_funs && effectful f)
     |> List.map (exp_fails_lemma isa)
-    |> List.map format_lemma |> List.iter (output_line chan);
-
-  output_line chan  "";
-
-  filter_funs isa (fun id f -> not (IdSet.subset (write_checked_regs isa) f.trans_regs_written) && IdSet.mem id needed_fps)
-    |> List.map (no_reg_writes_to_lemma false isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
   output_line chan  "";
@@ -624,10 +653,10 @@ let output_mem_props chan (isa : isa) =
   output_line chan  "";
   output_line chan  "end"
 
-let output_non_failure_props chan (isa : isa) precond_funs =
+let output_non_failure_props chan (isa : isa) preconds =
   output_line chan  "theory CHERI_Non_Failure";
   output_line chan  "";
-  output_line chan  "imports CHERI_Non_Failure_Setup CHERI_Instantiation";
+  output_line chan  "imports CHERI_Non_Failure_Setup CHERI_Gen_Lemmas Preconditions";
   output_line chan  "";
   output_line chan  "begin";
   output_line chan  "";
@@ -638,22 +667,33 @@ let output_non_failure_props chan (isa : isa) precond_funs =
     "    datatype_splits[where P=\"λm. exec_success_inner _ m _ \", THEN iffD2]";
   output_line chan  "";
 
+  if IdSet.is_empty isa.non_failure_unfolds
+  then ()
+  else begin
   output_line chan
     "lemmas non_failure_extra_defs =";
   IdSet.elements isa.non_failure_unfolds
     |> List.map (get_fun_info isa)
     |> List.iter (fun (_, name, _) -> output_line chan ("    " ^ name ^ "_def"));
   output_line chan  "";
-
   output_line chan
     "lemmas non_failure_extra_defs_unfolds[exec_success_intro] =";
   output_line chan
     "    non_failure_extra_defs[THEN ssubst[where P=\"λm. exec_success_inner _ m _ \"]]";
   output_line chan  "";
+  end;
+
+  output_line chan  "lemmas precond_no_flow_defs[simp] =";
+  output_line chan  "    or_bool_precond_no_flow_def and_bool_precond_no_flow_def";
+  output_line chan  "";
+
+  filter_funs isa (fun id _ -> IdSet.mem id preconds.triv)
+    |> List.map (triv_precond_lemma isa preconds)
+    |> List.map format_lemma |> List.iter (output_line chan);
 
   filter_funs isa (fun id f -> effectful f)
     |> List.filter (fun id -> not (IdSet.mem id isa.non_failure_unfolds))
-    |> List.map (non_failure_lemma isa precond_funs)
+    |> List.map (non_failure_lemma isa preconds)
     |> List.map format_lemma |> List.iter (output_line chan);
 
   output_line chan  "";
@@ -663,8 +703,8 @@ let process_isa file =
   let isa = load_isa file !opt_src_dir in
   let out_file name = Filename.concat !opt_out_dir name in
 
-  let (precond_env, precond_defs, precond_funs) =
-    get_preconds isa.type_env isa.ast in
+  let (precond_env, precond_defs, preconds) =
+    get_preconds isa.type_env isa.ast isa.non_failure_param_fields in
 
   let chan = open_out (out_file "CHERI_Gen_Lemmas.thy") in
   output_cap_lemmas chan isa;
@@ -676,11 +716,12 @@ let process_isa file =
   flush chan;
   close_out chan;
 
-  Process_file.output "" (Process_file.Lem_out [isa.name])
+  Process_file.opt_lem_state_extras := false;
+  Process_file.output "" (Process_file.Lem_out [isa.name; isa.name ^ "_types"])
     [(out_file "preconditions.lem", precond_env, {defs = precond_defs; comments = []})];
 
   let chan = open_out (out_file "CHERI_Non_Failure.thy") in
-  output_non_failure_props chan isa precond_funs;
+  output_non_failure_props chan isa preconds;
   flush chan;
   close_out chan;
 

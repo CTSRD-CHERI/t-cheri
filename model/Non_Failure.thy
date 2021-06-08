@@ -123,6 +123,9 @@ lemma regs_ok_append[simp]:
   "regs_ok regs (xs @ ys) = (regs_ok regs xs \<and> regs_ok regs ys)"
   by (auto simp add: regs_ok_def)
 
+abbreviation
+  "regs_ok_and regs P tr \<equiv> (regs_ok regs tr \<and> P tr)"
+
 lemma read_reg_success:
   "exec_success (read_reg r) (regs_ok regs)
     (map_of regs (name r) = Some (register_ops_of r))"
@@ -131,8 +134,6 @@ lemma read_reg_success:
    apply (simp add: regs_ok_def)
   apply auto
   done
-
-term "\<forall>c. c \<in> C \<longrightarrow> c \<in> derivable C"
 
 lemma write_reg_success[exec_success]:
   "exec_success (write_reg r v) (\<lambda>_. True) True"
@@ -143,8 +144,66 @@ lemma write_reg_success[exec_success]:
   apply (erule T.cases; clarsimp)
   done
 
-definition
-  regs_known :: "(string \<times> (('a \<Rightarrow> bool) \<times> 'b)) list \<Rightarrow> 'a event list \<Rightarrow> bool"
+fun(sequential)
+  register_read_prop :: "('st, 'regv, 'a) register_ref \<Rightarrow> ('a \<Rightarrow> bool) \<Rightarrow>
+        'regv event \<Rightarrow> bool"
+  where
+    "register_read_prop r P (E_read_reg nm v) = (if nm = name r
+        then (case of_regval r v of None \<Rightarrow> False | Some v \<Rightarrow> P v)
+        else True)"
+  | "register_read_prop _ _ _ = True"
+
+fun(sequential)
+  register_write_prop :: "('st, 'regv, 'a) register_ref \<Rightarrow> ('a \<Rightarrow> bool) \<Rightarrow>
+        'regv event \<Rightarrow> bool"
+  where
+    "register_write_prop r P (E_write_reg nm v) = (if nm = name r
+        then (case of_regval r v of None \<Rightarrow> False | Some v \<Rightarrow> P v)
+        else True)"
+  | "register_write_prop _ _ _ = True"
+
+fun register_trace_inv :: "('st, 'regv, 'a) register_ref \<Rightarrow> ('a \<Rightarrow> bool) \<Rightarrow>
+        'regv event list \<Rightarrow> bool"
+  where
+    "register_trace_inv r P [] = True"
+  | "register_trace_inv r P (ev # evs) = (register_read_prop r P ev \<and>
+    (register_write_prop r P ev \<longrightarrow> register_trace_inv r P evs))"
+
+definition register_trace_inv_preserved :: "('st, 'regv, 'a) register_ref \<Rightarrow> ('a \<Rightarrow> bool) \<Rightarrow>
+        'regv event list \<Rightarrow> bool"
+  where
+  "register_trace_inv_preserved r P xs = (register_trace_inv r P xs \<longrightarrow>
+    (\<forall>ev \<in> set xs. register_write_prop r P ev))"
+
+lemma register_trace_inv_append[simp]:
+  "register_trace_inv r P (xs @ ys) = (register_trace_inv r P xs \<and>
+    (register_trace_inv_preserved r P xs \<longrightarrow> register_trace_inv r P ys))"
+  by (induct xs, auto simp: register_trace_inv_preserved_def)
+
+lemma register_trace_inv_preserved_no_writes:
+  "(m, xs, m') \<in> Traces \<Longrightarrow> no_reg_writes_to Rs m \<Longrightarrow>
+    name r \<in> Rs \<Longrightarrow>
+    register_trace_inv_preserved r P xs"
+  apply (simp add: no_reg_writes_to_def)
+  apply (elim allE, drule mp, erule(1) conjI)
+  apply (clarsimp simp: register_trace_inv_preserved_def)
+  apply (case_tac ev, simp_all)
+  apply clarsimp
+  done
+
+lemma register_trace_inv_preserved_no_writes_impE:
+  "(register_trace_inv_preserved r P xs \<longrightarrow> Q) \<Longrightarrow>
+    (m, xs, m') \<in> Traces \<Longrightarrow>
+    no_reg_writes_to {name r} m \<Longrightarrow>
+    (register_trace_inv_preserved r P xs \<Longrightarrow> Q \<Longrightarrow> R) \<Longrightarrow>
+    R"
+  by (simp add: register_trace_inv_preserved_no_writes)
+
+lemma register_trace_inv_preserved_append[simp]:
+  "register_trace_inv_preserved r P (xs @ ys) =
+    (register_trace_inv_preserved r P xs \<and>
+        (register_trace_inv r P xs \<longrightarrow> register_trace_inv_preserved r P ys))"
+  by (auto simp add: register_trace_inv_preserved_def)
 
 lemma exec_success_inner_foreachM:
   "(\<forall>x y tr'. x \<in> set xs \<longrightarrow> exec_success_inner exc (f x y) tr') \<Longrightarrow>
@@ -207,6 +266,20 @@ fun unat_range_intro_tac ctxt = SUBGOAL (fn (t, i) => let
 method_setup unat_range_intro = \<open>Scan.succeed (fn ctxt =>
     Method.SIMPLE_METHOD (unat_range_intro_tac ctxt 1))\<close>
 
+ML \<open>
+fun unfold_from names ctxt = SUBGOAL (fn (t, i) => let
+    val consts = Term.add_const_names t []
+        |> filter (member (op =) names o hd o Long_Name.explode)
+    val thms = map (suffix "_def") consts
+        |> map_filter (try (Proof_Context.get_thms ctxt))
+        |> List.concat
+    val ss = (put_simpset HOL_basic_ss ctxt) addsimps thms
+  in full_simp_tac ss i end)
+\<close>
+
+method_setup unfold_from = \<open>Scan.lift (Scan.repeat1 Args.name) >> (fn nms => (fn ctxt =>
+    Method.SIMPLE_METHOD (unfold_from nms ctxt 1)))\<close>
+
 lemma
   "(x :: 3 word) \<noteq> 5 \<Longrightarrow> x \<noteq> 6 \<Longrightarrow> x \<noteq> 7 \<Longrightarrow> x \<noteq> 4 \<Longrightarrow> x \<noteq> 3 \<Longrightarrow> x \<noteq> 2 \<Longrightarrow> x \<noteq> 0 \<Longrightarrow> x \<noteq> 1 \<Longrightarrow> False"
   by (unat_range_intro, simp)
@@ -216,11 +289,17 @@ named_theorems exec_success_intro
 lemmas exec_success_if[exec_success_intro] =
     if_split[where P="\<lambda>m. exec_success_inner _ m _", THEN iffD2]
 
+named_theorems exec_success_elim
+
 method exec_success_step uses flip = determ \<open>
       clarsimp intro!: exec_successI exec_success_inner_unfold
         split del: if_split simp flip: flip
     | rule conjI exec_success_inner_bind exec_success_intro
     | (rule exec_success_imp, rule exec_success)
+    | erule exec_success_elim
+    | assumption
+    | (erule(1) register_trace_inv_preserved_no_writes_impE,
+        solves \<open>simp(no_asm)\<close>)
     | unat_range_intro
   \<close>
 

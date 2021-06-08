@@ -19,6 +19,7 @@ type isa =
     system_access_checks : IdSet.t;
     pcc_regs : IdSet.t;
     idc_regs : IdSet.t;
+    write_analysis_regs : IdSet.t;
     conf_regs : IdSet.t;
     cap_types : typ list;
     fun_infos : Analyse_sail.fun_info Bindings.t;
@@ -26,6 +27,7 @@ type isa =
     arg_renames : string Bindings.t;
     lemma_overrides : lemma_override StringMap.t Bindings.t;
     non_failure_unfolds : IdSet.t;
+    non_failure_param_fields : (id * id) list;
     reg_ref_renames : string Bindings.t;
     skip_funs : IdSet.t;
     needed_footprints : IdSet.t;
@@ -36,8 +38,9 @@ type isa =
   }
 
 let privileged_regs isa = IdSet.union isa.read_privileged_regs isa.write_privileged_regs
+let write_checked_regs isa = IdSet.union (IdSet.union isa.pcc_regs isa.idc_regs)
+        isa.write_analysis_regs
 let special_regs isa = IdSet.union (privileged_regs isa) (IdSet.union isa.pcc_regs isa.idc_regs)
-let write_checked_regs isa = IdSet.union isa.pcc_regs isa.idc_regs
 
 let lstrip f s =
   let rec idx_from i =
@@ -166,6 +169,7 @@ let load_isa file src_dir =
     system_access_checks = optional_idset (member "system_access_checks" arch);
     pcc_regs = optional_idset (member "pcc" arch);
     idc_regs = optional_idset (member "idc" arch);
+    write_analysis_regs = optional_idset (member "write_analysis_regs" arch);
     conf_regs;
     cap_types;
     fun_infos;
@@ -173,6 +177,8 @@ let load_isa file src_dir =
     arg_renames;
     lemma_overrides;
     non_failure_unfolds = optional_idset (member "non_failure_unfolds" arch);
+    non_failure_param_fields = optional_bindings (member "non_failure_param_fields" arch)
+        |> Bindings.map to_id |> Bindings.to_seq |> List.of_seq;
     reg_ref_renames = Bindings.map to_string (optional_bindings (member "reg_ref_renames" arch));
     skip_funs = optional_idset (member "skips" arch);
     needed_footprints = optional_idset (member "needed_footprints" arch);
