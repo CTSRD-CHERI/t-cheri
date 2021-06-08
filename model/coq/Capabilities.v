@@ -200,11 +200,13 @@ Section CapabilityDefinition.
      *)
     seal_indirect_entry: C -> C;
 
+    (* TODO: Another sealing type *)
+
     (* `CUnseal in RISCV *)
     unseal: C -> C -> C;
 
     (* `CFromPtr`,`CSetAddr` in RISC V. *)
-    from_address: C -> A -> C;
+    set_address: C -> A -> C;
 
     (* TODO: could not find instruction for this *)
     clear_global: C -> C;
@@ -222,9 +224,6 @@ Section CapabilityDefinition.
 
     (* Similar to `CSetBoundsExact` in RISCV *)
     narrow_bounds_exact: C -> address_interval -> C;
-
-    (* `CSub` in RISCV *)
-    sub: C -> C -> C ;
 
     (* `CCopyType` in RISC V. *)
     copy_type: C -> C -> C ;
@@ -350,21 +349,22 @@ Section CCapabilityProperties.
           get_obj_type c = Some ot)
       ->
       CapStateStep c (unseal c k)
-  | FromAddress (a:A): CapStateStep c (from_address c a)
+  | SetAddress (a:A): CapStateStep c (set_address c a)
   | ClearGlobal: CapStateStep c (clear_global c)
   | NarrowPerms (p:P): CapStateStep c (narrow_perms c p)
   | Invalidate: CapStateStep c (invalidate c) (* is it a step? *)
   | NarrowBounds (b:address_interval): CapStateStep c (narrow_bounds c b)
   | NarrowBoundsExact (b:address_interval): CapStateStep c (narrow_bounds_exact c b)
-  | Sub (c':C): CapStateStep c (sub c c')
   | CopyType (k:C): CapStateStep c (copy_type c k)
   | BuildCap (k:C): CapStateStep c (build_cap c k)
   .
 
+
   (* This to be replaced with closure on `CapStateStep` *)
-  Inductive derivable (cs:cap_set) : Ensemble C :=
-  | Copy: forall c, cat_set_in c cs -> derivable cs c
-  | Restrict: forall c c', derivable cs c'  -> c <= c' -> derivable cs c.
+  Inductive derivable (cs:cap_set) : cap_set :=
+  | Copy: forall c, cat_set_in c cs -> derivable cs (CapStateStep c ).
+
+
 
   Local Notation "x ⊆ y" := (Included _ x y) (at level 61, right associativity).
   Local Notation "x ∪ y" := (Union _ x y) (at level 61, right associativity).
