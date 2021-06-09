@@ -38,6 +38,12 @@ End Interval.
 Arguments Incl_Interval {V}%type_scope {V_lt}%type_scope.
 Arguments Empty_Interval {V}%type_scope {V_lt}%type_scope.
 
+Declare Scope IntervalScope.
+Delimit Scope IntervalScope with interval.
+Notation "x <= y" := (interval_leq x y) : IntervalScope.
+
+Open Scope IntervalScope.
+
 Class CAddress (A:Type) :=
   {
   (* "less than" *)
@@ -176,6 +182,22 @@ Section CapabilityDefinition.
            <->
            exists t, get_value c = CapToken t;
 
+    (* --- Encoding related stuff below ---- *)
+
+    (* Whenever given address could be represented within given
+       exact bounds of capability. Due to encoding issues not
+       all values could be reprsented.
+
+       See: `CapIsRepresentable` in Morello *)
+    addr_representable: address_interval -> A -> Prop;
+
+    (* Whenever given bounds could be encoded exactly.
+       Due to encoding issues not all bounds could be reprsented
+       exactly (e.g. due to alignment)
+
+       See: `CapIsRepresentable` in Morello *)
+    bounds_representable_exactly: address_interval -> Prop;
+
     }.
 
   (* Operations on capabilities.
@@ -209,7 +231,10 @@ Section CapabilityDefinition.
     (* `CUnseal in RISCV *)
     unseal: C -> C -> C;
 
-    (* `CFromPtr`,`CSetAddr` in RISC V. *)
+    (*
+       `CFromPtr`,`CSetAddr` in RISC V.
+       Similar to `SCVALUE` in Morello
+     *)
     set_address: C -> A -> C;
 
     (* TODO: could not find instruction for this *)
@@ -223,10 +248,14 @@ Section CapabilityDefinition.
     (* "Clear tag" *)
     invalidate: C -> C ;
 
-    (* Similar to `CSetBounds` in RISCV *)
+    (* Similar to `CSetBounds` in RISCV
+       `SCBNDS (immediate)` in Morello?
+     *)
     narrow_bounds: C -> address_interval -> C;
 
-    (* Similar to `CSetBoundsExact` in RISCV *)
+    (* Similar to `CSetBoundsExact` in RISCV
+       `SCBNDSE (immediate)` in Morello?
+     *)
     narrow_bounds_exact: C -> address_interval -> C;
 
     (* `CCopyType` in RISC V.
@@ -316,7 +345,10 @@ Section CCapabilityProperties.
          /\ (is_global c1 -> is_global c2)
          /\ perms_leq (get_perms c1) (get_perms c2)).
 
-  Local Notation "x <= y" := (cap_leq x y).
+  Declare Scope CapScope.
+  Delimit Scope CapScope with cap.
+
+  Local Notation "x <= y" := (cap_leq x y) : CapScope.
   Definition invokable (cc cd: C): Prop:=
     let pc := get_perms cc in
     let pd := get_perms cd in
@@ -362,7 +394,8 @@ Section CCapabilityProperties.
       ->
       CapStateStep c (unseal c k)
   | SetAddress (a:A):
-      is_valid c
+      is_valid c ->
+      addr_representable (get_bounds c) a
       ->
       CapStateStep c (set_address c a)
   | ClearGlobal:
@@ -378,11 +411,16 @@ Section CCapabilityProperties.
       ->
       CapStateStep c (invalidate c) (* is it a step? *)
   | NarrowBounds (b:address_interval):
-      is_valid c
+      is_valid c ->
+      ~ is_sealed c ->
+      (b <= (get_bounds c))%interval
       ->
       CapStateStep c (narrow_bounds c b)
   | NarrowBoundsExact (b:address_interval):
-      is_valid c
+      is_valid c ->
+      ~ is_sealed c ->
+      (b <= (get_bounds c))%interval ->
+      bounds_representable_exactly b
       ->
       CapStateStep c (narrow_bounds_exact c b)
   | CopyType (data:C):
