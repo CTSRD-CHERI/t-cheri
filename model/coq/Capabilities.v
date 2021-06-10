@@ -79,6 +79,10 @@ End CAddressProperties.
 Class CPermission (P:Type) :=
   {
   (* Convenience functions to examine some permission bits *)
+  global: P -> Prop; (* it permssion in RISV but in Morello spec while it is
+                    encoded and treated as one, it is sigled out as separate
+                    field of logical Capability structure (see R_HRVBQ paragraph
+                    in Morello spec. *)
   permits_execute: P -> Prop;
   permits_ccall: P -> Prop;
   permits_load: P -> Prop;
@@ -100,6 +104,7 @@ Section PermissinProperties.
      implementation type may have some additional fields not
      considered here *)
   Definition perms_eq (p1 p2: P): Prop :=
+    (global p1         ) = (global p2) /\
     (permits_execute p1         ) = (permits_execute p2) /\
     (permits_ccall p1           ) = (permits_ccall p2) /\
     (permits_load p1            ) = (permits_load p2) /\
@@ -116,6 +121,7 @@ Section PermissinProperties.
      interface.  Underlying implementation type may have some
      additional fields not considered here *)
   Definition perms_leq (p1 p2: P): Prop :=
+    ((global p1         ) -> (global p2)) /\
     ((permits_execute p1         ) -> (permits_execute p2)) /\
     ((permits_ccall p1           ) -> (permits_ccall p2)) /\
     ((permits_load p1            ) -> (permits_load p2)) /\
@@ -139,12 +145,16 @@ Section CapabilityDefinition.
           `{ADR: CAddress}
           `{PERM: @CPermission P}.
 
+  (*
+     Related docs:
+     - UCAM-CL-TR-951.pdf appendix D.9
+   *)
   Variant CapSeal :=
   | Cap_Unsealed
-  | Cap_SEntry
-  | Cap_Indirect_SEntry
+  | Cap_SEntry (* "RB" in Morello *)
+  | Cap_Indirect_SEntry (* "LB" in Morello *)
+  | Cap_Indirect_SEntry_Pair (* "LBP" in Morello *)
   | Cap_Sealed (otype:OT).
-
 
   Variant CapValue :=
   | CapAddress (a:A)
@@ -167,8 +177,6 @@ Section CapabilityDefinition.
 
     (* Get informaiton about "seal" on this capability *)
     get_seal: C -> CapSeal;
-
-    is_global: C -> Prop;
 
     (* Boldly assuming this one never fails *)
     address_of_otype: OT -> A;
@@ -208,71 +216,88 @@ Section CapabilityDefinition.
   Class CCapabilityOps (C:Type) `{CAPS:CCapability C} :=
     {
 
-    (*
-       `CSeal` in RISC V.
-       `SEAL (capabilitiy` in Morello
+
+    (* --- Monotonic manipulation -- *)
+
+    (* Modifying the Capability Value (address of object type)
+
+       Related instructions:
+       - CFromPtr in RISC V
+       - CSetAddr in RISC V
+       - SCVALUE in Morello
+       - CCopyType in RISC V
+       - CPYTYPE in Morello
      *)
-    seal: C -> C -> C;
+    set_value: C -> CapValue -> C;
 
-    (*
-       `CSealEntry` in RISC V.
-       'SEAL (immediatete)` in Morello
-     *)
-    seal_entry: C -> C;
+    (* Reducing the Capability Bounds (with rounding)
 
-    (*
-       TODO: Anything similar in RISC V ?
-       'SEAL (immediatete) in Morello
-     *)
-    seal_indirect_entry: C -> C;
-
-    (* TODO: Another sealing type *)
-
-    (* `CUnseal in RISCV *)
-    unseal: C -> C -> C;
-
-    (*
-       `CFromPtr`,`CSetAddr` in RISC V.
-       Similar to `SCVALUE` in Morello
-     *)
-    set_address: C -> A -> C;
-
-    (* TODO: could not find instruction for this *)
-    clear_global: C -> C;
-
-    (* Narrow permissions.
-       similar to `CAndPerm` in RISC V
-     *)
-    narrow_perms: C -> P -> C ;
-
-    (* "Clear tag" *)
-    invalidate: C -> C ;
-
-    (* Similar to `CSetBounds` in RISCV
-       `SCBNDS (immediate)` in Morello?
+       Related instructions:
+       - CSetBounds in RISCV
+       - SCBNDS (immediate) in Morello?
      *)
     narrow_bounds: C -> address_interval -> C;
 
-    (* Similar to `CSetBoundsExact` in RISCV
-       `SCBNDSE (immediate)` in Morello?
+    (* Reducing the Capability Bounds (exact)
+
+       Related instructions:
+       - CSetBoundsExact in RISCV
+       - SCBNDSE (immediate) in Morello?
      *)
     narrow_bounds_exact: C -> address_interval -> C;
 
-    (* `CCopyType` in RISC V.
-       `CPYTYPE` in Morello
+    (* Reducing the Capability Permissions
 
-       Arguments order:
-       1. key - valid capability which will be copied/updated.
-       2. data - capaility from which "object type" is copied.
-                 it dos not have to be valid.
-
+       Related instructions:
+       - CAndPerm in RISC V
+       - TODO? ARM?
      *)
-    copy_type: C -> C -> C ;
+    narrow_perms: C -> P -> C ;
 
-    (* `CBuildCap` in RISC V.
-       `BUILD` in Morello
+    (* Sealing operations *)
+
+    (* Regular sealing (with object type)
+
+       Related instructions:
+       - CSeal in RISC V.
+       - SEAL (capabilitiy) in Morello
      *)
-    build_cap: C -> C -> C ;
+    seal: C -> C -> C;
+
+    (* Seal Entry
+       - CSealEntry in RISC V.
+       - SEAL (immediatete) in Morello
+     *)
+    seal_entry: C -> C;
+
+    (* Seal Indirect Entry
+       - CInvokeInd proposed but not implmented RISC V
+       - SEAL (immediatete) in Morello
+     *)
+    seal_indirect_entry: C -> C;
+
+    (* Seal Entry Pair
+       - proposed but not implmented in in RISC V.
+       - SEAL (immediatete) in Morello
+     *)
+    seal_indirect_entry_pair: C -> C;
+
+    (* Modifying the Capability Flags *)
+
+    (* TODO: flags *)
+
+    (* --- Controlled non-monotonic manipulation --  *)
+
+    (* Unsealing a capability using an unsealing operation.
+       - CUnseal in RISCV
+       - UNSEAL in Morello
+     *)
+    unseal: C -> C -> C;
+
+    (* TODO: Using a permitted, privileged capability creating
+       instruction to mark a register or memory location as holding a valid
+       capability *)
+
     }.
 
 End CapabilityDefinition.
@@ -342,7 +367,6 @@ Section CCapabilityProperties.
       \/ (is_valid c2
          /\ ~ is_sealed c1 /\ ~ is_sealed c2
          /\ bounds_leq c1 c2
-         /\ (is_global c1 -> is_global c2)
          /\ perms_leq (get_perms c1) (get_perms c2)).
 
   Declare Scope CapScope.
