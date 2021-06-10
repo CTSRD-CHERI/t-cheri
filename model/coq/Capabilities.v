@@ -163,9 +163,6 @@ Section CapabilityDefinition.
   (* Capability data type *)
   Class CCapability (C:Type) :=
     {
-    (* Formerly "is_tagged" *)
-    is_valid: C -> Prop;
-
     (* Returns either inclusive bounds for covered
      memory region *)
     get_bounds: C -> address_interval;
@@ -363,9 +360,7 @@ Section CCapabilityProperties.
   Definition cap_leq: relation C :=
     fun c1 c2 =>
       c1 = c2
-      \/ ~ is_valid c1
-      \/ (is_valid c2
-         /\ ~ is_sealed c1 /\ ~ is_sealed c2
+      \/ (~ is_sealed c1 /\ ~ is_sealed c2
          /\ bounds_leq c1 c2
          /\ perms_leq (get_perms c1) (get_perms c2)).
 
@@ -376,7 +371,6 @@ Section CCapabilityProperties.
   Definition invokable (cc cd: C): Prop:=
     let pc := get_perms cc in
     let pd := get_perms cd in
-    is_valid cc /\ is_valid cd /\
     is_sealed cc /\ is_sealed cd /\
     ~ is_sentry cc /\ ~ is_sentry cd /\
     permits_ccall pc /\ permits_ccall pd /\
@@ -386,11 +380,9 @@ Section CCapabilityProperties.
   Definition CapIsInBounds(c:C): Prop
     := address_set_in (get_address c) (get_mem_region c).
 
-  (* Transition function between "valid" Capabilities state space *)
+  (* Transition function between valid Capabilities state space *)
   Inductive CapStateStep (c:C) : C -> Prop  :=
   | Seal (k:C):
-      is_valid c ->
-      is_valid k ->
       ~ is_sealed c ->
       ~ is_sealed k ->
       permits_seal (get_perms k) ->
@@ -398,16 +390,10 @@ Section CCapabilityProperties.
       ->
       CapStateStep c (seal c k)
   | SealEntry:
-      is_valid c
-      ->
       CapStateStep c (seal_entry c)
   | SealIndirectEntry:
-      is_valid c
-      ->
       CapStateStep c (seal_indirect_entry c)
   | UnSeal (k:C):
-      is_valid c ->
-      is_valid k ->
       is_sealed c ->
       ~ is_sealed k ->
       permits_unseal (get_perms k) ->
@@ -418,37 +404,27 @@ Section CCapabilityProperties.
       ->
       CapStateStep c (unseal c k)
   | SetAddress (a:A):
-      is_valid c ->
       addr_representable (get_bounds c) a
       ->
       CapStateStep c (set_address c a)
   | ClearGlobal:
-      is_valid c
-      ->
       CapStateStep c (clear_global c)
   | NarrowPerms (p:P):
-      is_valid c
-      ->
       CapStateStep c (narrow_perms c p)
   | Invalidate:
-      is_valid c
-      ->
       CapStateStep c (invalidate c) (* is it a step? *)
   | NarrowBounds (b:address_interval):
-      is_valid c ->
       ~ is_sealed c ->
       (b <= (get_bounds c))%interval
       ->
       CapStateStep c (narrow_bounds c b)
   | NarrowBoundsExact (b:address_interval):
-      is_valid c ->
       ~ is_sealed c ->
       (b <= (get_bounds c))%interval ->
       bounds_representable_exactly b
       ->
       CapStateStep c (narrow_bounds_exact c b)
   | CopyType (data:C):
-      is_valid c ->
       ~ is_sealed c
       ->
       CapStateStep c (copy_type c data)
