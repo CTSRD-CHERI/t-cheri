@@ -205,6 +205,12 @@ lemma register_trace_inv_preserved_append[simp]:
         (register_trace_inv r P xs \<longrightarrow> register_trace_inv_preserved r P ys))"
   by (auto simp add: register_trace_inv_preserved_def)
 
+lemma register_trace_inv_preserved_list[simp]:
+  "register_trace_inv_preserved r P []"
+  "register_trace_inv_preserved r P (ev # evs) =
+    (register_read_prop r P ev \<longrightarrow> register_write_prop r P ev \<and> register_trace_inv_preserved r P evs)"
+  by (auto simp add: register_trace_inv_preserved_def)
+
 lemma exec_success_inner_foreachM:
   "(\<forall>x y tr'. x \<in> set xs \<longrightarrow> exec_success_inner exc (f x y) tr') \<Longrightarrow>
     exec_success_inner exc (foreachM xs y f) tr"
@@ -267,7 +273,7 @@ method_setup unat_range_intro = \<open>Scan.succeed (fn ctxt =>
     Method.SIMPLE_METHOD (unat_range_intro_tac ctxt 1))\<close>
 
 ML \<open>
-fun unfold_from names ctxt = SUBGOAL (fn (t, i) => let
+fun unfold_from_step names ctxt = SUBGOAL (fn (t, i) => let
     val consts = Term.add_const_names t []
         |> filter (member (op =) names o hd o Long_Name.explode)
     val thms = map (suffix "_def") consts
@@ -275,6 +281,9 @@ fun unfold_from names ctxt = SUBGOAL (fn (t, i) => let
         |> List.concat
     val ss = (put_simpset HOL_basic_ss ctxt) addsimps thms
   in full_simp_tac ss i end)
+
+fun unfold_from names ctxt = TRY o (REPEAT_ALL_NEW
+  (CHANGED o unfold_from_step names ctxt))
 \<close>
 
 method_setup unfold_from = \<open>Scan.lift (Scan.repeat1 Args.name) >> (fn nms => (fn ctxt =>
@@ -296,10 +305,11 @@ method exec_success_step uses flip = determ \<open>
         split del: if_split simp flip: flip
     | rule conjI exec_success_inner_bind exec_success_intro
     | (rule exec_success_imp, rule exec_success)
-    | erule exec_success_elim
     | assumption
     | (erule(1) register_trace_inv_preserved_no_writes_impE,
         solves \<open>simp(no_asm)\<close>)
+    | erule exec_success_elim
+    | (unfold_from Preconditions; solves \<open>simp\<close>)
     | unat_range_intro
   \<close>
 

@@ -171,17 +171,31 @@ let vector_eq_lit_worker id args default =
     else E_app (mk_id "not_bool", [x])
   with Invalid_argument _ -> default
 
+let rec pat_to_id_opt = function
+  | P_aux (P_id id, _) -> Some id
+  | P_aux (P_typ (_, p), _) -> pat_to_id_opt p
+  | _ -> None
+
 let plet_id_worker = function
-  | (P_aux (P_id id, _), (E_aux (E_id id2, _) as v), body) ->
-    unaux_exp (subst id v body)
+  | (p, (E_aux (E_id id2, _) as v), body) -> begin match pat_to_id_opt p with
+    | Some id -> unaux_exp (subst id v body)
+    | None -> E_internal_plet (p, v, body)
+  end
   | (p, exp, body) -> E_internal_plet (p, exp, body)
 
 let let_id_worker = function
-  | (LB_aux (LB_val (P_aux (P_id id, _), (E_aux (E_id id2, _) as v)), _), body) ->
-    unaux_exp (subst id v body)
+  | ((LB_aux (LB_val (p, (E_aux (E_id id2, _) as v)), _) as lb), body) ->
+  begin match pat_to_id_opt p with
+    | Some id -> unaux_exp (subst id v body)
+    | None -> E_let (lb, body)
+  end
   | (lb, body) -> E_let (lb, body)
 
-let case_if_simp = fold_exp { id_exp_alg with
+let field_worker field_simps (x, id) = match Bindings.find_opt id field_simps with
+  | None -> E_field (x, id)
+  | Some (v_id, _) -> E_id v_id
+
+let precond_simp field_simps = fold_exp { id_exp_alg with
     e_case = case_to_if_worker;
 (*
     e_app = (fun (id, args) -> vector_eq_lit_worker id args (E_app (id, args)));
@@ -189,7 +203,9 @@ let case_if_simp = fold_exp { id_exp_alg with
         [lhs; rhs] (E_app_infix (lhs, id, rhs)));
 *)
     e_let = let_id_worker;
-    e_internal_plet = plet_id_worker }
+    e_internal_plet = plet_id_worker;
+    e_field = field_worker field_simps
+}
 
 (* precondition information. notes which functions have preconditions,
    and for those that do, which arguments to the function are relevant.
@@ -236,13 +252,15 @@ let let_rhs_triv exp =
     e_lit = (fun _ -> true)
   } exp
 
-let filter_for_let fun_id ids assertions =
+let filter_for_let fun_id ids (p, body) assertions =
   let xs = List.filter (ids_not_present ids) assertions in
   let n = List.length assertions - List.length xs in
   if n > 0
   then prerr_endline ("dropped " ^ string_of_int n ^
     " assertions (" ^
-    Util.string_of_list ", " string_of_id (IdSet.elements ids) ^ ") in " ^
+    Util.string_of_list ", " string_of_id (IdSet.elements ids) ^
+    ": " ^ string_of_pat p ^
+    " = " ^ string_of_exp body ^ ") in " ^
     string_of_id fun_id)
   else ();
   xs
@@ -250,8 +268,8 @@ let filter_for_let fun_id ids assertions =
 let apply_let_bind fun_id p body assertions = match p with
   | P_aux (P_id id, _) -> if let_rhs_triv body
     then List.map (subst id (drop_tannot body)) assertions
-    else filter_for_let fun_id (pat_ids p) assertions
-  | _ -> filter_for_let fun_id (pat_ids p) assertions
+    else filter_for_let fun_id (pat_ids p) (p, body) assertions
+  | _ -> filter_for_let fun_id (pat_ids p) (p, body) assertions
 
 let rec scan_assertions_aux nm preconds x =
   let scan = scan_assertions nm preconds in
@@ -336,9 +354,9 @@ let precond_smt_check env ast fn_name =
   with Failure _ ->
     prerr_endline ("smt conversion failed, carrying on"); false
 
-let pat_to_id = function
-  | P_aux (P_id id, _) -> id
-  | p -> raise (Reporting.err_general (pat_loc p) ("pat not id: " ^ string_of_pat p))
+let pat_to_id p = match pat_to_id_opt p with
+  | Some id -> id
+  | _ -> raise (Reporting.err_general (pat_loc p) ("pat not id: " ^ string_of_pat p))
 
 let simplify_binding ex_params (p, body) =
   let (args, is_unit) = match p with
@@ -362,11 +380,12 @@ let add_funcl_assertions ast data = function
   | FCL_aux (FCL_Funcl (id, Pat_aux (Pat_exp (p, body), _)), (l, _)) ->
     log_msg ("scanning " ^ string_of_id id ^ " for preconditions");
     let (env, precond_defs, preconds) = data in
-    let body2 = case_if_simp body in
+    let body2 = precond_simp preconds.field_to_param body in
     log_msg ("converted body");
     begin match scan_assertions id preconds body2 with
     | [] -> data
     | assns ->
+      prerr_endline ("got a precondition for " ^ (string_of_id id));
       let assn = mk_conjs assns in
       let p2 = map_pat_annot (fun _ -> no_annot) p in
       let (q, typ) = Type_check.Env.get_val_spec_orig id env in
