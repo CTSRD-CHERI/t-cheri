@@ -336,6 +336,13 @@ Section CCapabilityProperties.
        | _ => False
        end.
 
+  (* Helper function to check if indirect entry capability *)
+  Definition is_indirect_sentry_pair (c:C) : Prop
+    := match get_seal c with
+       | Cap_Indirect_SEntry_Pair => True
+       | _ => False
+       end.
+
   (* Return [None] it the capability is "unsealed" and
      [Some OT] otherwise *)
   Definition get_obj_type (c:C): option OT
@@ -369,11 +376,14 @@ Section CCapabilityProperties.
   Delimit Scope CapScope with cap.
 
   Local Notation "x <= y" := (cap_leq x y) : CapScope.
+
+  (* TODO: This is unused for now *)
   Definition invokable (cc cd: C): Prop:=
     let pc := get_perms cc in
     let pd := get_perms cd in
     is_sealed cc /\ is_sealed cd /\
     ~ is_sentry cc /\ ~ is_sentry cd /\
+    (* TODO: what about indirect sentry? *)
     permits_ccall pc /\ permits_ccall pd /\
     get_obj_type cc = get_obj_type cd /\
     permits_execute pc /\ ~ permits_execute pd.
