@@ -441,11 +441,11 @@ Section CCapabilityProperties.
       CapStateStep c (unseal c k)
   .
 
-  (* This to be replaced with closure on `CapStateStep` *)
   Inductive derivable (cs:cap_set) : cap_set :=
-  | Copy: forall c, cat_set_in c cs -> derivable cs (CapStateStep c ).
-
-
+  | DerivableIn: forall c, cat_set_in c cs -> derivable cs c
+  | DerivableStep: forall c c', derivable cs c ->
+                           CapStateStep c c' ->
+                           derivable cs c'.
 
   Local Notation "x ⊆ y" := (Included _ x y) (at level 61, right associativity).
   Local Notation "x ∪ y" := (Union _ x y) (at level 61, right associativity).
@@ -458,13 +458,11 @@ Section CCapabilityProperties.
     intros cs cs' H c IN.
     induction IN.
     -
-      apply Copy.
-      apply H, H0.
-    - eapply Restrict; eauto.
-    - eapply Unseal_global; eauto.
-    - eapply Unseal_not_global; eauto.
-    - eapply Seal; eauto.
-    - eapply SealEntry; eauto.
+      apply DerivableIn.
+      unfold cat_set_in in *.
+      auto.
+    -
+      eapply DerivableStep; eauto.
   Qed.
 
   (* "Extensive" property (as in closure operators).
@@ -489,20 +487,14 @@ Section CCapabilityProperties.
       intros x H.
       induction H; unfold cat_set_in, In in *.
       + auto.
-      + eapply Restrict; eauto.
-      + eapply Unseal_global; eauto.
-      + eapply Unseal_not_global; eauto.
-      + eapply Seal; eauto.
-      + eapply SealEntry; eauto.
+      + eapply DerivableStep; eauto.
     -
       intros x H.
       induction H; unfold cat_set_in, In in *.
-      + apply Copy; apply Copy; auto.
-      + eapply Restrict; eauto.
-      + eapply Unseal_global; eauto.
-      + eapply Unseal_not_global; eauto.
-      + eapply Seal; eauto.
-      + eapply SealEntry; eauto.
+      + apply DerivableIn.
+        apply DerivableIn.
+        assumption.
+      + eapply DerivableStep; eauto.
   Qed.
 
   Lemma derivable_empty: derivable empty_address_set = empty_address_set.
@@ -515,10 +507,6 @@ Section CCapabilityProperties.
       unfold In in H.
       induction H.
       + apply Noone_in_empty in H; tauto.
-      + apply Noone_in_empty in IHderivable; tauto.
-      + apply Noone_in_empty in IHderivable1; tauto.
-      + apply Noone_in_empty in IHderivable1; tauto.
-      + apply Noone_in_empty in IHderivable1; tauto.
       + apply Noone_in_empty in IHderivable; tauto.
     -
       apply Noone_in_empty in H; tauto.
@@ -539,15 +527,11 @@ Section CCapabilityProperties.
         apply Union_inv in H0.
         destruct H0.
         *
-          apply Copy, H0.
+          apply DerivableIn, H0.
         *
           specialize (H c).
           apply H, H0.
-      + eapply Restrict; eauto.
-      + eapply Unseal_global; eauto.
-      + eapply Unseal_not_global; eauto.
-      + eapply Seal; eauto.
-      + eapply SealEntry; eauto.
+      + eapply DerivableStep; eauto.
     -
       apply derivable_mono.
       intros x H0.
