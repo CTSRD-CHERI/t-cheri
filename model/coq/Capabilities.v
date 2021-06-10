@@ -182,6 +182,8 @@ Section CapabilityDefinition.
     C0 : C ;
     (* Syncing permissoins with value *)
 
+    (* TODO: flags *)
+
     seal_perms_value_type:
       forall c, (permits_seal (get_perms c) \/ permits_unseal (get_perms c))
            <->
@@ -212,7 +214,6 @@ Section CapabilityDefinition.
    *)
   Class CCapabilityOps (C:Type) `{CAPS:CCapability C} :=
     {
-
 
     (* --- Monotonic manipulation -- *)
 
@@ -382,37 +383,16 @@ Section CCapabilityProperties.
 
   (* Transition function between valid Capabilities state space *)
   Inductive CapStateStep (c:C) : C -> Prop  :=
-  | Seal (k:C):
-      ~ is_sealed c ->
-      ~ is_sealed k ->
-      permits_seal (get_perms k) ->
-      CapIsInBounds k
+  | SetValue (v:CapValue):
+      match v with
+      | CapAddress a =>
+        (~permits_seal (get_perms c) /\ ~permits_unseal (get_perms c)) ->
+        addr_representable (get_bounds c) a
+      | CapToken t =>
+        permits_seal (get_perms c) \/ permits_unseal (get_perms c)
+      end
       ->
-      CapStateStep c (seal c k)
-  | SealEntry:
-      CapStateStep c (seal_entry c)
-  | SealIndirectEntry:
-      CapStateStep c (seal_indirect_entry c)
-  | UnSeal (k:C):
-      is_sealed c ->
-      ~ is_sealed k ->
-      permits_unseal (get_perms k) ->
-      CapIsInBounds k ->
-      (exists ot,
-          get_value k = CapToken ot /\
-          get_obj_type c = Some ot)
-      ->
-      CapStateStep c (unseal c k)
-  | SetAddress (a:A):
-      addr_representable (get_bounds c) a
-      ->
-      CapStateStep c (set_address c a)
-  | ClearGlobal:
-      CapStateStep c (clear_global c)
-  | NarrowPerms (p:P):
-      CapStateStep c (narrow_perms c p)
-  | Invalidate:
-      CapStateStep c (invalidate c) (* is it a step? *)
+      CapStateStep c (set_value c v)
   | NarrowBounds (b:address_interval):
       ~ is_sealed c ->
       (b <= (get_bounds c))%interval
@@ -424,13 +404,32 @@ Section CCapabilityProperties.
       bounds_representable_exactly b
       ->
       CapStateStep c (narrow_bounds_exact c b)
-  | CopyType (data:C):
-      ~ is_sealed c
+  | NarrowPerms (p:P):
+      CapStateStep c (narrow_perms c p)
+  | Seal (k:C):
+      ~ is_sealed c ->
+      ~ is_sealed k ->
+      permits_seal (get_perms k) ->
+      CapIsInBounds k
       ->
-      CapStateStep c (copy_type c data)
-  | BuildCap (k:C): CapStateStep c (build_cap c k)
+      CapStateStep c (seal c k)
+  | SealEntry:
+      CapStateStep c (seal_entry c)
+  | SealIndirectEntry:
+      CapStateStep c (seal_indirect_entry c)
+  | SealIndirectEntryPair:
+      CapStateStep c (seal_indirect_entry_pair c)
+  | UnSeal (k:C):
+      is_sealed c ->
+      ~ is_sealed k ->
+      permits_unseal (get_perms k) ->
+      CapIsInBounds k ->
+      (exists ot,
+          get_value k = CapToken ot /\
+          get_obj_type c = Some ot)
+      ->
+      CapStateStep c (unseal c k)
   .
-
 
   (* This to be replaced with closure on `CapStateStep` *)
   Inductive derivable (cs:cap_set) : cap_set :=
