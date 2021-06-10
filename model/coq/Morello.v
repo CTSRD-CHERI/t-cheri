@@ -87,9 +87,9 @@ Instance CPermissoin_MPermission: CPermission(MPermission) :=
   |}.
 
 Definition CAP_SEAL_TYPE_UNSEALED:otype := $0.
-Definition CAP_SEAL_TYPE_RB:otype       := $1.
-Definition CAP_SEAL_TYPE_LPB:otype      := $2.
-Definition CAP_SEAL_TYPE_LB:otype       := $3.
+Definition CAP_SEAL_TYPE_RB:otype       := $1. (* register-based branch *)
+Definition CAP_SEAL_TYPE_LPB:otype      := $2. (* load pair and branch *)
+Definition CAP_SEAL_TYPE_LB:otype       := $3. (* load and branch *)
 
 Definition is_Reserved_OT (v:otype) :=
   v = CAP_SEAL_TYPE_UNSEALED \/
