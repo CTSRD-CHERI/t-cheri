@@ -96,6 +96,7 @@ Class CPermission (P:Type) :=
   permits_store_local_cap: P -> Prop;
   permits_system_access: P -> Prop;
   permits_unseal: P -> Prop;
+  (* TODO: User-defined permissions *)
   }.
 
 Section PermissinProperties.
@@ -191,8 +192,6 @@ Section CapabilityDefinition.
     (* NULL capability *)
     C0 : C ;
     (* Syncing permissoins with value *)
-
-    (* TODO: flags *)
 
     seal_perms_value_type:
       forall c, (permits_seal (get_perms c) \/ permits_unseal (get_perms c))
@@ -297,8 +296,6 @@ Section CapabilityDefinition.
        - SCFLGS in Morello
      *)
     set_flags: C -> vector bool CAP_FLAGS_LEN -> C;
-
-    (* TODO: flags *)
 
     (* --- Controlled non-monotonic manipulation --  *)
 
