@@ -2,12 +2,15 @@
 
 Require Import Coq.Arith.PeanoNat.
 Require Import Coq.Relations.Relation_Definitions.
-Require Import Coq.Sets.Ensembles.
 Require Import Coq.Sets.Constructive_sets.
+Require Import Coq.Vectors.VectorDef.
+Require Import Coq.Sets.Ensembles.
 
 Set Implicit Arguments.
 Set Strict Implicit.
 Generalizable All Variables.
+
+Notation vector := VectorDef.t.
 
 Open Scope nat_scope.
 Open Scope list_scope.
@@ -163,6 +166,10 @@ Section CapabilityDefinition.
   (* Capability data type *)
   Class CCapability (C:Type) :=
     {
+
+    (* Number of user-defined flags *)
+    CAP_FLAGS_LEN: nat ;
+
     (* Returns either inclusive bounds for covered
      memory region *)
     get_bounds: C -> address_interval;
@@ -174,6 +181,9 @@ Section CapabilityDefinition.
 
     (* Get informaiton about "seal" on this capability *)
     get_seal: C -> CapSeal;
+
+    (* user-defined flags *)
+    get_flags: C -> vector bool CAP_FLAGS_LEN;
 
     (* Boldly assuming this one never fails *)
     address_of_otype: OT -> A;
@@ -280,7 +290,13 @@ Section CapabilityDefinition.
      *)
     seal_indirect_entry_pair: C -> C;
 
-    (* Modifying the Capability Flags *)
+    (* Modifying the Capability Flags
+       - BICFLGS in Morello
+       - EORFLGS in Morello
+       - ORRFLGS in Morello
+       - SCFLGS in Morello
+     *)
+    set_flags: C -> vector bool CAP_FLAGS_LEN -> C;
 
     (* TODO: flags *)
 
@@ -364,12 +380,16 @@ Section CCapabilityProperties.
   Definition bounds_leq: relation C :=
     fun c1 c2 => interval_leq (get_bounds c1) (get_bounds c2).
 
+  Definition flags_leq: relation (vector bool CAP_FLAGS_LEN)
+    := VectorDef.Forall2 Bool.le.
+
   (* "<=" relation on Capabilities *)
   Definition cap_leq: relation C :=
     fun c1 c2 =>
       c1 = c2
       \/ (~ is_sealed c1 /\ ~ is_sealed c2
          /\ bounds_leq c1 c2
+         /\ flags_leq (get_flags c1) (get_flags c2)
          /\ perms_leq (get_perms c1) (get_perms c2)).
 
   Declare Scope CapScope.
@@ -416,6 +436,8 @@ Section CCapabilityProperties.
       CapStateStep c (narrow_bounds_exact c b)
   | NarrowPerms (p:P):
       CapStateStep c (narrow_perms c p)
+  | SetFlags (f:vector bool CAP_FLAGS_LEN):
+      CapStateStep c (set_flags c f)
   | Seal (k:C):
       ~ is_sealed c ->
       ~ is_sealed k ->
