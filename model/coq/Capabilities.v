@@ -213,21 +213,26 @@ Section CapabilityDefinition.
            <->
            exists t, get_value c = CapToken t;
 
-    (* --- Encoding related stuff below ---- *)
+    (* --- Represetability Checks ---- *)
 
-    (* Whenever given address could be represented within given
-       exact bounds of capability. Due to encoding issues not
-       all values could be reprsented.
+    (* Due to encoding, not all capabilities with large bounds have a
+       contiguous representable region. This representability check is
+       applied when manipulating a Capability Value
 
-       See: `CapIsRepresentable` in Morello *)
-    addr_representable: address_interval -> A -> Prop;
-
-    (* Whenever given bounds could be encoded exactly.
-       Due to encoding issues not all bounds could be reprsented
-       exactly (e.g. due to alignment)
+       For example, in Morello: if modifying a Capability Value causes
+       the bounds to change, a representabilty check fails. Some
+       versions of the check may fail in additional cases.
 
        See: `CapIsRepresentable` in Morello *)
-    bounds_representable_exactly: address_interval -> Prop;
+
+    addr_representable: C -> A -> Prop;
+
+    (* Whenever given bounds could be encoded exactly. Due to
+       encoding issues not all bounds could be reprsented exactly
+       (e.g. due to alignment).
+
+       See: `CapIsRepresentable` in Morello *)
+    bounds_representable_exactly: C -> address_interval -> Prop;
 
     }.
 
@@ -429,7 +434,7 @@ Section CCapabilityProperties.
       match v with
       | CapAddress a =>
         (~permits_seal (get_perms c) /\ ~permits_unseal (get_perms c)) ->
-        addr_representable (get_bounds c) a
+        addr_representable c a
       | CapToken t =>
         permits_seal (get_perms c) \/ permits_unseal (get_perms c)
       end
@@ -443,7 +448,7 @@ Section CCapabilityProperties.
   | NarrowBoundsExact (b:address_interval):
       ~ is_sealed c ->
       (b <= (get_bounds c))%interval ->
-      bounds_representable_exactly b
+      bounds_representable_exactly c b
       ->
       CapStateStep c (narrow_bounds_exact c b)
   | NarrowPerms (p:P):

@@ -230,10 +230,10 @@ Admitted.
 
 Parameter M0:MCapability. (* TODO *)
 
-Definition maddr_representable: w64_interval -> w64 -> Prop.
+Definition maddr_representable: MCapability -> w64 -> Prop.
 Admitted.
 
-Definition mbounds_representable_exactly: w64_interval -> Prop.
+Definition mbounds_representable_exactly: MCapability -> w64_interval -> Prop.
 Admitted.
 
 
