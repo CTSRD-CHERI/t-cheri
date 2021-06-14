@@ -45,6 +45,11 @@ Definition otype := word otype_size.
 
 (* --- "Logical view of Capablities in Morello. --- *)
 
+
+
+(* Number of user permissions in Morello *)
+Definition MUSER_PERMS_LEN := 4.
+
 Record MPermission :=
   {
   global: bool;
@@ -63,12 +68,14 @@ Record MPermission :=
   permit_compartment_id: bool; (* Morello-spefic? *)
   permit_mutable_load : bool; (* Morello-spefic? *)
 
-  (* TODO: User[N] *)
+  (* User[N] *)
+  user_perms: vector bool MUSER_PERMS_LEN;
   }.
 
 
 Instance CPermissoin_MPermission: CPermission(MPermission) :=
   {|
+  Capabilities.USER_PERMS_LEN := MUSER_PERMS_LEN;
   Capabilities.global :=
     fun p : MPermission => global p = true;
   Capabilities.permits_execute :=
@@ -90,7 +97,9 @@ Instance CPermissoin_MPermission: CPermission(MPermission) :=
   Capabilities.permits_system_access :=
     fun p : MPermission => permits_system_access p = true;
   Capabilities.permits_unseal :=
-    fun p : MPermission => permits_unseal p = true
+    fun p : MPermission => permits_unseal p = true;
+
+  Capabilities.user_perms := user_perms
   |}.
 
 Definition CAP_SEAL_TYPE_UNSEALED:otype := $0.

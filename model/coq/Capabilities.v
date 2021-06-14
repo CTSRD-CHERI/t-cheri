@@ -81,6 +81,10 @@ End CAddressProperties.
 
 Class CPermission (P:Type) :=
   {
+
+  (* Number of user-defined flags *)
+  USER_PERMS_LEN: nat ;
+
   (* Convenience functions to examine some permission bits *)
   global: P -> Prop; (* it permssion in RISV but in Morello spec while it is
                     encoded and treated as one, it is sigled out as separate
@@ -96,7 +100,10 @@ Class CPermission (P:Type) :=
   permits_store_local_cap: P -> Prop;
   permits_system_access: P -> Prop;
   permits_unseal: P -> Prop;
-  (* TODO: User-defined permissions *)
+
+  (* User-defined permissions *)
+  user_perms: P -> vector bool USER_PERMS_LEN;
+
   }.
 
 Section PermissinProperties.
@@ -118,7 +125,13 @@ Section PermissinProperties.
     (permits_store_cap p1       ) = (permits_store_cap p2) /\
     (permits_store_local_cap p1 ) = (permits_store_local_cap p2) /\
     (permits_system_access p1   ) = (permits_system_access p2) /\
-    (permits_unseal p1          ) = (permits_unseal p2).
+    (permits_unseal p1          ) = (permits_unseal p2) /\
+    (user_perms p1              ) = (user_perms p2)
+  .
+
+  Definition user_perms_leq: relation (vector bool USER_PERMS_LEN)
+    := VectorDef.Forall2 Bool.le.
+
 
   (* Logical "lessn than" comparison of permssions based solely on
      their properties expressed in [Permissoin] typeclass
@@ -135,7 +148,9 @@ Section PermissinProperties.
     ((permits_store_cap p1       ) -> (permits_store_cap p2)) /\
     ((permits_store_local_cap p1 ) -> (permits_store_local_cap p2)) /\
     ((permits_system_access p1   ) -> (permits_system_access p2)) /\
-    ((permits_unseal p1          ) -> (permits_unseal p2)).
+    ((permits_unseal p1          ) -> (permits_unseal p2)) /\
+    user_perms_leq (user_perms p1) (user_perms p2)
+  .
 
 End PermissinProperties.
 
@@ -257,7 +272,7 @@ Section CapabilityDefinition.
 
        Related instructions:
        - CAndPerm in RISC V
-       - TODO? ARM?
+       - CLRPERM in Morello
      *)
     narrow_perms: C -> P -> C ;
 
