@@ -123,11 +123,11 @@ let non_mem_exp_lemma isa id =
     using = []; unfolding = [] }
   |> apply_lemma_override isa id "non_mem_exp"
 
-let no_reg_writes_to_lemma no_exc isa id =
+let no_reg_writes_to_lemma check_regs no_exc isa id =
   let (f, name, call) = get_fun_info isa id in
   (* Restricting attention to special capability registers for now *)
   let regs_written = if no_exc then f.trans_regs_written_no_exc else f.trans_regs_written in
-  let regs = IdSet.elements (IdSet.diff (write_checked_regs isa) regs_written) in
+  let regs = IdSet.elements (IdSet.diff check_regs regs_written) in
   let reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") regs in
   (* let get_arg_assm i r = if (is_ref_typ r && not (is_cap_typ isa (base_typ_of isa r))) then ["name arg" ^ string_of_int i ^ " \\<notin> Rs"] else [] in *)
   let assm =
@@ -142,39 +142,41 @@ let no_reg_writes_to_lemma no_exc isa id =
     proof = "(unfold " ^ name ^ "_def bind_assoc, no_reg_writes_toI)" }
   |> apply_lemma_override isa id (exc_prefix ^ "no_reg_writes_to")
 
-let non_failure_precond_app preconds isa id f =
+let precond_app_bits preconds isa id f =
   match get_precond_args preconds id f.args with
-  | None -> None
-  | Some (id2, args2) ->
-    let args = match preconds.extra_params @ args2 with
-      | [] -> "()"
-      | xs -> format_fun_args isa xs
+    | None -> None
+    | Some (id2, regs, args2) ->
+    let precond = format_fun_name isa id2 in
+    let reg_params = List.map (fun (id, typ) -> (id, (prepend_id "param_" id, typ))) regs in
+    let args = match List.map snd reg_params @ args2 with
+        | [] -> "()"
+        | xs -> format_fun_args isa xs
     in
-    Some (id2, "(" ^ format_fun_name isa id2 ^ " " ^ args ^ ")")
+    let reg_eqs = "[" ^ Util.string_of_list ", " (fun (id, (pid, _)) ->
+        "param_match " ^ string_of_id id ^ "_ref " ^ string_of_id pid) reg_params ^ "]" in
+    Some (precond ^ "_def ", reg_eqs, "(" ^ precond ^ " " ^ args ^ ")")
 
 let non_failure_lemma isa preconds id =
   let (f, name, call) = get_fun_info isa id in
-  let (pre_def, pre) = match non_failure_precond_app preconds isa id f with
-    | None -> ("", "True")
-    | Some (id2, app) -> (format_fun_name isa id2 ^ "_def ", app)
-  in
-  let assm = match preconds.extra_params with
-    | [] -> "regs_ok registers"
-    | xs -> "regs_ok_and registers (extra_params_match " ^ format_fun_args isa xs ^ ")"
+  let f_def = name ^ "_def" in
+  let (unfold, assm, pre) = match precond_app_bits preconds isa id f with
+    | None -> (f_def, "regs_ok registers", "True")
+    | Some (pre_def, reg_eqs, pre_app) ->
+      (f_def ^ " " ^ pre_def, "regs_ok_and registers " ^ reg_eqs, pre_app)
   in
   { name = "success_" ^ name;
     attrs = "[exec_success]"; assms = [];
     stmts = ["exec_success (" ^ call ^ ") (" ^ assm ^ ") " ^ pre];
     unfolding = []; using = [];
-    proof = "(unfold " ^ pre_def ^ name ^ "_def; exec_success)" }
+    proof = "(unfold " ^ unfold ^ "; exec_success)" }
   |> apply_lemma_override isa id ("non_failure")
 
 let triv_precond_lemma isa preconds id =
   let (f, name, call) = get_fun_info isa id in
-  let (def_name, app) = match non_failure_precond_app preconds isa id f with
+  let (def_name, app) = match precond_app_bits preconds isa id f with
     | None -> raise (Reporting.err_general Parse_ast.Unknown
         ("no precond for triv id: " ^ string_of_id id))
-    | Some (id2, app) -> (format_fun_name isa id2 ^ "_def", app)
+    | Some (pre_def, _, app) -> (pre_def, app)
   in
   { name = "triv_precond_" ^ name;
     attrs = "[simp]"; assms = [];
@@ -531,7 +533,7 @@ let output_line chan l =
 let funs isa = List.filter (fun id -> not (IdSet.mem id isa.skip_funs)) (fun_ids isa.ast)
 let filter_funs isa p = List.filter (fun id -> p id (Bindings.find id isa.fun_infos)) (funs isa)
 
-let output_cap_lemmas chan (isa : isa) =
+let output_cap_lemmas chan check_regs (isa : isa) =
   let exc_funs = exception_funs (isa.ast) in
   let needed_fps = needed_footprints isa in
   output_line chan  "theory CHERI_Gen_Lemmas";
@@ -543,8 +545,8 @@ let output_cap_lemmas chan (isa : isa) =
   output_line chan "    register_ref_defs[THEN arg_cong[where f=name], simplified]";
   output_line chan  "";
 
-  filter_funs isa (fun id f -> not (IdSet.subset (write_checked_regs isa) f.trans_regs_written) && IdSet.mem id needed_fps)
-    |> List.map (no_reg_writes_to_lemma false isa)
+  filter_funs isa (fun id f -> not (IdSet.subset check_regs f.trans_regs_written) && IdSet.mem id needed_fps)
+    |> List.map (no_reg_writes_to_lemma check_regs false isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
   output_line chan  "";
@@ -581,7 +583,7 @@ let output_cap_lemmas chan (isa : isa) =
     not (IdSet.is_empty non_written_regs_no_exc || IdSet.equal non_written_regs non_written_regs_no_exc) && IdSet.mem id needed_fps
   in
   filter_funs isa output_runs_no_reg_writes_to
-    |> List.map (no_reg_writes_to_lemma true isa)
+    |> List.map (no_reg_writes_to_lemma (write_checked_regs isa) true isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
   output_line chan  "";
@@ -703,11 +705,13 @@ let process_isa file =
   let isa = load_isa file !opt_src_dir in
   let out_file name = Filename.concat !opt_out_dir name in
 
-  let (precond_env, precond_defs, preconds) =
-    get_preconds isa.type_env isa.ast isa.non_failure_param_fields in
+  let (precond_env, precond_defs, preconds, precond_check_regs) =
+    get_preconds isa.type_env isa.ast in
+
+  let check_regs = IdSet.union precond_check_regs (write_checked_regs isa) in
 
   let chan = open_out (out_file "CHERI_Gen_Lemmas.thy") in
-  output_cap_lemmas chan isa;
+  output_cap_lemmas chan check_regs isa;
   flush chan;
   close_out chan;
 
