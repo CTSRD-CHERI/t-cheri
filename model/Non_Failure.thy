@@ -123,8 +123,8 @@ lemma regs_ok_append[simp]:
   "regs_ok regs (xs @ ys) = (regs_ok regs xs \<and> regs_ok regs ys)"
   by (auto simp add: regs_ok_def)
 
-abbreviation
-  "regs_ok_and regs P tr \<equiv> (regs_ok regs tr \<and> P tr)"
+abbreviation(input)
+  "regs_ok_and regs Ps tr \<equiv> (regs_ok regs tr \<and> list_all (\<lambda>P. P tr) Ps)"
 
 lemma read_reg_success:
   "exec_success (read_reg r) (regs_ok regs)
@@ -145,71 +145,65 @@ lemma write_reg_success[exec_success]:
   done
 
 fun(sequential)
-  register_read_prop :: "('st, 'regv, 'a) register_ref \<Rightarrow> ('a \<Rightarrow> bool) \<Rightarrow>
-        'regv event \<Rightarrow> bool"
+  register_expected_event :: "('st, 'regv, 'a) register_ref \<Rightarrow> 'a \<Rightarrow> 'regv event \<Rightarrow> bool"
   where
-    "register_read_prop r P (E_read_reg nm v) = (if nm = name r
-        then (case of_regval r v of None \<Rightarrow> False | Some v \<Rightarrow> P v)
-        else True)"
-  | "register_read_prop _ _ _ = True"
+    "register_expected_event r x (E_read_reg nm y) = (if nm = name r
+        then (case of_regval r y of None \<Rightarrow> False | Some z \<Rightarrow> x = z) else True)"
+  | "register_expected_event r x _ = True"
 
 fun(sequential)
-  register_write_prop :: "('st, 'regv, 'a) register_ref \<Rightarrow> ('a \<Rightarrow> bool) \<Rightarrow>
-        'regv event \<Rightarrow> bool"
+  register_value_event :: "('st, 'regv, 'a) register_ref \<Rightarrow> 'a \<Rightarrow> 'regv event \<Rightarrow> 'a"
   where
-    "register_write_prop r P (E_write_reg nm v) = (if nm = name r
-        then (case of_regval r v of None \<Rightarrow> False | Some v \<Rightarrow> P v)
-        else True)"
-  | "register_write_prop _ _ _ = True"
+    "register_value_event r x (E_write_reg nm y) = (if nm = name r
+        then (case of_regval r y of None \<Rightarrow> x | Some z \<Rightarrow> z) else x)"
+  | "register_value_event r x _ = x"
 
-fun register_trace_inv :: "('st, 'regv, 'a) register_ref \<Rightarrow> ('a \<Rightarrow> bool) \<Rightarrow>
-        'regv event list \<Rightarrow> bool"
+fun
+  register_expected :: "('st, 'regv, 'a) register_ref \<Rightarrow> 'a \<Rightarrow> 'regv event list \<Rightarrow> bool"
   where
-    "register_trace_inv r P [] = True"
-  | "register_trace_inv r P (ev # evs) = (register_read_prop r P ev \<and>
-    (register_write_prop r P ev \<longrightarrow> register_trace_inv r P evs))"
+    "register_expected r init_v [] = True"
+  | "register_expected r init_v (ev # evs) = (register_expected_event r init_v ev \<and>
+    register_expected r (register_value_event r init_v ev) evs)"
 
-definition register_trace_inv_preserved :: "('st, 'regv, 'a) register_ref \<Rightarrow> ('a \<Rightarrow> bool) \<Rightarrow>
-        'regv event list \<Rightarrow> bool"
+fun
+  register_final_value :: "('st, 'regv, 'a) register_ref \<Rightarrow> 'a \<Rightarrow> 'regv event list \<Rightarrow> 'a"
   where
-  "register_trace_inv_preserved r P xs = (register_trace_inv r P xs \<longrightarrow>
-    (\<forall>ev \<in> set xs. register_write_prop r P ev))"
+    "register_final_value r init_v [] = init_v"
+  | "register_final_value r init_v (ev # evs) =
+    (register_final_value r (register_value_event r init_v ev) evs)"
 
-lemma register_trace_inv_append[simp]:
-  "register_trace_inv r P (xs @ ys) = (register_trace_inv r P xs \<and>
-    (register_trace_inv_preserved r P xs \<longrightarrow> register_trace_inv r P ys))"
-  by (induct xs, auto simp: register_trace_inv_preserved_def)
+lemma register_expected_append[simp]:
+  "register_expected r init_v (xs @ ys) =
+    (register_expected r init_v xs \<and>
+        register_expected r (register_final_value r init_v xs) ys)"
+  by (induct xs arbitrary: init_v, simp_all)
 
-lemma register_trace_inv_preserved_no_writes:
-  "(m, xs, m') \<in> Traces \<Longrightarrow> no_reg_writes_to Rs m \<Longrightarrow>
-    name r \<in> Rs \<Longrightarrow>
-    register_trace_inv_preserved r P xs"
-  apply (simp add: no_reg_writes_to_def)
-  apply (elim allE, drule mp, erule(1) conjI)
-  apply (clarsimp simp: register_trace_inv_preserved_def)
-  apply (case_tac ev, simp_all)
-  apply clarsimp
+lemma register_final_value_append[simp]:
+  "register_final_value r init_v (xs @ ys) =
+    register_final_value r (register_final_value r init_v xs) ys"
+  by (induct xs arbitrary: init_v, simp_all)
+
+lemma register_final_value_no_write_events:
+  "(\<forall>v. E_write_reg (name r) v \<notin> set xs) \<Longrightarrow>
+    register_final_value r v xs = v"
+  apply (induct xs, simp_all)
+  apply (case_tac a, simp_all split: option.split)
+  apply auto
   done
 
-lemma register_trace_inv_preserved_no_writes_impE:
-  "(register_trace_inv_preserved r P xs \<longrightarrow> Q) \<Longrightarrow>
-    (m, xs, m') \<in> Traces \<Longrightarrow>
-    no_reg_writes_to {name r} m \<Longrightarrow>
-    (register_trace_inv_preserved r P xs \<Longrightarrow> Q \<Longrightarrow> R) \<Longrightarrow>
-    R"
-  by (simp add: register_trace_inv_preserved_no_writes)
+(* maybe make this a simp rule? not clear how expensive that might be *)
+lemma register_final_value_no_writes:
+  "(m, xs, m') \<in> Traces \<Longrightarrow> no_reg_writes_to {name r} m \<Longrightarrow>
+    register_final_value r v xs = v"
+  apply (rule register_final_value_no_write_events)
+  apply (auto simp add: no_reg_writes_to_def)
+  done
 
-lemma register_trace_inv_preserved_append[simp]:
-  "register_trace_inv_preserved r P (xs @ ys) =
-    (register_trace_inv_preserved r P xs \<and>
-        (register_trace_inv r P xs \<longrightarrow> register_trace_inv_preserved r P ys))"
-  by (auto simp add: register_trace_inv_preserved_def)
-
-lemma register_trace_inv_preserved_list[simp]:
-  "register_trace_inv_preserved r P []"
-  "register_trace_inv_preserved r P (ev # evs) =
-    (register_read_prop r P ev \<longrightarrow> register_write_prop r P ev \<and> register_trace_inv_preserved r P evs)"
-  by (auto simp add: register_trace_inv_preserved_def)
+lemma register_final_no_writes_apply_expected:
+  "register_expected r (register_final_value r v xs) ys \<Longrightarrow>
+    (m, xs, m') \<in> Traces \<Longrightarrow> no_reg_writes_to {name r} m \<Longrightarrow>
+    register_final_value r v xs = v"
+  by (rule register_final_value_no_writes)
 
 lemma exec_success_inner_foreachM:
   "(\<forall>x y tr'. x \<in> set xs \<longrightarrow> exec_success_inner exc (f x y) tr') \<Longrightarrow>
@@ -304,10 +298,10 @@ method exec_success_step uses flip = determ \<open>
       clarsimp intro!: exec_successI exec_success_inner_unfold
         split del: if_split simp flip: flip
     | rule conjI exec_success_inner_bind exec_success_intro
+    | (frule(1) register_final_no_writes_apply_expected,
+        solves \<open>simp(no_asm)\<close>)
     | (rule exec_success_imp, rule exec_success)
     | assumption
-    | (erule(1) register_trace_inv_preserved_no_writes_impE,
-        solves \<open>simp(no_asm)\<close>)
     | erule exec_success_elim
     | (unfold_from Preconditions; solves \<open>simp\<close>)
     | unat_range_intro
