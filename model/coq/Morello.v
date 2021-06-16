@@ -43,10 +43,6 @@ Instance CAddress_w64 : CAddress(w64) :=
 Definition otype_size: nat := 15. (* CAP_VALUE_NUM_BITS *)
 Definition otype := word otype_size.
 
-(* --- "Logical view of Capablities in Morello. --- *)
-
-
-
 (* Number of user permissions in Morello *)
 Definition MUSER_PERMS_LEN := 4.
 
@@ -160,7 +156,7 @@ Program Definition Seal_of_otype (x:otype): (@CapSeal MObjectType)
                       else Cap_Sealed (@exist _ _ x _)))).
 Next Obligation.
   intro R.
-  inversion R; try  congruence.
+  inversion R; try congruence.
   destruct H3; try congruence.
   destruct H3; try congruence.
 Defined.
