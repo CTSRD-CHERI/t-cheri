@@ -95,9 +95,13 @@ let exception_funs ast = List.fold_left add_exception_fun IdSet.empty ast.defs
 
 let false_exp = mk_exp (E_lit (L_aux (L_false, Parse_ast.Unknown)))
 let true_exp = mk_exp (E_lit (L_aux (L_true, Parse_ast.Unknown)))
-let mk_conj a b = mk_exp (E_app (mk_id "and_bool_precond_no_flow", [a; b]))
-let mk_disj a b = mk_exp (E_app (mk_id "or_bool_precond_no_flow", [a; b]))
+let conj_nm = mk_id "and_bool_precond_no_flow"
+let mk_conj a b = mk_exp (E_app (conj_nm, [a; b]))
+let disj_nm = mk_id "or_bool_precond_no_flow"
+let mk_disj a b = mk_exp (E_app (disj_nm, [a; b]))
 let mk_not a = mk_exp (E_app (mk_id "not_bool", [a]))
+let is_conj id = (Id.compare id conj_nm = 0)
+let is_disj id = (Id.compare id disj_nm = 0)
 
 let rec mk_conjs = function
   | [] -> true_exp
@@ -116,11 +120,12 @@ let ids_present ids =
 let ids_not_present ids exp = not (ids_present ids exp)
 
 let mk_t_e x = E_aux (x, (Parse_ast.Unknown, Type_check.empty_tannot))
-let mk_t_eq x y = mk_t_e (E_app (mk_id "eq", [x; y]))
-let mk_t_not a = mk_t_e (E_app (mk_id "not_bool", [a]))
+let mk_t_eq x y = mk_t_e (E_app (mk_id "==", [x; y]))
 
 let case_pat_exp_to_cond x = function
-  | Pat_exp (P_aux (P_lit l, _), rhs) -> Some (mk_t_eq x (mk_t_e (E_lit l)), rhs)
+  | Pat_exp (P_aux (P_lit l, (loc, _)), rhs) ->
+        (* Some (mk_t_eq x (mk_t_e (E_lit l)), rhs) *)
+    raise (Reporting.err_general loc "case_pat_exp_to_cond: remaining literal")
   | Pat_when (P_aux (P_wild, _), c, rhs) -> Some (c, rhs)
   | Pat_when (P_aux (P_id id, _), c, rhs) -> Some (subst id x c, subst id x rhs)
   | _ -> None
@@ -213,6 +218,7 @@ let precond_simp = fold_exp { id_exp_alg with
 *)
 type preconds = {
     funs : (bool list * (id * typ) list) Bindings.t;
+    precond_ids : IdSet.t;
     triv : IdSet.t
 }
 
@@ -251,28 +257,72 @@ let let_rhs_triv exp =
     e_lit = (fun _ -> true)
   } exp
 
-let filter_for_let fun_id ids (p, body) assertions =
-  let xs = List.filter (ids_not_present ids) assertions in
-  let n = List.length assertions - List.length xs in
+let filter_assertions_msg fun_id msg xs ys =
+  let n = List.length xs - List.length ys in
   if n > 0
   then prerr_endline ("dropped " ^ string_of_int n ^
-    " assertions (" ^
-    Util.string_of_list ", " string_of_id (IdSet.elements ids) ^
-    ": " ^ string_of_pat p ^
-    " = " ^ string_of_exp body ^ ") in " ^
-    string_of_id fun_id)
+    " assertions (" ^ msg ^ ") in " ^ string_of_id fun_id)
   else ();
-  xs
+  ys
 
-let apply_let_bind fun_id p body assertions = match p with
-  | P_aux (P_id id, _) -> if let_rhs_triv body
-    then List.map (subst id (drop_tannot body)) assertions
-    else filter_for_let fun_id (pat_ids p) (p, body) assertions
-  | _ -> filter_for_let fun_id (pat_ids p) (p, body) assertions
+let filter_assertions_pat fun_id (p, body) msg assertions =
+  let xs = List.filter (ids_not_present (pat_ids p)) assertions in
+  filter_assertions_msg fun_id
+    (string_of_pat p ^ " = " ^ string_of_exp body ^ ": " ^ msg)
+    assertions xs
 
-let rec scan_assertions_aux nm preconds x =
+(* it's ok to expand a let-binding by substitution, or grab an
+   assertion body or a conditional, as long as doing so introduces
+   no effects *)
+let check_effects env exp =
+  let checked = try Type_check.check_exp env (drop_tannot exp) (Type_check.typ_of exp)
+  with Type_check.Type_error (_, l, err) ->
+    raise (Reporting.err_typ l ("check_effects: " ^ Type_error.string_of_type_error err
+        ^ "\n on: " ^ string_of_exp exp))
+  in
+  let effects = checked |> Type_check.effect_of |> effect_set in
+  if BESet.for_all (fun eff -> string_of_base_effect eff = "rreg") effects
+  then None
+  else Some ("effects: " ^ Util.string_of_list ", "
+    string_of_base_effect (BESet.elements effects))
+
+let apps_with_effects env =
+  let check_ty id ty = match ty with
+    | Typ_aux (Typ_fn (_, _, effect), _) -> effect_set effect |> BESet.is_empty
+    | _ -> raise (Reporting.err_general Parse_ast.Unknown
+        ("apps_with_effects: not fun type: " ^ string_of_id id))
+  in
+  let check id = check_ty id (snd (Type_check.Env.get_val_spec id env)) in
+  fold_exp { (pure_exp_alg [] (@)) with
+    e_app = (fun (id, xs) -> (if check id then [] else [id]) @ List.concat xs)
+  }
+
+let check_all_effects env exp = match apps_with_effects env exp with
+  | [] -> check_effects env exp
+  | id :: _ -> Some ("function effect: " ^ string_of_id id)
+
+let drop_int_return exp = fold_exp { id_exp_alg with
+    e_internal_return = unaux_exp
+  } exp
+
+let let_bind_filter_assertions fun_id pat env x assertions =
+  match pat_to_id_opt pat with
+  | Some id -> begin match check_all_effects env x with
+      | None -> List.map (subst id (drop_tannot (drop_int_return x))) assertions
+      | Some msg -> filter_assertions_pat fun_id (pat, x) msg assertions
+  end
+  | _ -> filter_assertions_pat fun_id (pat, x) "compound pat" assertions
+
+let filter_assertion_effects fun_id env assertions =
+  let xs = List.map (fun assn -> (drop_tannot assn, check_all_effects env assn)) assertions in
+  let ys = List.filter (fun (_, c) -> Option.is_none c) xs in
+  let c_msg = List.find_map snd xs in
+  filter_assertions_msg fun_id (Util.option_default "" c_msg) assertions ys
+
+let rec scan_assertions nm preconds exp =
+  let env = Type_check.env_of exp in
   let scan = scan_assertions nm preconds in
-  match x with
+  match unaux_exp exp with
   | E_block es -> List.concat (List.map scan es)
   | E_assert (e, msg) -> [drop_tannot e]
   | E_if (c, x, y) ->
@@ -288,15 +338,13 @@ let rec scan_assertions_aux nm preconds x =
     x_assns @ y_assns
   | E_cast (_, e) -> scan e
   | E_throw e -> if throw_is_failure e then [false_exp] else []
-  | E_let (LB_aux (LB_val (p, e1), _), e2) ->
-        scan e1 @ apply_let_bind nm p e1 (scan e2)
-  | E_internal_plet (p, e1, e2) ->
-        scan e1 @ apply_let_bind nm p e1 (scan e2)
+  | E_let (LB_aux (LB_val (pat, e1), _), e2) ->
+        scan e1 @ let_bind_filter_assertions nm pat env e1 (scan e2)
+  | E_internal_plet (pat, e1, e2) ->
+        scan e1 @ let_bind_filter_assertions nm pat env e1 (scan e2)
   | E_app (id, args) -> get_precond_app preconds id args
   | E_app_infix (lhs, id, rhs) -> get_precond_app preconds id [lhs; rhs]
   | e -> []
-  and scan_assertions nm fun_assertions (E_aux (exp, _)) =
-    scan_assertions_aux nm fun_assertions exp
 
 let def_note = function
   | DEF_fundef fd -> "fundef_of " ^ string_of_id (id_of_fundef fd)
@@ -368,6 +416,7 @@ let simplify_binding regs_read (p, body) =
     | P_aux (P_tup xs, _) -> (List.map pat_to_id xs, false)
     | P_aux (P_id id, _) -> ([id], false)
     | P_aux (P_lit (L_aux (L_unit, _)), _) -> ([], true)
+    | P_aux (P_wild, _) -> ([], true)
     | P_aux (_, (l, _)) ->
       raise (Reporting.err_general l ("simplify_binding: fundef pattern: " ^ string_of_pat p))
   in
@@ -409,7 +458,8 @@ let type_check_assn_def env id p assn =
         arg_ids ty_args2 env in
     let check_assn = try Type_check.check_exp bound_env assn bool_typ
     with Type_check.Type_error (_, l, err) ->
-        raise (Reporting.err_typ l (Type_error.string_of_type_error err))
+        raise (Reporting.err_typ l ("type_check_assn_def: " ^
+            Type_error.string_of_type_error err))
     in
     let regs_read = regs_read_in_exp check_assn |> IdSet.elements in
     let typed_regs = List.map (fun r -> (r, get_reg_typ env r)) regs_read in
@@ -428,21 +478,40 @@ let type_check_assn_def env id p assn =
     let (defs, env2) = Type_error.check_defs env [spec; fund] in
     ((adj_args, typed_regs), defs, env2)
 
+let log_time msg f x =
+  let start = Sys.time () in
+  let y = f x in
+  let time = Sys.time () -. start in
+  if time > 0.1
+  then log_msg (msg ^ ": " ^ Float.to_string time ^ "s")
+  else ();
+  y
+
 let add_funcl_assertions ast data = function
   | FCL_aux (FCL_Funcl (id, Pat_aux (Pat_exp (p, body), _)), (l, _)) ->
     log_msg ("scanning " ^ string_of_id id ^ " for preconditions");
     let (env, precond_defs, preconds) = data in
-    let body2 = precond_simp body in
+    let body2 = log_time "precond_simp" precond_simp body in
+    let body3 = try Type_check.check_exp (Type_check.env_of body)
+        (drop_tannot body2) (Type_check.typ_of body)
+    with Type_check.Type_error (_, l, err) ->
+        raise (Reporting.err_typ l ("add_funcl_assertions: recheck: " ^
+            Type_error.string_of_type_error err))
+    in
     log_msg ("converted body");
-    begin try match scan_assertions id preconds body2 with
+    prerr_endline (string_of_exp body3);
+    begin try match log_time "scan_assertions"
+        (scan_assertions id preconds) body3 with
     | [] -> data
     | assns ->
         prerr_endline ("got a precondition for " ^ (string_of_id id));
         let assn = mk_conjs assns in
         let (arg_info, defs, env2) = type_check_assn_def env id p assn in
-        let preconds2 = { preconds with funs = Bindings.add id arg_info preconds.funs } in
+        let preconds2 = { preconds with funs = Bindings.add id arg_info preconds.funs;
+            precond_ids = IdSet.add (precond_name id) preconds.precond_ids } in
         let precond_defs2 = precond_defs @ defs in
-        let triv = precond_smt_check env2 (append_ast_defs ast precond_defs2) id in
+        let triv = log_time "precond_smt_check"
+            (precond_smt_check env2 (append_ast_defs ast precond_defs2)) id in
         let preconds3 = if triv then { preconds2 with triv = IdSet.add id preconds2.triv }
             else preconds2 in
        (env2, precond_defs2, preconds3)
@@ -476,7 +545,7 @@ let rec tcheck env cdefs = function
   quote_fundef_defs def;
   let env_defs = try Type_check.check_with_envs env [def]
     with Type_check.Type_error (_, l, err) ->
-     raise (Reporting.err_typ l (Type_error.string_of_type_error err))
+     raise (Reporting.err_typ l ("tcheck: " ^ Type_error.string_of_type_error err))
   in
   let def_cdefs = List.map fst env_defs in
   let env2 = snd (List.hd (List.rev env_defs)) in
@@ -488,14 +557,12 @@ let bool_ops =
   let xy_pat = mk_pat (P_tup [mk_pat (P_id x); mk_pat (P_id y)]) in
   let ty = mk_typ (Typ_fn ([bool_typ; bool_typ], bool_typ, no_effect)) in
   let tysch = mk_typschm (mk_typquant []) ty in
-  let or_simple = mk_id "or_bool_precond_no_flow" in
-  let and_simple = mk_id "and_bool_precond_no_flow" in
   [
-    mk_val_spec (VS_val_spec (tysch, or_simple, [], false));
-    mk_fundef [mk_funcl or_simple xy_pat
+    mk_val_spec (VS_val_spec (tysch, disj_nm, [], false));
+    mk_fundef [mk_funcl disj_nm xy_pat
         (mk_exp (E_app (mk_id "or_bool", [mk_exp (E_id x); mk_exp (E_id y)])))];
-    mk_val_spec (VS_val_spec (tysch, and_simple, [], false));
-    mk_fundef [mk_funcl and_simple xy_pat
+    mk_val_spec (VS_val_spec (tysch, conj_nm, [], false));
+    mk_fundef [mk_funcl conj_nm xy_pat
         (mk_exp (E_app (mk_id "and_bool", [mk_exp (E_id x); mk_exp (E_id y)])))]]
 
 let add_unique_fields l fs (typ, id) = Bindings.update id
@@ -508,7 +575,8 @@ let get_preconds env ast =
   Reporting.opt_warnings := true;
   prerr_endline ("getting preconds for " ^ (string_of_int (List.length ast.defs)) ^ " ast elems");
   let (bool_defs, env) = Type_error.check_defs env bool_ops in
-  let preconds = {funs = Bindings.empty; triv = IdSet.empty} in
+  let ast = Rewrites.rewrite_ast_pat_lits (fun _ -> true) env ast in
+  let preconds = {funs = Bindings.empty; precond_ids = IdSet.empty; triv = IdSet.empty} in
   let (env, precond_defs, preconds) = List.fold_left (add_fun_assertions ast)
         (env, bool_defs, preconds) ast.defs in
   prerr_endline ("got " ^ string_of_int (List.length precond_defs) ^ " precond ast elems");
@@ -598,7 +666,18 @@ let fun_infos_of_ast env ast =
   let exc_funs = exception_funs ast in
   List.fold_left (add_fun_infos_of_def env exc_funs) Bindings.empty ast.defs
 
-let load_files ?mutrecs:(mutrecs=IdSet.empty) files =
+let do_slice slices ast = match slices with
+  | None -> ast
+  | Some (roots_list, cuts_list) ->
+   let module NodeSet = Set.Make(Slice.Node) in
+   let module G = Graph.Make(Slice.Node) in
+   let fun_id id = Slice.Function id in
+   let roots = NodeSet.of_list (List.map fun_id roots_list) in
+   let cuts = NodeSet.of_list (List.map fun_id cuts_list) in
+   let g = G.prune roots cuts (Slice.graph_of_ast ast) in
+   Slice.filter_ast cuts g ast
+
+let load_files ?mutrecs:(mutrecs=IdSet.empty) files slices =
   let open Process_file in
   Nl_flow.opt_nl_flow := true;
   Process_file.opt_memo_z3 := true;
@@ -612,6 +691,7 @@ let load_files ?mutrecs:(mutrecs=IdSet.empty) files =
   Util.opt_verbosity := 1;
 
   let (_, ast, env) = load_files [] Type_check.initial_env files in
+  let ast = do_slice slices ast in
   let (ast, env) = descatter env ast in
   let (ast, env) =
     List.fold_right (fun file (ast,_) -> Splice.splice ast file)
