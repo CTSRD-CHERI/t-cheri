@@ -881,16 +881,16 @@ proof -
     by (elim s_invariant_holds_weaken) (auto simp: addr_trans_invariant_plus_def)
 qed
 
-lemma get_reg_cap_intra_domain_trace_reachable:
+lemma get_reg_cap_reachable:
   assumes r: "c \<in> get_reg_caps r s'"
     (*and t: "hasTrace t (instr_sem ISA instr)"*) and s': "s_run_trace t s = Some s'"
-    and axioms: "cheri_axioms CC ISA is_fetch False initial_caps use_mem_caps invoked_caps invoked_indirect_caps t"
-    and C: "initial_caps \<union> invoked_caps \<union> invoked_indirect_caps \<subseteq> C"
+    and axioms: "cheri_axioms CC ISA is_fetch has_ex initial_caps use_mem_caps invoked_caps invoked_indirect_caps t"
+    and C: "initial_caps \<subseteq> C" "r \<in> PCC ISA \<union> IDC ISA \<longrightarrow> \<not>has_ex \<and> invoked_caps \<union> invoked_indirect_caps \<subseteq> C"
+      \<comment> \<open>TODO: Handle has_ex case by adding an assumption like \<open>has_ex \<longrightarrow> KCC \<subseteq> C\<close>\<close>
     (*and no_exception: "\<not>hasException t (instr_sem ISA instr)"
     and no_ccall: "invoked_caps ISA instr t = {}"*)
     and tag: "is_tagged_method CC c"
     and priv: "r \<in> read_privileged_regs ISA \<longrightarrow> system_access_reachable_plus C s"
-  (* TODO: shows "c \<in> reachable_caps s \<or> (r \<in> (PCC ISA \<union> IDC ISA) \<and> c \<in> invoked_caps)" *)
   shows "c \<in> reachable_caps_plus C s"
 proof -
   from r obtain v where v: "get_reg_val r s' = Some v" and c: "c \<in> caps_of_regval ISA v"
@@ -904,7 +904,7 @@ proof -
       with priv obtain c' where c': "c' \<in> reachable_caps_plus C s"
         and "permits_system_access_method CC c'"
         and "is_tagged_method CC c'" and "\<not>is_sealed_method CC c'"
-        using reachable_caps_plus_mono[OF C]
+        using reachable_caps_plus_mono C
         by (auto simp: system_access_reachable_plus_def)
       then show "c \<in> reachable_caps_plus C s"
         using Init c tag v
@@ -922,18 +922,18 @@ proof -
     case (Update j)
     show ?thesis
     proof cases
-      assume "c \<in> initial_caps \<union> invoked_caps \<union> invoked_indirect_caps"
+      assume "r \<in> PCC ISA \<union> IDC ISA \<and> \<not>has_ex \<and> c \<in> initial_caps \<union> invoked_caps \<union> invoked_indirect_caps"
       then show "c \<in> reachable_caps_plus C s"
         using C
         by (intro reachable_caps_plus.Plus) auto
     next
-      assume c_not_inv: "c \<notin> initial_caps \<union> invoked_caps \<union> invoked_indirect_caps"
+      assume c_not_inv: "\<not>(r \<in> PCC ISA \<union> IDC ISA \<and> \<not>has_ex \<and> c \<in> initial_caps \<union> invoked_caps \<union> invoked_indirect_caps)"
       from Update have "c \<in> writes_reg_caps CC (caps_of_regval ISA) (t ! j)"
         and "writes_to_reg (t ! j) = Some r"
         using tag c v
         by auto
       then have "c \<in> derivable (initial_caps \<union> available_caps CC ISA (invoked_indirect_caps = {} \<and> use_mem_caps) j t)"
-        using axioms tag \<open>j < length t\<close> c_not_inv
+        using axioms tag \<open>j < length t\<close> c_not_inv C
         unfolding cheri_axioms_def
         by (auto elim!: store_cap_reg_axiomE simp: cap_derivable_iff_derivable)
       moreover have "derivable (initial_caps \<union> available_caps CC ISA (invoked_indirect_caps = {} \<and> use_mem_caps) j t) \<subseteq> reachable_caps_plus initial_caps s"
@@ -945,6 +945,17 @@ proof -
     qed
   qed
 qed
+
+corollary get_reg_cap_non_invoked_reachable:
+  assumes  "c \<in> get_reg_caps r s'"
+    and "s_run_trace t s = Some s'"
+    and "cheri_axioms CC ISA is_fetch has_ex initial_caps use_mem_caps invoked_caps invoked_indirect_caps t"
+    and "r \<notin> PCC ISA \<union> IDC ISA"
+    and "is_tagged_method CC c"
+    and "r \<in> read_privileged_regs ISA \<longrightarrow> system_access_reachable_plus initial_caps s"
+  shows "c \<in> reachable_caps_plus initial_caps s"
+  using assms
+  by (elim get_reg_cap_reachable) auto
 
 lemma reachable_caps_plus_trace_intradomain_monotonicity:
   assumes axioms: "cheri_axioms CC ISA is_fetch False initial_caps use_mem_caps invoked_caps invoked_indirect_caps t"
@@ -959,12 +970,12 @@ proof
     case (Reg r c)
     then show ?case
       using axioms s'
-      by (intro get_reg_cap_intra_domain_trace_reachable) auto
+      by (intro get_reg_cap_reachable) auto
   next
     case (SysReg c r c')
     then show ?case
       using axioms s'
-      by (intro get_reg_cap_intra_domain_trace_reachable) (auto simp: system_access_reachable_plus_def)
+      by (intro get_reg_cap_reachable) (auto simp: system_access_reachable_plus_def)
   next
     case (Mem addr c vaddr c')
     then have c: "get_mem_cap addr (tag_granule ISA) s' = Some c"
