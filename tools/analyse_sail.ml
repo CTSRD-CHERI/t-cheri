@@ -191,6 +191,8 @@ let load_files ?mutrecs:(mutrecs=IdSet.empty) files =
     List.fold_right (fun file (ast,_) -> Splice.splice ast file)
       (!opt_splice) (ast, env)
   in
+  let ast = Spec_analysis.infer_effects ast in
+  let (ast, env) = Type_error.check Type_check.initial_env ast in
   let (ast, env) = rewrite_ast_target "lem" env ast in
   Constraint.save_digests ();
   (ast, env)
