@@ -1360,21 +1360,20 @@ end
 
 locale Cap_Axiom_Assm_Automaton =
   Capability_Invariant_ISA CC ISA initial_caps cap_invariant +
-  Cap_Axiom_Automaton CC ISA initial_caps enabled use_mem_caps
+  Cap_Axiom_Automaton CC ISA initial_caps enabled use_mem_caps +
+  Wellformed_Traces wellformed_ev is_isa_exception
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
     and initial_caps :: "'cap set"
     and cap_invariant :: "'cap \<Rightarrow> bool"
     and enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool"
-    and use_mem_caps :: bool +
-  fixes ex_traces :: bool
-    and is_isa_exception :: "'e \<Rightarrow> bool"
-    and ev_assms :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool"
+    and use_mem_caps :: bool
     and wellformed_ev :: "'regval event \<Rightarrow> bool"
+    and is_isa_exception :: "'e \<Rightarrow> bool" +
+  fixes ex_traces :: bool
+    and ev_assms :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool"
   assumes non_cap_event_enabled: "\<And>e. non_cap_event e \<Longrightarrow> enabled s e"
     and read_non_special_regs_enabled: "\<And>r v. r \<notin> PCC ISA \<union> IDC ISA \<union> KCC ISA \<union> read_privileged_regs ISA \<Longrightarrow> enabled s (E_read_reg r v)"
 begin
-
-abbreviation "wellformed_trace t \<equiv> \<forall>e \<in> set t. wellformed_ev e"
 
 abbreviation "trace_assms \<equiv> holds_along_trace ev_assms"
 
@@ -1450,6 +1449,10 @@ lemma pre_inv_trace_assms_append_iff:
 lemma pre_inv_trace_assms_wellformed_trace:
   "pre_inv_trace_assms s n t \<Longrightarrow> wellformed_trace t"
   by (induction s n t rule: pre_inv_trace_assms.induct) auto
+
+lemma inv_trace_assms_wellformed_trace:
+  "inv_trace_assms s t \<Longrightarrow> wellformed_trace t"
+  by (auto simp: inv_trace_assms_def)
 
 lemma inv_trace_assms_Nil[simp]:
   "inv_trace_assms s [] \<longleftrightarrow> accessed_caps_invariant s"
@@ -1671,17 +1674,13 @@ proof (unfold traces_enabled_def, intro allI impI, elim conjE)
        (auto intro: non_cap_exp_trace_enabledI)
 qed
 
-definition "exp_ends_with m P \<equiv> (\<forall>t m'. (m, t, m') \<in> Traces \<and> finished m' \<and> wellformed_trace t \<longrightarrow> P m')"
-abbreviation "exp_raises_isa_ex m \<equiv> exp_ends_with m (\<lambda>m'. \<exists>e. m' = Exception e \<and> is_isa_exception e)"
-abbreviation "exp_succeeds m \<equiv> exp_ends_with m (\<lambda>m'. \<exists>a. m' = Done a)"
-
 lemma exp_raises_ex_traces_enabled:
   assumes "exp_raises_isa_ex m"
     and "ex_traces \<longrightarrow> traces_enabled m s"
   shows "traces_enabled m s"
   using assms pre_inv_trace_assms_wellformed_trace
   unfolding traces_enabled_def exp_ends_with_def finished_def finished_exception_def
-  by fastforce
+  by (fastforce simp: runTrace_iff_Traces)
 
 lemma finish_bind_cases:
   assumes "finished (m \<bind> f)"
@@ -1695,7 +1694,7 @@ lemma exp_raises_isa_ex_bind:
   assumes "exp_succeeds m" and "\<And>t a. Run m t a \<Longrightarrow> wellformed_trace t \<Longrightarrow> exp_raises_isa_ex (f a)"
   shows "exp_raises_isa_ex (m \<bind> f)"
   using assms
-  by (fastforce simp: exp_ends_with_def elim!: bind_Traces_cases finish_bind_cases)
+  by (fastforce simp: exp_ends_with_def runTrace_iff_Traces elim!: bind_Traces_cases final_bind_cases)
 
 lemma traces_enabled_let[traces_enabledI]:
   assumes "traces_enabled (f y) s"

@@ -507,6 +507,19 @@ lemma exp_fails_if_then_else:
   using assms
   by auto
 
+locale Wellformed_Traces =
+  fixes wellformed_ev :: "'regval event \<Rightarrow> bool"
+    and is_isa_exception :: "'ev \<Rightarrow> bool"
+begin
+
+abbreviation "wellformed_trace t \<equiv> \<forall>e \<in> set t. wellformed_ev e"
+
+definition "exp_ends_with m P \<equiv> (\<forall>t m'. runTrace t m = Some m' \<and> final m' \<and> wellformed_trace t \<longrightarrow> P m')"
+abbreviation "exp_raises_isa_ex m \<equiv> exp_ends_with m (\<lambda>m'. \<exists>e. m' = Exception e \<and> is_isa_exception e)"
+abbreviation "exp_succeeds m \<equiv> exp_ends_with m (\<lambda>m'. \<exists>a. m' = Done a)"
+
+end
+
 locale Register_State =
   fixes get_regval :: "string \<Rightarrow> 'regstate \<Rightarrow> 'regval option"
     and set_regval :: "string \<Rightarrow> 'regval \<Rightarrow> 'regstate \<Rightarrow> 'regstate option"
