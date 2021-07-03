@@ -1219,6 +1219,7 @@ fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Righta
                    (r \<in> PCC ISA \<and> leq_cap CC c (unseal_method CC cc) \<or>
                     r \<in> IDC ISA \<and> leq_cap CC c (unseal_method CC cd))) \<or>
           (\<exists>c'. c \<in> invoked_caps \<and>
+                invoked_indirect_caps \<noteq> {} \<and>
                 c' \<in> derivable (initial_caps \<union> accessed_mem_caps s) \<and>
                 ((leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c' \<and> r \<in> PCC ISA) \<or>
                  (leq_cap CC c c' \<and> r \<in> PCC ISA \<union> IDC ISA)))))"
@@ -1246,7 +1247,8 @@ lemma enabled_E_write_reg_cases:
       "r \<in> PCC ISA \<and> leq_cap CC c (unseal_method CC cc) \<or> r \<in> IDC ISA \<and> leq_cap CC c (unseal_method CC cd)" and
       "c \<notin> derivable (initial_caps \<union> accessed_caps use_mem_caps s)"
   | (Indirect) c' where "c \<in> invoked_caps" and
-      "c' \<in> derivable (initial_caps \<union> accessed_mem_caps s)"
+      "invoked_indirect_caps \<noteq> {}" and
+      "c' \<in> derivable (initial_caps \<union> accessed_mem_caps s)" and
       "(leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c' \<and> r \<in> PCC ISA) \<or>
        (leq_cap CC c c' \<and> r \<in> PCC ISA \<union> IDC ISA)"
   using assms
@@ -1344,7 +1346,7 @@ proof -
       next
         case (Indirect c')
         then show ?thesis
-          by (auto simp: cap_derivable_iff_derivable)
+          by (fastforce simp: cap_derivable_iff_derivable)
       qed
     qed auto
   qed
