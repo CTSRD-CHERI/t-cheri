@@ -59,9 +59,12 @@ let has_ref_args f = List.exists is_ref_typ (arg_typs f)
 let mangle_name renames n =
   (try Bindings.find n renames with Not_found -> isa_name n)
 
-let mangle_fun_name arch = mangle_name arch.fun_renames
-let mangle_arg_name arch = mangle_name arch.arg_renames
-let mangle_reg_ref arch n = mangle_name arch.reg_ref_renames (append_id n "_ref")
+let union_bindings b1 b2 = Bindings.union (fun k x y -> Some y) b1 b2
+let mangle_fun_name ?extra_renames:(extra_renames=Bindings.empty) arch = mangle_name (union_bindings arch.fun_renames extra_renames)
+let mangle_arg_name ?extra_renames:(extra_renames=Bindings.empty) arch = mangle_name (union_bindings arch.arg_renames extra_renames)
+let mangle_reg_ref ?extra_renames:(extra_renames=Bindings.empty) arch n = mangle_name (union_bindings arch.reg_ref_renames extra_renames) (append_id n "_ref")
+
+let arg_renames ids = List.fold_left (fun rs id -> Bindings.add (mk_id id) (id ^ "__arg") rs) Bindings.empty ids
 
 let get_kid_itself typ = match unaux_typ typ with
   | Typ_app (itself, [Ast.A_aux (Ast.A_nexp (Nexp_aux (Nexp_var kid, _)), _)])
@@ -70,21 +73,21 @@ let get_kid_itself typ = match unaux_typ typ with
   | _ -> None
 
 let format_fun_name arch id = mangle_fun_name arch id
-let format_fun_args ?annot_kids:(annot_kids=false) arch f =
+let format_fun_args ?annot_kids:(annot_kids=false) ?extra_renames:(extra_renames=Bindings.empty) arch f =
   let format_arg i (id, typ) =
-    let arg = mangle_arg_name arch id in
+    let arg = mangle_arg_name ~extra_renames arch id in
     match get_kid_itself typ with
     | Some kid -> "(" ^ arg ^ " :: " ^ string_of_kid kid ^ "::len itself)"
     | None -> arg
   in
   String.concat " " (List.mapi format_arg f.args)
-let format_fun_call ?annot_kids:(annot_kids=false) arch id f =
+let format_fun_call ?annot_kids:(annot_kids=false) ?extra_renames:(extra_renames=Bindings.empty) arch id f =
   let tannot = match Type_check.destruct_bitvector arch.type_env f.ret_typ with
     | Some (Nexp_aux (Nexp_var kid, _), _) when annot_kids ->
        " :: " ^ string_of_kid kid ^ "::len word M"
     | _ -> ""
   in
-  format_fun_name arch id ^ " " ^ format_fun_args ~annot_kids arch f ^ tannot
+  format_fun_name arch id ^ " " ^ format_fun_args ~annot_kids ~extra_renames arch f ^ tannot
 
 let apply_lemma_override arch id lemma_type lemma =
   match Bindings.find_opt id arch.lemma_overrides with
@@ -95,9 +98,9 @@ let apply_lemma_override arch id lemma_type lemma =
      end
   | None -> lemma
 
-let get_fun_info ?annot_kids:(annot_kids=false) isa id =
+let get_fun_info ?annot_kids:(annot_kids=false) ?extra_renames:(extra_renames=Bindings.empty) isa id =
   let f = Bindings.find id isa.fun_infos in
-  (f, format_fun_name isa id, format_fun_call ~annot_kids isa id f)
+  (f, format_fun_name isa id, format_fun_call ~annot_kids ~extra_renames isa id f)
 
 let non_cap_exp_lemma isa id : lemma =
   let (f, name, call) = get_fun_info isa id in
@@ -123,20 +126,21 @@ let non_mem_exp_lemma isa id =
   |> apply_lemma_override isa id "non_mem_exp"
 
 let no_reg_writes_to_lemma no_exc isa id =
-  let (f, name, call) = get_fun_info isa id in
+  let extra_renames = arg_renames ["Rs"] in
+  let (f, name, call) = get_fun_info isa ~extra_renames id in
   (* Restricting attention to special capability registers for now *)
   let regs_written = if no_exc then f.trans_regs_written_no_exc else f.trans_regs_written in
   let regs = IdSet.elements (IdSet.diff (write_checked_regs isa) regs_written) in
   let reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") regs in
   (* let get_arg_assm i r = if (is_ref_typ r && not (is_cap_typ isa (base_typ_of isa r))) then ["name arg" ^ string_of_int i ^ " \\<notin> Rs"] else [] in *)
   let assm =
-    "Rs \\<subseteq> {" ^ String.concat ", " reg_names ^ "}"
+    if IdSet.is_empty regs_written then "" else ("Rs \\<subseteq> {" ^ String.concat ", " reg_names ^ "} \\<Longrightarrow> ")
     (* @ List.concat (List.mapi get_arg_assm f.arg_typs) *)
   in
   let exc_prefix = if no_exc then "runs_" else "" in
   { name = exc_prefix ^ "no_reg_writes_to_" ^ name;
     attrs = "[" ^ exc_prefix ^ "no_reg_writes_toI, simp]"; assms = [];
-    stmts = [assm ^ " \\<Longrightarrow> " ^ exc_prefix ^ "no_reg_writes_to Rs (" ^ call ^ ")"];
+    stmts = [assm ^ exc_prefix ^ "no_reg_writes_to Rs (" ^ call ^ ")"];
     unfolding = []; using = [];
     proof = "(unfold " ^ name ^ "_def bind_assoc, no_reg_writes_toI)" }
   |> apply_lemma_override isa id (exc_prefix ^ "no_reg_writes_to")
@@ -233,8 +237,16 @@ let needed_footprints isa =
   let ids' = List.concat (List.map ids_of_node (NodeSet.elements nodes')) in
   IdSet.union ids (IdSet.inter (IdSet.of_list ids') (effectful_funs isa))
 
-let return_caps_derivable_lemma isa id =
-  let (f, name, call) = get_fun_info isa id in
+let has_override isa id l =
+  match Bindings.find_opt id isa.lemma_overrides with
+  | Some overrides -> StringMap.mem l overrides
+  | None -> false
+
+let has_system_access_checks isa f = ids_overlap isa.system_access_checks f.trans_calls
+
+let return_caps_derivable_lemma for_fetch isa id =
+  let extra_renames = arg_renames ["s"; "t"; "c"] in
+  let (f, name, call) = get_fun_info ~extra_renames isa id in
   let priv_cap_regs_read =
     if ids_overlap isa.system_access_checks f.trans_calls then IdSet.empty else
     IdSet.inter isa.read_privileged_regs f.trans_regs_read_no_exc
@@ -242,20 +254,20 @@ let return_caps_derivable_lemma isa id =
   let nonpriv_cap_regs_read = IdSet.inter (IdSet.diff (special_regs isa) (privileged_regs isa)) f.trans_regs_read in
   let cap_regs_read = IdSet.union priv_cap_regs_read nonpriv_cap_regs_read in
   let cap_reg_names = List.map (fun r -> "''" ^ string_of_id r ^ "''") (IdSet.elements cap_regs_read) in
-  let get_arg_assm i (arg, r) = if (is_cap_typ isa (base_typ_of isa r)) then [mangle_arg_name isa arg ^ " \\<in> derivable_caps s \\<Longrightarrow> "] else [] in
+  let get_arg_assm i (arg, r) = if (is_cap_typ isa (base_typ_of isa r)) then [mangle_arg_name ~extra_renames isa arg ^ " \\<in> derivable_caps s \\<Longrightarrow> "] else [] in
   let arg_assm = String.concat "" (List.concat (List.mapi get_arg_assm f.args)) in
   let access_assm =
     if IdSet.is_empty cap_regs_read then "" else
     ("{" ^ String.concat ", " cap_reg_names ^ "} \\<subseteq> accessible_regs s \\<Longrightarrow> ")
   in
-  let sysreg_assms = if ids_overlap isa.system_access_checks f.trans_calls then "sysreg_trace_assms t \\<Longrightarrow> " else "" in
-  let (next_state, next_stateI) = if is_cap_fun isa f then ("(run s t)", "") else ("s", "non_cap_exp_insert_run s, ") in
+  let sysreg_assms = if has_system_access_checks isa f then "sysreg_trace_assms s t \\<Longrightarrow> " else "" in
+  let (next_state, next_stateI) = if is_cap_fun isa f then ("(run s t)", "") else ("s", "non_cap_exp_derivable_insert_run, ") in
   { name = name ^ "_derivable"; attrs = "[derivable_capsE]";
     assms = [];
     stmts = ["Run (" ^ call ^ ") t c \\<Longrightarrow> " ^ arg_assm ^ access_assm ^ sysreg_assms ^ "c \\<in> derivable_caps " ^ next_state];
     unfolding = []; using = [];
     proof = "(" ^ next_stateI ^ "unfold " ^ name ^ "_def, derivable_capsI)" }
-  |> apply_lemma_override isa id "derivable_caps"
+  |> apply_lemma_override isa id (if for_fetch && has_override isa id "derivable_caps_fetch" then "derivable_caps_fetch" else "derivable_caps")
 
 let rec arg_assms_of_nc arg_kids nc =
   let opt_binop l op r = match l, r with
@@ -292,8 +304,9 @@ let arg_assms_of_quant_item arg_kids (qi : Ast.quant_item) = match qi with
 let arg_assms_of_typquant arg_kids tq =
   List.concat (List.map (arg_assms_of_quant_item arg_kids) (quant_items tq))
 
-let traces_enabled_lemma mem isa id =
-  let (f, name, call) = get_fun_info ~annot_kids:true isa id in
+let traces_enabled_lemma mem for_fetch isa id =
+  let extra_renames = arg_renames ["s"] in
+  let (f, name, call) = get_fun_info ~annot_kids:true ~extra_renames isa id in
   let priv_cap_regs_read =
     if ids_overlap isa.system_access_checks f.trans_calls then IdSet.empty else
       IdSet.union
@@ -329,13 +342,13 @@ let traces_enabled_lemma mem isa id =
   in
   let cap_arg_assms =
     if has_mem_eff f || writes isa.cap_regs f then
-      List.concat (List.mapi (fun i (a, t) -> if is_cap_typ isa t then [mangle_arg_name isa a ^ " \\<in> derivable_caps s"] else []) f.args)
+      List.concat (List.mapi (fun i (a, t) -> if is_cap_typ isa t then [mangle_arg_name ~extra_renames isa a ^ " \\<in> derivable_caps s"] else []) f.args)
     else []
   in
   let add_arg_kid (i, arg_kids, kid_eqs) (arg_id, arg_typ) =
     let new_kid = match Type_check.destruct_numeric arg_typ with
       | Some ([], _, Nexp_aux (Nexp_var kid, _)) ->
-         Some (kid, mangle_arg_name isa arg_id)
+         Some (kid, mangle_arg_name ~extra_renames isa arg_id)
       | _ ->
          begin match get_kid_itself arg_typ with
            | Some kid ->
@@ -343,7 +356,7 @@ let traces_enabled_lemma mem isa id =
            | _ ->
               begin match Type_check.destruct_bitvector isa.type_env arg_typ with
                 | Some (Nexp_aux (Nexp_var kid, _), _) ->
-                   Some (kid, "int (size " ^ mangle_arg_name isa arg_id ^ ")")
+                   Some (kid, "int (size " ^ mangle_arg_name ~extra_renames isa arg_id ^ ")")
                 | _ -> None
               end
          end
@@ -383,11 +396,16 @@ let traces_enabled_lemma mem isa id =
   in
   let assms = cap_assm @ asr_assm @ arg_assms @ eq_assms @ ret_typ_assm @ invoked_reg_assms @ invoked_indirect_assms @ load_auth_assms in
   let using = if assms = [] then "" else " assms: assms" in
+  let override =
+    let base = "traces_enabled" ^ (if mem then "_mem" else "") in
+    let fetch = base ^ "_fetch" in
+    if for_fetch && has_override isa id fetch then fetch else base
+  in
   { name = "traces_enabled_" ^ name; attrs = "[traces_enabledI]";
     assms; unfolding = [(name ^ "_def"); "bind_assoc"]; using = [];
     stmts = ["traces_enabled (" ^ call ^ ") s"];
     proof = "(traces_enabledI" ^ using ^ ")" }
-  |> apply_lemma_override isa id (if mem then "traces_enabled_mem" else "traces_enabled")
+  |> apply_lemma_override isa id override
 
 (* let find_strings x m = try StringMap.find x m with Not_found -> StringSet.empty
 
@@ -489,6 +507,20 @@ let output_line chan l =
 let funs isa = List.filter (fun id -> not (IdSet.mem id isa.skip_funs)) (fun_ids isa.ast)
 let filter_funs isa p = List.filter (fun id -> p id (Bindings.find id isa.fun_infos)) (funs isa)
 
+let get_fun_deps isa id = match Bindings.find_opt id isa.fun_infos with
+  | Some f -> f.trans_calls
+  | None -> IdSet.empty
+
+let execute_deps isa = IdSet.fold (fun id deps -> IdSet.union (get_fun_deps isa id) deps) isa.execute_funs isa.execute_funs
+let fetch_deps isa = IdSet.fold (fun id deps -> IdSet.union (get_fun_deps isa id) deps) isa.fetch_funs isa.fetch_funs
+let is_fetch_fun isa id = if IdSet.is_empty isa.fetch_funs then true else IdSet.mem id (fetch_deps isa)
+let is_execute_fun isa id = if IdSet.is_empty isa.execute_funs then true else IdSet.mem id (execute_deps isa)
+
+let generate_lemma_for_fun l isa id = match Bindings.find_opt id isa.skip_lemmas with
+  | Some ls -> not (StringSet.mem l ls)
+  | None -> true
+let filter_funs_for_lemma l isa p = filter_funs isa (fun id f -> generate_lemma_for_fun l isa id && p id f)
+
 let output_cap_lemmas chan (isa : isa) =
   let exc_funs = exception_funs (isa.ast) in
   let needed_fps = needed_footprints isa in
@@ -498,6 +530,31 @@ let output_cap_lemmas chan (isa : isa) =
   output_line chan  "";
   output_line chan  "declare register_defs[simp_rules_add subset_assms_simp]";
   output_line chan  "";
+
+  filter_funs_for_lemma "exp_fails" isa (fun id f -> IdSet.mem id exc_funs && effectful f)
+    |> List.map (exp_fails_lemma isa)
+    |> List.map format_lemma |> List.iter (output_line chan);
+
+  output_line chan  "";
+
+  filter_funs_for_lemma "no_reg_writes_to" isa (fun id f -> not (IdSet.subset (write_checked_regs isa) f.trans_regs_written) && IdSet.mem id needed_fps)
+    |> List.map (no_reg_writes_to_lemma false isa)
+    |> List.map format_lemma |> List.iter (output_line chan);
+
+  output_line chan  "";
+
+  let output_runs_no_reg_writes_to id f =
+    let non_written_regs = IdSet.diff (write_checked_regs isa) f.trans_regs_written in
+    let non_written_regs_no_exc = IdSet.diff (write_checked_regs isa) f.trans_regs_written_no_exc in
+    let no_writes_no_exc = IdSet.is_empty f.trans_regs_written_no_exc && not (IdSet.is_empty f.trans_regs_written) in
+    (no_writes_no_exc || (not (IdSet.is_empty non_written_regs_no_exc || IdSet.equal non_written_regs non_written_regs_no_exc))) && IdSet.mem id needed_fps
+  in
+  filter_funs_for_lemma "runs_no_reg_writes_to" isa output_runs_no_reg_writes_to
+    |> List.map (no_reg_writes_to_lemma true isa)
+    |> List.map format_lemma |> List.iter (output_line chan);
+
+  output_line chan  "";
+
   output_line chan ("context " ^ isa.name ^ "_Axiom_Automaton");
   output_line chan  "begin";
   output_line chan  "";
@@ -510,7 +567,7 @@ let output_cap_lemmas chan (isa : isa) =
   output_line chan  "  non_cap_regsI[THEN non_cap_exp_write_non_cap_reg]";
   output_line chan  "";*)
 
-  filter_funs isa (fun id f -> not (is_cap_fun isa f) && effectful f)
+  filter_funs_for_lemma "non_cap_exp" isa (fun id f -> not (is_cap_fun isa f) && effectful f)
     |> List.map (non_cap_exp_lemma isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
@@ -518,32 +575,34 @@ let output_cap_lemmas chan (isa : isa) =
   output_line chan  (format_lemma (read_cap_regs_derivable_lemma isa));
   output_line chan  "";
 
-  filter_funs isa (fun id f -> IdSet.mem id exc_funs && effectful f)
-    |> List.map (exp_fails_lemma isa)
+  filter_funs_for_lemma "derivable_caps" isa (fun id f -> returns_cap isa f && effectful f && not (has_system_access_checks isa f) && (is_execute_fun isa id || IdSet.is_empty isa.fetch_funs))
+    |> List.map (return_caps_derivable_lemma false isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
-  output_line chan  "";
+  if not (IdSet.is_empty isa.fetch_funs) && not (IdSet.is_empty isa.execute_funs) then begin
+    output_line chan  "end";
+    output_line chan  "";
+    output_line chan ("context " ^ isa.name ^ "_Instr_Axiom_Automaton");
+    output_line chan  "begin";
+    output_line chan  "";
+  end;
 
-  filter_funs isa (fun id f -> not (IdSet.subset (write_checked_regs isa) f.trans_regs_written) && IdSet.mem id needed_fps)
-    |> List.map (no_reg_writes_to_lemma false isa)
+  filter_funs_for_lemma "derivable_caps" isa (fun id f -> returns_cap isa f && effectful f && has_system_access_checks isa f && (is_execute_fun isa id || IdSet.is_empty isa.fetch_funs))
+    |> List.map (return_caps_derivable_lemma false isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
-  output_line chan  "";
+  if not (IdSet.is_empty isa.fetch_funs) && not (IdSet.is_empty isa.execute_funs) then begin
+    output_line chan  "";
+    output_line chan  "end";
+    output_line chan  "";
+    output_line chan ("context " ^ isa.name ^ "_Fetch_Axiom_Automaton");
+    output_line chan  "begin";
+    output_line chan  "";
 
-  let output_runs_no_reg_writes_to id f =
-    let non_written_regs = IdSet.diff (write_checked_regs isa) f.trans_regs_written in
-    let non_written_regs_no_exc = IdSet.diff (write_checked_regs isa) f.trans_regs_written_no_exc in
-    not (IdSet.is_empty non_written_regs_no_exc || IdSet.equal non_written_regs non_written_regs_no_exc) && IdSet.mem id needed_fps
-  in
-  filter_funs isa output_runs_no_reg_writes_to
-    |> List.map (no_reg_writes_to_lemma true isa)
-    |> List.map format_lemma |> List.iter (output_line chan);
-
-  output_line chan  "";
-
-  filter_funs isa (fun id f -> returns_cap isa f && effectful f)
-    |> List.map (return_caps_derivable_lemma isa)
-    |> List.map format_lemma |> List.iter (output_line chan);
+    filter_funs_for_lemma "derivable_caps" isa (fun id f -> returns_cap isa f && effectful f && has_system_access_checks isa f && is_fetch_fun isa id)
+      |> List.map (return_caps_derivable_lemma true isa)
+      |> List.map format_lemma |> List.iter (output_line chan);
+  end;
 
   output_line chan  "";
   output_line chan  "end";
@@ -551,12 +610,15 @@ let output_cap_lemmas chan (isa : isa) =
   output_line chan  "end"
 
 let output_cap_props chan (isa : isa) =
+  let separate_fetch = not (IdSet.is_empty isa.fetch_funs) && not (IdSet.is_empty isa.execute_funs) in
+  let context = isa.name ^ (if separate_fetch then "_Instr" else "") ^ "_Write_Cap_Automaton" in
+
   output_line chan  "theory CHERI_Cap_Properties";
   output_line chan  "imports CHERI_Lemmas";
   output_line chan  "begin";
   output_line chan  "";
 
-  output_line chan ("context " ^ isa.name ^ "_Write_Cap_Automaton");
+  output_line chan ("context " ^ context);
   output_line chan  "begin";
   output_line chan  "";
 
@@ -568,8 +630,8 @@ let output_cap_props chan (isa : isa) =
   output_line chan  "lemmas non_cap_exp_traces_enabled[traces_enabledI] = non_cap_expI[THEN non_cap_exp_traces_enabledI]\n";
   output_line chan  "";
 
-  filter_funs isa (fun id f -> is_cap_fun isa f)
-    |> List.map (traces_enabled_lemma false isa)
+  filter_funs_for_lemma "traces_enabled" isa (fun id f -> is_cap_fun isa f && (is_execute_fun isa id || IdSet.is_empty isa.fetch_funs))
+    |> List.map (traces_enabled_lemma false false isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
   output_line chan  "end";
@@ -577,6 +639,9 @@ let output_cap_props chan (isa : isa) =
   output_line chan  "end"
 
 let output_mem_props chan (isa : isa) =
+  let separate_fetch = not (IdSet.is_empty isa.fetch_funs) && not (IdSet.is_empty isa.execute_funs) in
+  let mem_context = isa.name ^ (if separate_fetch then "_Instr" else "") ^ "_Mem_Automaton" in
+
   output_line chan  "theory CHERI_Mem_Properties";
   output_line chan  "imports CHERI_Lemmas";
   output_line chan  "begin";
@@ -586,13 +651,13 @@ let output_mem_props chan (isa : isa) =
   output_line chan  "begin";
   output_line chan  "";
 
-  filter_funs isa (fun id f -> (is_cap_fun isa f || has_ref_args f) && not (has_mem_eff f))
+  filter_funs_for_lemma "non_mem_exp" isa (fun id f -> (is_cap_fun isa f || has_ref_args f) && not (has_mem_eff f))
     |> List.map (non_mem_exp_lemma isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
   output_line chan  "end";
   output_line chan  "";
-  output_line chan ("context " ^ isa.name ^ "_Mem_Automaton");
+  output_line chan ("context " ^ mem_context);
   output_line chan  "begin";
   output_line chan  "";
 
@@ -600,8 +665,48 @@ let output_mem_props chan (isa : isa) =
   output_line chan  "lemmas non_mem_exp_traces_enabled[traces_enabledI] = non_mem_expI[THEN non_mem_exp_traces_enabledI]\n";
   output_line chan  "";
 
-  filter_funs isa (fun id f -> has_mem_eff f)
-    |> List.map (traces_enabled_lemma true isa)
+  filter_funs_for_lemma "traces_enabled_mem" isa (fun id f -> has_mem_eff f && (is_execute_fun isa id || IdSet.is_empty isa.fetch_funs))
+    |> List.map (traces_enabled_lemma true false isa)
+    |> List.map format_lemma |> List.iter (output_line chan);
+
+  output_line chan  "end";
+  output_line chan  "";
+  output_line chan  "end"
+
+let output_fetch_props chan (isa : isa) =
+  output_line chan  "theory CHERI_Fetch_Properties";
+  output_line chan  "imports CHERI_Mem_Properties";
+  output_line chan  "begin";
+  output_line chan  "";
+
+  output_line chan ("context " ^ isa.name ^ "_Fetch_Write_Cap_Automaton");
+  output_line chan  "begin";
+  output_line chan  "";
+
+  output_line chan (format_lemma (write_regs_lemma isa));
+  output_line chan (format_lemma (read_regs_lemma isa));
+
+  output_line chan  "";
+
+  output_line chan  "lemmas non_cap_exp_traces_enabled[traces_enabledI] = non_cap_expI[THEN non_cap_exp_traces_enabledI]\n";
+  output_line chan  "";
+
+  filter_funs_for_lemma "traces_enabled_fetch" isa (fun id f -> is_cap_fun isa f && is_fetch_fun isa id)
+    |> List.map (traces_enabled_lemma false true isa)
+    |> List.map format_lemma |> List.iter (output_line chan);
+
+  output_line chan  "end";
+  output_line chan  "";
+  output_line chan ("context " ^ isa.name ^ "_Fetch_Mem_Automaton");
+  output_line chan  "begin";
+  output_line chan  "";
+
+  output_line chan  "lemmas non_cap_exp_traces_enabled[traces_enabledI] = non_cap_expI[THEN non_cap_exp_traces_enabledI]\n";
+  output_line chan  "lemmas non_mem_exp_traces_enabled[traces_enabledI] = non_mem_expI[THEN non_mem_exp_traces_enabledI]\n";
+  output_line chan  "";
+
+  filter_funs_for_lemma "traces_enabled_mem_fetch" isa (fun id f -> has_mem_eff f && is_fetch_fun isa id)
+    |> List.map (traces_enabled_lemma true true isa)
     |> List.map format_lemma |> List.iter (output_line chan);
 
   output_line chan  "end";
@@ -625,7 +730,14 @@ let process_isa file =
   let chan = open_out (out_file "CHERI_Mem_Properties.thy") in
   output_mem_props chan isa;
   flush chan;
-  close_out chan
+  close_out chan;
+
+  if not (IdSet.is_empty isa.fetch_funs) then begin
+    let chan = open_out (out_file "CHERI_Fetch_Properties.thy") in
+    output_fetch_props chan isa;
+    flush chan;
+    close_out chan
+  end
 
 let main () =
   let opt_file_arguments = ref [] in

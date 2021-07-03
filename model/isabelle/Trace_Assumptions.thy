@@ -6,6 +6,18 @@ section \<open>Trivia\<close>
 
 text \<open>TODO: Add this to library\<close>
 
+lemma T_bind_leftI:
+  assumes "(m, e, m') \<in> T"
+  shows "(bind m f, e, bind m' f) \<in> T"
+  using assms
+  by induction auto
+
+lemma Traces_bind_leftI:
+  assumes "(m, t, m') \<in> Traces"
+  shows "(bind m f, t, bind m' f) \<in> Traces"
+  using assms
+  by induction (auto intro: T_bind_leftI)
+
 lemma return_Traces_iff[simp]:
   "(return x, t, m') \<in> Traces \<longleftrightarrow> t = [] \<and> m' = Done x"
   by (auto simp: return_def)
@@ -117,6 +129,26 @@ lemma Run_catch_early_returnE:
   unfolding catch_early_return_def
   by (elim Run_try_catchE) (auto split: sum.splits)
 
+lemma catch_early_return_bind_liftR:
+  "catch_early_return (liftR m \<bind> f) = (m \<bind> (\<lambda>a. catch_early_return (f a)))"
+  by (induction m) (auto simp: catch_early_return_def liftR_def throw_def)
+
+lemma catch_early_return_bind_early_return:
+  "catch_early_return (early_return a \<bind> f) = return a"
+  by (auto simp: catch_early_return_def early_return_def throw_def)
+
+lemmas catch_early_return_bind_substs =
+  catch_early_return_bind_liftR[THEN forw_subst]
+  catch_early_return_bind_early_return[THEN forw_subst]
+  bind_assoc[THEN forw_subst[where P = "\<lambda>m. P (catch_early_return m)" for P]]
+  bind_return[THEN forw_subst[where P = "\<lambda>m. P (catch_early_return m)" for P]]
+
+lemma final_simps[intro, simp]:
+  "final (Done a)"
+  "final (Exception e)"
+  "final (Fail msg)"
+  by (auto simp: final_def)
+
 section \<open>(Conditionally) deterministic monadic expressions\<close>
 
 definition "determ_exp_if P m c \<equiv> (\<forall>t a. Run m t a \<and> P t \<longrightarrow> a = c)"
@@ -168,6 +200,9 @@ lemma no_reg_writes_to_bindI_ignore_left:
   shows "no_reg_writes_to Rs (m \<bind> f)"
   using assms
   by (intro no_reg_writes_to_bindI)
+
+lemmas runs_no_reg_writes_to_catch_early_return_bind[intro, simp, runs_no_reg_writes_toI] =
+  catch_early_return_bind_substs[where P = "runs_no_reg_writes_to Rs" for Rs]
 
 lemma runs_no_reg_writes_to_bindI[intro, simp, runs_no_reg_writes_toI]:
   assumes "runs_no_reg_writes_to Rs m" and "\<And>t a. Run m t a \<Longrightarrow> runs_no_reg_writes_to Rs (f a)"
@@ -223,6 +258,12 @@ lemma runs_no_reg_writes_to_let[simp, runs_no_reg_writes_toI]:
   "runs_no_reg_writes_to Rs (f x) \<Longrightarrow> runs_no_reg_writes_to Rs (let a = x in f a)"
   by auto
 
+lemma runs_no_reg_writes_to_catch_early_return_let[simp, runs_no_reg_writes_toI]:
+  assumes "runs_no_reg_writes_to Rs (catch_early_return (f x))"
+  shows "runs_no_reg_writes_to Rs (catch_early_return (let a = x in f a))"
+  using assms
+  by auto
+
 lemma no_reg_writes_to_if[simp, no_reg_writes_toI]:
   assumes "c \<Longrightarrow> no_reg_writes_to Rs m1" and "\<not>c \<Longrightarrow> no_reg_writes_to Rs m2"
   shows "no_reg_writes_to Rs (if c then m1 else m2)"
@@ -240,6 +281,9 @@ lemma runs_no_reg_writes_to_if[simp, runs_no_reg_writes_toI]:
   shows "runs_no_reg_writes_to Rs (if c then m1 else m2)"
   using assms
   by auto
+
+lemmas runs_no_reg_writes_to_catch_early_return_if[simp, runs_no_reg_writes_toI] =
+  if_split[where P = "\<lambda>m. runs_no_reg_writes_to Rs (catch_early_return m)" for Rs, THEN iffD2]
 
 lemma runs_no_reg_writes_to_if_no_asm:
   assumes "runs_no_reg_writes_to Rs m1" and "runs_no_reg_writes_to Rs m2"
@@ -259,6 +303,9 @@ lemma runs_no_reg_writes_to_case_prod[intro, simp, runs_no_reg_writes_toI]:
   using assms
   by (cases z) auto
 
+lemmas runs_no_reg_writes_to_catch_early_return_case_prod[simp, runs_no_reg_writes_toI] =
+  prod.split[where P = "\<lambda>m. runs_no_reg_writes_to Rs (catch_early_return m)" for Rs, THEN iffD2]
+
 lemma no_reg_writes_to_case_bool[intro, simp, no_reg_writes_toI]:
   assumes "z \<Longrightarrow> no_reg_writes_to Rs m1" and "\<not>z \<Longrightarrow> no_reg_writes_to Rs m2"
   shows "no_reg_writes_to Rs (case z of True \<Rightarrow> m1 | False \<Rightarrow> m2)"
@@ -270,6 +317,9 @@ lemma runs_no_reg_writes_to_case_bool[intro, simp, runs_no_reg_writes_toI]:
   shows "runs_no_reg_writes_to Rs (case z of True \<Rightarrow> m1 | False \<Rightarrow> m2)"
   using assms
   by (cases z) auto
+
+lemmas runs_no_reg_writes_to_catch_early_return_case_bool[simp, runs_no_reg_writes_toI] =
+  bool.split[where P = "\<lambda>m. runs_no_reg_writes_to Rs (catch_early_return m)" for Rs, THEN iffD2]
 
 lemma no_reg_writes_to_choose_regval[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (choose_regval desc)"
@@ -457,10 +507,36 @@ lemma exp_fails_if_then_else:
   using assms
   by auto
 
+locale Wellformed_Traces =
+  fixes wellformed_ev :: "'regval event \<Rightarrow> bool"
+    and is_isa_exception :: "'ev \<Rightarrow> bool"
+begin
+
+abbreviation "wellformed_trace t \<equiv> \<forall>e \<in> set t. wellformed_ev e"
+
+definition "exp_ends_with m P \<equiv> (\<forall>t m'. runTrace t m = Some m' \<and> final m' \<and> wellformed_trace t \<longrightarrow> P m')"
+abbreviation "exp_raises_isa_ex m \<equiv> exp_ends_with m (\<lambda>m'. \<exists>e. m' = Exception e \<and> is_isa_exception e)"
+abbreviation "exp_succeeds m \<equiv> exp_ends_with m (\<lambda>m'. \<exists>a. m' = Done a)"
+
+end
+
 locale Register_State =
   fixes get_regval :: "string \<Rightarrow> 'regstate \<Rightarrow> 'regval option"
     and set_regval :: "string \<Rightarrow> 'regval \<Rightarrow> 'regstate \<Rightarrow> 'regstate option"
+  (* TODO: Add optional register_value state generation to Sail where the next two hold by construction? *)
+  assumes read_absorb_write: "\<And>r v s s'. set_regval r v s = Some s' \<Longrightarrow> get_regval r s' = Some v"
+    and read_ignore_write: "\<And>r r' v s s'. set_regval r v s = Some s' \<Longrightarrow> r' \<noteq> r \<Longrightarrow> get_regval r' s' = get_regval r' s"
 begin
+
+abbreviation "s_emit_event e s \<equiv> emitEventS (get_regval, set_regval) e s"
+abbreviation "s_run_trace t s \<equiv> runTraceS (get_regval, set_regval) t s"
+abbreviation "s_allows_trace t s \<equiv> \<exists>s'. s_run_trace t s = Some s'"
+
+fun get_reg_val :: "register_name \<Rightarrow> 'regstate sequential_state \<Rightarrow> 'regval option" where
+  "get_reg_val r s = get_regval r (regstate s)"
+
+fun put_reg_val :: "register_name \<Rightarrow> 'regval \<Rightarrow> 'regstate sequential_state \<Rightarrow> 'regstate sequential_state option" where
+  "put_reg_val r v s = map_option (\<lambda>rs'. s\<lparr>regstate := rs'\<rparr>) (set_regval r v (regstate s))"
 
 fun updates_regs :: "string set \<Rightarrow> 'regval trace \<Rightarrow> 'regstate \<Rightarrow> 'regstate option" where
   "updates_regs R [] s = Some s"
@@ -882,11 +958,6 @@ lemma determ_runs_bindI:
   using assms
   by (intro determ_runsI[where c = "the_result (f (the_result m))"])
      (auto elim!: Run_inv_bindE simp: determ_the_result_eq)
-
-lemma final_simps[intro, simp]:
-  "final (Exception e)"
-  "final (Fail msg)"
-  by (auto simp: final_def)
 
 lemma runs_preserve_invariant_Run_invariant[simp]:
   assumes "runs_preserve_invariant m"

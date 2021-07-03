@@ -170,16 +170,7 @@ let store_cap_reg_axiom ISA has_ex initial_caps use_mem_caps invoked_caps invoke
      (cap_derivable (initial_caps union available_caps ISA (invoked_indirect_caps = {} && use_mem_caps) i t) c ||
      (* ... or perform one of the following non-monotonic register writes: *)
      (* Exception *)
-     (has_ex &&
-      ((*exists r' v' j.
-         j < i &&
-         index t j = Just (E_read_reg r' v') &&*)
-         c IN exception_targets_at_idx ISA i t &&
-         (*reads_from_reg_at_idx j t = Just r' &&
-         c' IN (reads_reg_caps_at_idx ISA j t) &&
-         leq_cap c c' &&
-         r' IN (ISA.KCC (*take j t*)) &&*)
-         r IN (ISA.PCC (*take i t*)))) ||
+     (has_ex && c IN exception_targets_at_idx ISA i t && r IN ISA.PCC) ||
      (* Capability pair invocation *)
      (exists cc cd.
         c IN invoked_caps &&
@@ -207,6 +198,7 @@ let store_cap_reg_axiom ISA has_ex initial_caps use_mem_caps invoked_caps invoke
      (* Indirect capability (pair) invocation (writing the loaded capability/capabilities to PCC/IDC) *)
      (exists c'.
         c IN invoked_caps &&
+        invoked_indirect_caps <> {} &&
         cap_derivable (initial_caps union available_mem_caps ISA i t) c' &&
         ((leq_cap c (unseal c') && is_sealed c' && is_sentry c' && r IN ISA.PCC) ||
          (leq_cap c c' && r IN (ISA.PCC union ISA.IDC))))))

@@ -11,6 +11,8 @@ type isa =
   { name : string;
     ast : Type_check.tannot ast;
     type_env : Type_check.Env.t;
+    fetch_funs : IdSet.t;
+    execute_funs : IdSet.t;
     cap_regs : IdSet.t;
     read_privileged_regs : IdSet.t;
     write_privileged_regs : IdSet.t;
@@ -19,6 +21,7 @@ type isa =
     system_access_checks : IdSet.t;
     pcc_regs : IdSet.t;
     idc_regs : IdSet.t;
+    footprint_regs : IdSet.t;
     conf_regs : IdSet.t;
     cap_types : typ list;
     fun_infos : Analyse_sail.fun_info Bindings.t;
@@ -27,6 +30,7 @@ type isa =
     lemma_overrides : lemma_override StringMap.t Bindings.t;
     reg_ref_renames : string Bindings.t;
     skip_funs : IdSet.t;
+    skip_lemmas : StringSet.t Bindings.t;
     needed_footprints : IdSet.t;
     invoked_regs : string list Bindings.t;
     invoked_indirect_regs : string list Bindings.t;
@@ -36,7 +40,7 @@ type isa =
 
 let privileged_regs isa = IdSet.union isa.read_privileged_regs isa.write_privileged_regs
 let special_regs isa = IdSet.union (privileged_regs isa) (IdSet.union isa.pcc_regs isa.idc_regs)
-let write_checked_regs isa = IdSet.union isa.pcc_regs isa.idc_regs
+let write_checked_regs isa = IdSet.union isa.footprint_regs (IdSet.union isa.pcc_regs isa.idc_regs)
 
 let lstrip f s =
   let rec idx_from i =
@@ -68,6 +72,7 @@ let load_isa file src_dir =
   let add_sassoc b (key, value) = StringMap.add key value b in
   let to_typ json = Initial_check.typ_of_string (to_string json) in
   let to_string_list json = convert_each to_string json in
+  let to_string_set json = StringSet.of_list (to_string_list json) in
   let to_override json =
     { name_override = to_option to_string (member "name" json);
       attrs_override = to_option to_string (member "attrs" json);
@@ -154,9 +159,14 @@ let load_isa file src_dir =
   let fun_renames = snd (List.fold_left add_fun_rename ([], fun_renames) (Analyse_sail.fun_ids ast)) in
   let add_arg_rename id arg_renames = Bindings.add id (string_of_id id ^ "__arg") arg_renames in
   let arg_renames = IdSet.fold add_arg_rename (optional_idset (member "reserved_ids" arch)) Bindings.empty in
+  let skip_lemmas = Bindings.map to_string_set (optional_bindings (member "skip_lemmas" arch)) in
+  let add_fun_skip f lemmas skips = if StringSet.mem "all" lemmas then IdSet.add f skips else skips in
+  let skip_funs = Bindings.fold add_fun_skip skip_lemmas (optional_idset (member "skips" arch)) in
   { name = to_string (member "name" arch);
     ast;
     type_env;
+    fetch_funs = optional_idset (member "fetch" arch);
+    execute_funs = optional_idset (member "execute" arch);
     cap_regs;
     read_privileged_regs = optional_idset (member "read_privileged_regs" arch);
     write_privileged_regs = optional_idset (member "write_privileged_regs" arch);
@@ -165,6 +175,7 @@ let load_isa file src_dir =
     system_access_checks = optional_idset (member "system_access_checks" arch);
     pcc_regs = optional_idset (member "pcc" arch);
     idc_regs = optional_idset (member "idc" arch);
+    footprint_regs = optional_idset (member "footprint_regs" arch);
     conf_regs;
     cap_types;
     fun_infos;
@@ -172,7 +183,8 @@ let load_isa file src_dir =
     arg_renames;
     lemma_overrides;
     reg_ref_renames = Bindings.map to_string (optional_bindings (member "reg_ref_renames" arch));
-    skip_funs = optional_idset (member "skips" arch);
+    skip_funs;
+    skip_lemmas;
     needed_footprints = optional_idset (member "needed_footprints" arch);
     invoked_regs = optional_bindings (member "invoked_regs" arch) |> Bindings.map to_string_list;
     invoked_indirect_regs = optional_bindings (member "invoked_indirect_regs" arch) |> Bindings.map to_string_list;
