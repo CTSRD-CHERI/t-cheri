@@ -380,7 +380,7 @@ lemma store_cap_reg_axiomE:
     and "(leq_cap CC c (unseal_method CC cc) \<and> r \<in> PCC ISA) \<or> (leq_cap CC c (unseal_method CC cd) \<and> r \<in> IDC ISA)"
   | (Indirect) c' where "c \<in> invoked_caps"
     and "cap_derivable CC (initial_caps \<union> available_mem_caps CC ISA i t) c'"
-    and "invoked_indirect_caps \<noteq> {}"
+    and "invoked_indirect_caps \<noteq> {}" and "use_mem_caps"
     and "(leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c' \<and> r \<in> PCC ISA) \<or>
          (leq_cap CC c c' \<and> r \<in> PCC ISA \<union> IDC ISA)"
   using assms

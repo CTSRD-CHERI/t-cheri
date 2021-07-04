@@ -198,7 +198,7 @@ let store_cap_reg_axiom ISA has_ex initial_caps use_mem_caps invoked_caps invoke
      (* Indirect capability (pair) invocation (writing the loaded capability/capabilities to PCC/IDC) *)
      (exists c'.
         c IN invoked_caps &&
-        invoked_indirect_caps <> {} &&
+        invoked_indirect_caps <> {} && use_mem_caps &&
         cap_derivable (initial_caps union available_mem_caps ISA i t) c' &&
         ((leq_cap c (unseal c') && is_sealed c' && is_sentry c' && r IN ISA.PCC) ||
          (leq_cap c c' && r IN (ISA.PCC union ISA.IDC))))))
