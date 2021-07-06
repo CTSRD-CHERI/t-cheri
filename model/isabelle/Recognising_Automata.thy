@@ -902,14 +902,6 @@ lemma accessible_regs_no_writes_run_subset:
   using t Rs no_reg_writes_to_mono[OF m]
   by (auto intro: accessible_regs_no_writes_run)
 
-(*method accessible_regsI uses simp assms =
-  (match conclusion in \<open>Rs \<subseteq> accessible_regs (run s t)\<close> for Rs s t \<Rightarrow>
-     \<open>match premises in t: \<open>Run_inv m t a regs\<close> for m a regs \<Rightarrow>
-        \<open>rule accessible_regs_no_writes_run_subset[OF t],
-         solves \<open>use assms in \<open>no_reg_writes_toI simp: simp\<close>,
-         accessible_regsI simp: simp assms: assms\<close>\<close>\<close>
-   \<bar> \<open>Rs \<subseteq> accessible_regs s\<close> for Rs s \<Rightarrow> \<open>use assms in \<open>auto simp: simp\<close>\<close>)*)
-
 named_theorems accessible_regsE
 named_theorems accessible_regsI
 
@@ -1142,49 +1134,6 @@ method derivable_capsI uses intro elim simp assms =
 
 end
 
-(*locale Store_Cap_Mem_Automaton = Capability_ISA CC ISA
-  for CC :: "'cap Capability_class"
-  and ISA :: "('cap, 'regval, 'instr, 'e) isa"
-begin
-
-definition enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool" where
-  "enabled s e \<equiv> (\<forall> c. \<forall> addr. \<forall> sz. 
-     ((writes_mem_cap CC e = Some (addr, sz, c)) \<and> (is_tagged_method   CC) c)
-     \<longrightarrow>
-     (c \<in> derivable (accessed_caps s)))"
-
-sublocale Cap_Axiom_Automaton CC ISA enabled ..
-
-lemma non_cap_event_enabledI:
-  assumes "non_cap_event e"
-  shows "enabled s e"
-  using assms
-  by (elim non_cap_event.elims) (auto simp: enabled_def writes_mem_cap_def bind_eq_Some_conv)
-
-lemma non_cap_trace_enabledI:
-  assumes "non_cap_trace t"
-  shows "trace_enabled s t"
-  using assms
-  by (induction t) (auto simp: non_cap_event_enabledI non_cap_event_axiom_step_inv)
-
-lemma enabled_E_read_reg:
-  "enabled s (E_read_reg r v)"
-  by (auto simp: enabled_def writes_mem_cap_def)
-
-lemma non_cap_exp_trace_enabledI:
-  assumes "non_cap_exp m"
-    and "(m, t, m') \<in> Traces"
-  shows "trace_enabled s t"
-  by (cases rule: non_cap_exp_Traces_cases[OF assms])
-     (auto intro: non_cap_trace_enabledI enabled_E_read_reg simp: trace_enabled_append_iff)
-
-lemma recognises_store_cap_mem_axiom:
-  "store_cap_mem_axiom CC ISA t \<longleftrightarrow> accepts t"
-  by (auto simp: accepts_from_iff_all_enabled_final store_cap_mem_axiom_def enabled_def
-                 cap_derivable_iff_derivable writes_mem_cap_Some_iff)
-
-end*)
-
 locale Write_Cap_Automaton = Capability_ISA CC ISA initial_caps
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
     and initial_caps :: "'cap set" +
@@ -1268,19 +1217,6 @@ lemma non_cap_exp_trace_enabledI:
   shows "trace_enabled s t"
   by (cases rule: non_cap_exp_Traces_cases[OF assms])
      (auto intro: non_cap_trace_enabledI simp: trace_enabled_append_iff)
-
-(*lemma accepts_E_write_reg_not_read_after:
-  assumes "accepts t"
-    and "i < length t"
-    and "index t i = Some (E_write_reg r v)"
-    and "c \<in> caps_of_regval ISA v"
-    and "is_tagged_method CC c"
-    and "c \<notin> derivable (available_caps CC ISA i t)"
-    and "r \<in> PCC ISA \<or> r \<in> IDC ISA"
-  shows "reg_not_read_after i r t"
-  using assms
-  unfolding accepts_from_iff_all_enabled_final reg_not_read_after_def
-  by (auto elim!: enabled.elims simp: write_only_regs_run_take_eq)*)
 
 lemma index_eq_some': "(index l n = Some x) = (n < length l \<and> l ! n = x)"
   by auto
@@ -2655,13 +2591,6 @@ method traces_enabledI_with methods solve uses intro elim =
     | (rule traces_enabled_split[THEN iffD2]; intro conjI impI; traces_enabledI_with solve intro: intro elim: elim)
     | solve)
 
-(*method traces_enabledI uses simp intro elim assms =
-  (traces_enabledI_with
-     \<open>(solves \<open>accessible_regsI simp: simp assms: assms\<close>)
-      | (solves \<open>derivable_capsI simp: simp assms: assms\<close>)
-      | (use assms in \<open>auto intro!: intro elim!: elim simp: simp\<close>)?\<close>
-     intro: intro)*)
-
 method traces_enabledI uses simp intro elim assms =
   ((traces_enabled_step intro: intro elim: elim; traces_enabledI simp: simp intro: intro elim: elim assms: assms)+
     | (accessible_regs_step simp: simp assms: assms; solves \<open>traces_enabledI simp: simp intro: intro elim: elim assms: assms\<close>)
@@ -2669,8 +2598,6 @@ method traces_enabledI uses simp intro elim assms =
     | (solves \<open>no_reg_writes_toI simp: simp\<close>)
     | (solves \<open>preserves_invariantI simp: simp\<close>)
     | (use assms in \<open>auto intro!: intro elim!: elim simp: simp\<close>)?)
-
-(* method traces_enabledI = (intro traces_enabledI preserves_invariantI) *)
 
 lemma if_derivable_capsI[derivable_capsI]:
   assumes "cond \<Longrightarrow> c1 \<in> derivable_caps s" and "\<not>cond \<Longrightarrow> c2 \<in> derivable_caps s"
@@ -3137,209 +3064,5 @@ lemma traces_enabled_mem_axioms:
       auto)+
 
 end
-
-(*locale Store_Mem_Automaton = Capability_ISA_Fixed_Translation CC ISA
-  for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
-begin
-
-fun store_enabled :: "('cap, 'regval) axiom_state \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> memory_byte list \<Rightarrow> bitU \<Rightarrow> bool" where
-  "store_enabled s paddr sz v tag =
-     (length v = sz \<and>
-      (tag = B0 \<or> tag = B1) \<and>
-      (tag = B1 \<longrightarrow> address_tag_aligned ISA paddr \<and> sz = tag_granule ISA) \<and>
-      (paddr \<in> translation_tables ISA [] \<or>
-       (\<exists>c' vaddr. c' \<in> derivable (accessed_caps s) \<and>
-          is_tagged_method CC c' \<and>
-          \<not> is_sealed_method CC c' \<and>
-          translate_address ISA vaddr Store [] = Some paddr \<and>
-          set (address_range vaddr sz) \<subseteq> get_mem_region_method CC c' \<and>
-          (if mem_val_is_cap CC ISA v tag \<and> tag = B1
-           then permit_store_capability (get_perms_method CC c')
-           else permit_store (get_perms_method CC c')) \<and>
-          (mem_val_is_local_cap CC ISA v tag \<and> tag = B1 \<longrightarrow>
-           permit_store_local_capability (get_perms_method CC c')))))"
-
-fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool" where
-  "enabled s (E_write_mem _ paddr sz v _) = store_enabled s paddr sz v B0"
-| "enabled s (E_write_memt _ paddr sz v tag _) = store_enabled s paddr sz v tag"
-| "enabled s _ = True"
-
-sublocale Cap_Axiom_Automaton CC ISA enabled ..
-
-lemma non_store_event_enabledI:
-  assumes "non_store_event e"
-  shows "enabled s e"
-  using assms
-  by (cases e) auto
-
-lemma non_store_trace_enabledI:
-  assumes "non_store_trace t"
-  shows "trace_enabled s t"
-  using assms
-  by (induction t arbitrary: s) (auto intro: non_store_event_enabledI)
-
-lemma non_cap_event_enabledI:
-  assumes "non_cap_event e"
-  shows "enabled s e"
-  using assms
-  by (elim non_cap_event.elims) auto
-
-lemma non_cap_trace_enabledI:
-  assumes "non_cap_trace t"
-  shows "trace_enabled s t"
-  using assms
-  by (induction t) (auto simp: non_cap_event_enabledI non_cap_event_axiom_step_inv)
-
-lemma non_cap_exp_trace_enabledI:
-  assumes "non_cap_exp m"
-    and "(m, t, m') \<in> Traces"
-  shows "trace_enabled s t"
-  by (cases rule: non_cap_exp_Traces_cases[OF assms])
-     (auto intro: non_cap_trace_enabledI simp: trace_enabled_append_iff)
-
-lemma accepts_iff_store_mem_tag_axioms:
-  assumes "translation_assms t"
-  shows "accepts t \<longleftrightarrow> store_mem_axiom CC ISA t \<and> store_tag_axiom CC ISA t"
-proof
-  assume *: "accepts t"
-  show "store_mem_axiom CC ISA t \<and> store_tag_axiom CC ISA t"
-  proof (unfold store_mem_axiom_def store_tag_axiom_def, fold all_conj_distrib, intro allI, goal_cases Idx)
-    case (Idx i paddr sz v tag)
-    then show ?case
-      using accepts_from_nth_enabledI[OF *]
-      unfolding writes_mem_val_at_idx_def cap_derivable_iff_derivable
-      unfolding fixed_translation_tables[OF assms] fixed_translation[OF assms]
-      by (fastforce simp: bind_eq_Some_conv elim!: writes_mem_val.elims)
-  qed
-next
-  assume *: "store_mem_axiom CC ISA t \<and> store_tag_axiom CC ISA t"
-  show "accepts t"
-  proof (unfold accepts_from_iff_all_enabled_final, intro conjI allI impI TrueI)
-    fix i
-    assume "i < length t"
-    then show "enabled (run initial (take i t)) (t ! i)"
-      using *[unfolded store_mem_axiom_def store_tag_axiom_def, folded all_conj_distrib, rule_format, of i]
-      unfolding writes_mem_val_at_idx_def cap_derivable_iff_derivable
-      unfolding fixed_translation_tables[OF assms] fixed_translation[OF assms]
-      by (cases "t ! i") (auto cong: conj_cong disj_cong)
-  qed
-qed
-
-lemma recognises_store_mem_tag_axioms:
-  assumes "translation_assms t" and "accepts t"
-  shows "store_mem_axiom CC ISA t" and "store_tag_axiom CC ISA t"
-  using assms(2)
-  unfolding accepts_iff_store_mem_tag_axioms[OF assms(1)]
-  by auto
-
-end
-
-fun non_load_event :: "'regval event \<Rightarrow> bool" where
-  "non_load_event (E_read_mem _ paddr sz v) = False"
-| "non_load_event (E_read_memt _ paddr sz v_tag) = False"
-| "non_load_event _ = True"
-
-abbreviation non_load_trace :: "'regval trace \<Rightarrow> bool" where
-  "non_load_trace t \<equiv> (\<forall>e \<in> set t. non_load_event e)"
-
-lemma non_load_trace_load_mem_axiomI:
-  assumes "non_load_trace t"
-  shows "load_mem_axiom CC ISA is_fetch t"
-proof -
-  have i: "non_load_event (t ! i)" if "i < length t" for i
-    using assms that
-    by auto
-  show "load_mem_axiom CC ISA is_fetch t"
-    using i
-    by (fastforce simp: load_mem_axiom_def reads_mem_val_at_idx_def bind_eq_Some_conv elim!: reads_mem_val.elims)
-qed
-
-locale Load_Mem_Automaton = Capability_ISA_Fixed_Translation CC ISA
-  for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa" +
-  fixes is_fetch :: bool
-begin
-
-fun load_enabled :: "('cap, 'regval) axiom_state \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> memory_byte list \<Rightarrow> bitU \<Rightarrow> bool" where
-  "load_enabled s paddr sz v tag =
-    (paddr \<in> translation_tables ISA [] \<or>
-    (\<exists>c' vaddr.
-        c' \<in> derivable (accessed_caps s) \<and>
-        is_tagged_method CC c' \<and>
-        \<not> is_sealed_method CC c' \<and>
-        translate_address ISA vaddr (if is_fetch then Load else Fetch) [] = Some paddr \<and>
-        set (address_range vaddr sz) \<subseteq> get_mem_region_method CC c' \<and>
-        (if is_fetch \<and> tag = B0
-         then permit_execute (get_perms_method CC c')
-         else permit_load (get_perms_method CC c')) \<and>
-        (tag \<noteq> B0 \<longrightarrow> permit_load_capability (get_perms_method CC c') \<and> sz = tag_granule ISA \<and>
-                      address_tag_aligned ISA paddr)))"
-
-fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool" where
-  "enabled s (E_read_mem _ paddr sz v) = load_enabled s paddr sz v B0"
-| "enabled s (E_read_memt _ paddr sz v_tag) = load_enabled s paddr sz (fst v_tag) (snd v_tag)"
-| "enabled s _ = True"
-
-sublocale Cap_Axiom_Automaton CC ISA enabled ..
-
-lemma non_load_event_enabledI:
-  assumes "non_load_event e"
-  shows "enabled s e"
-  using assms
-  by (cases e) auto
-
-lemma non_load_trace_enabledI:
-  assumes "non_load_trace t"
-  shows "trace_enabled s t"
-  using assms
-  by (induction t arbitrary: s) (auto intro: non_load_event_enabledI)
-
-lemma non_cap_event_enabledI:
-  assumes "non_cap_event e"
-  shows "enabled s e"
-  using assms
-  by (elim non_cap_event.elims) auto
-
-lemma non_cap_trace_enabledI:
-  assumes "non_cap_trace t"
-  shows "trace_enabled s t"
-  using assms
-  by (induction t) (auto simp: non_cap_event_enabledI non_cap_event_axiom_step_inv)
-
-lemma non_cap_exp_trace_enabledI:
-  assumes "non_cap_exp m"
-    and "(m, t, m') \<in> Traces"
-  shows "trace_enabled s t"
-  by (cases rule: non_cap_exp_Traces_cases[OF assms])
-     (auto intro: non_cap_trace_enabledI simp: trace_enabled_append_iff)
-
-lemma recognises_load_mem_axiom:
-  assumes "translation_assms t"
-  shows "accepts t \<longleftrightarrow> load_mem_axiom CC ISA is_fetch t"
-proof
-  assume *: "accepts t"
-  show "load_mem_axiom CC ISA is_fetch t"
-  proof (unfold load_mem_axiom_def, intro allI impI, elim conjE, goal_cases Idx)
-    case (Idx i paddr sz v tag)
-    then show ?case
-      using accepts_from_nth_enabledI[OF *]
-      unfolding cap_derivable_iff_derivable reads_mem_val_at_idx_def
-      unfolding fixed_translation_tables[OF assms] fixed_translation[OF assms]
-      by (cases "t ! i"; fastforce simp add: bind_eq_Some_conv)
-  qed
-next
-  assume *: "load_mem_axiom CC ISA is_fetch t"
-  show "accepts t"
-  proof (unfold accepts_from_iff_all_enabled_final, intro conjI allI impI TrueI)
-    fix i
-    assume "i < length t"
-    then show "enabled (run initial (take i t)) (t ! i)"
-      using *[unfolded load_mem_axiom_def, rule_format, of i]
-      unfolding reads_mem_val_at_idx_def cap_derivable_iff_derivable
-      unfolding fixed_translation_tables[OF assms] fixed_translation[OF assms]
-      by (cases "t ! i"; fastforce)
-  qed
-qed
-
-end*)
 
 end
