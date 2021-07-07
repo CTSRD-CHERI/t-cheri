@@ -524,6 +524,8 @@ let filter_funs_for_lemma l isa p = filter_funs isa (fun id f -> generate_lemma_
 let output_cap_lemmas chan (isa : isa) =
   let exc_funs = exception_funs (isa.ast) in
   let needed_fps = needed_footprints isa in
+  output_line chan  "section \\<open>Generated helper lemmas\\<close>";
+  output_line chan  "";
   output_line chan  "theory CHERI_Gen_Lemmas";
   output_line chan  "imports CHERI_Instantiation";
   output_line chan  "begin";
@@ -613,6 +615,8 @@ let output_cap_props chan (isa : isa) =
   let separate_fetch = not (IdSet.is_empty isa.fetch_funs) && not (IdSet.is_empty isa.execute_funs) in
   let context = isa.name ^ (if separate_fetch then "_Instr" else "") ^ "_Write_Cap_Automaton" in
 
+  output_line chan  "section \\<open>Generated instruction monotonicity proofs\\<close>";
+  output_line chan  "";
   output_line chan  "theory CHERI_Cap_Properties";
   output_line chan  "imports CHERI_Lemmas";
   output_line chan  "begin";
@@ -642,6 +646,8 @@ let output_mem_props chan (isa : isa) =
   let separate_fetch = not (IdSet.is_empty isa.fetch_funs) && not (IdSet.is_empty isa.execute_funs) in
   let mem_context = isa.name ^ (if separate_fetch then "_Instr" else "") ^ "_Mem_Automaton" in
 
+  output_line chan  "section \\<open>Generated instruction memory check proofs\\<close>";
+  output_line chan  "";
   output_line chan  "theory CHERI_Mem_Properties";
   output_line chan  "imports CHERI_Lemmas";
   output_line chan  "begin";
@@ -674,6 +680,8 @@ let output_mem_props chan (isa : isa) =
   output_line chan  "end"
 
 let output_fetch_props chan (isa : isa) =
+  output_line chan  "section \\<open>Generated instruction fetch proofs\\<close>";
+  output_line chan  "";
   output_line chan  "theory CHERI_Fetch_Properties";
   output_line chan  "imports CHERI_Mem_Properties";
   output_line chan  "begin";
