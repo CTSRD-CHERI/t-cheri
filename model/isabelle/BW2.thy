@@ -16,22 +16,31 @@ fresh meta-bound variables. The latter form seems to be quite
 compatible with the Argo solver.
 \<close>
 
-lemma minus_one_nat_case:
-  "(n - 1) = (case n of 0 \<Rightarrow> 0 | Suc j \<Rightarrow> j)"
-  by (simp split: nat.split)
-
-lemma upt_Suc_left:
-  "upt (Suc i) j = (if j = 0 then [] else map Suc (upt i (j - 1)))"
-  by (cases j, simp_all add: map_Suc_upt)
-
-lemma upt_map_diff:
-  "upt i j = map ((+) i) (upt 0 (j - i))"
-  using map_add_upt[of i "j - i", symmetric]
-  by (cases "i \<le> j", simp_all)
-
 lemma word_if_add_let:
   "(if P then (x :: ('a :: len0) word) else y) = (let switch = P in id If switch x y)"
   by simp
+
+lemmas bit_if = if_distrib[where f="\<lambda>x. bit x _"]
+
+lemma bit_unat:
+  "bit (unat (w :: ('a :: len) word)) i = bit w i"
+  by transfer (simp add: bit_simps)
+
+lemma bit_uint:
+  "bit (uint (w :: ('a :: len) word)) i = bit w i"
+  by transfer (simp add: bit_simps)
+
+lemma bit_word_numeral_eq_nat:
+  "bit (numeral n :: ('a :: len) word) i = bit (take_bit (LENGTH('a)) (numeral n :: nat)) i"
+  by (simp add: bit_unat[symmetric])
+
+lemma bit_word_numeral_eq_int:
+  "bit (numeral n :: ('a :: len) word) i = bit (take_bit (LENGTH('a)) (numeral n :: int)) i"
+  by (simp only: bit_uint[symmetric] uint_bintrunc)
+
+lemma bit_use_drop_bit:
+  "j \<le> i \<Longrightarrow> bit x i = bit (drop_bit j x) (i - j)"
+  by (simp add: bit_simps)
 
 ML \<open>
 structure Let_Alt = struct
@@ -113,14 +122,20 @@ fun let_atom_conv1 ct = case Thm.term_of ct of
 
 fun let_atom_conv ctxt = Conv.top_conv (K (Conv.try_conv let_atom_conv1)) ctxt
 
-fun let_to_top_conv ctxt ct = case Thm.term_of ct of
-    Const (@{const_name Let}, _) $ _ $ Abs _ =>
-    Conv.arg_conv (Conv.abs_conv (let_to_top_conv o snd) ctxt) ct
-  | t => (case find_let [t] of
-    NONE => Conv.all_conv ct
-  | SOME (nm, v, _) => Conv.every_conv [add_let_conv ctxt nm (Thm.cterm_of ctxt v),
-    let_atom_conv ctxt, let_to_top_conv ctxt] ct
-  )
+fun let_to_top_step_conv ctxt ct = let
+    val (is_let, foc) = case Thm.term_of ct of
+          Const (@{const_name Let}, _) $ x $ Abs _ => (true, x)
+        | t => (false, t)
+  in case find_let [foc] of
+    NONE => if is_let
+    then Conv.arg_conv (Conv.abs_conv (let_to_top_step_conv o snd) ctxt) ct
+    else Conv.no_conv ct
+  | SOME (nm, v, _) => if is_atom v
+    then let_atom_conv ctxt ct
+    else add_let_conv ctxt nm (Thm.cterm_of ctxt v) ct
+  end
+
+fun let_to_top_conv ctxt = Conv.repeat_conv (let_to_top_step_conv ctxt)
 
 fun let_to_top_tac ctxt = CONVERSION
     (Conv.params_conv ~1 (fn ctxt => Conv.concl_conv ~1 (Conv.arg_conv
@@ -153,6 +168,24 @@ lemma ball_insert:
   by simp
 
 lemmas imp_to_id = id_apply[where x="(\<longrightarrow>)", THEN fun_cong, THEN fun_cong, symmetric]
+
+lemma bit_num_0[bit_simps]:
+  "\<not> bit 0 x"
+  by simp
+
+lemmas if_simps = if_bool_eq_disj[where Q=False, simplified]
+  if_bool_eq_disj[where R=False, simplified]
+  if_bool_eq_conj[where Q=True, simplified]
+  if_bool_eq_conj[where R=True, simplified]
+
+lemma carry_simps:
+  "carry True a b = (a \<or> b)"
+  "carry a True b = (a \<or> b)"
+  "carry a b True = (a \<or> b)"
+  "carry False a b = (a \<and> b)"
+  "carry a False b = (a \<and> b)"
+  "carry a b False = (a \<and> b)"
+  by (auto simp add: carry_def)
 
 ML \<open>
 structure Mk_Cache_Simproc = struct
@@ -201,8 +234,8 @@ val no_split_ss =
 val init_ss = simpset_of (put_simpset HOL_basic_ss \<^context> addsimps
    @{thms word_via_carry_val word_if_add_let})
 
-fun init_tac ctxt =
-    simp_tac (put_simpset init_ss ctxt addsimprocs [@{simproc let_alt}])
+fun init_tac ctxt = simp_tac (put_simpset init_ss ctxt)
+    THEN_ALL_NEW simp_tac (put_simpset HOL_basic_ss ctxt addsimps @{thms id_apply})
 
 val is_word = can Word_Lib.dest_wordT o fastype_of
 
@@ -217,8 +250,8 @@ fun rev_mp_prems_step_tac pred ctxt = DETERM o SUBGOAL (fn (t, i) => let
 fun rev_mp_prems_tac pred ctxt = REPEAT_DETERM o (rev_mp_prems_step_tac pred ctxt)
 
 fun let_to_imp_step ctxt = FIRST'
-  [resolve_tac ctxt @{thms carry_let_eq_impI word_let_eq_impI let_eq_impI},
-   CHANGED o Let_Alt.let_to_top_tac ctxt,
+  [CHANGED o Let_Alt.let_to_top_tac ctxt,
+   resolve_tac ctxt @{thms carry_let_eq_impI word_let_eq_impI let_eq_impI},
    CHANGED o Let_Alt.let_gather_dup_tac ctxt is_word]
 
 fun let_to_imp_tac ctxt = TRY o REPEAT_ALL_NEW (let_to_imp_step ctxt)
@@ -227,29 +260,38 @@ fun let_tac ctxt = let_to_imp_tac ctxt
     THEN_ALL_NEW rev_mp_prems_tac (exists_Const (fn (s, _) => s = @{const_name bit})) ctxt
 
 val len_ss = put_simpset (simpset_of \<^theory_context>\<open>Type_Length\<close>) @{context}
-        delsimps @{thms bit_0}
     |> simpset_of;
 
 fun mk_arith_simproc ctxt = Mk_Cache_Simproc.mk ctxt "bitwise_arith_cache" len_ss
   (map Logic.varify_global
-    [@{term "x + y"}, @{term "x - y"}, @{term "Suc i"}, @{term "x < y"},
-        @{term "x = y"}, @{term "x <= y"},
+    [@{term "x + y"}, @{term "x - y"},
+        @{term "x < y"}, @{term "x <= y"},
+        @{term "Suc i"}, @{term "pred_numeral n"},
+        @{term "drop_bit i (n :: nat)"}, @{term "take_bit i (n :: nat)"},
+        @{term "bit (i :: int) j"}, @{term "(i :: nat) = j"},
         @{term "len_of x"}])
 
-fun get_bit_simps ctxt = Named_Theorems.get ctxt @{named_theorems bit_simps}
+fun get_bit_simps ctxt = let
+    val ss = Named_Theorems.get ctxt @{named_theorems bit_simps}
+    val _ = tracing ("get_bit_simps: length: " ^ @{make_string} (length ss))
+  in ss end
 
 fun main_ss ctxt = put_simpset no_split_ss ctxt
-    addsimps @{thms Word.exp_eq_zero_iff
+    addsimps @{thms Word.exp_eq_zero_iff one_neq_zero
         upt_conv_Cons numeral_2_eq_2[symmetric]
         upt_conv_Nil[OF order_refl]
-        list.set ball_insert ball_empty}
+        list.set ball_insert ball_empty
+        nat.case case_nat_numeral[unfolded Let_def]
+        bit_word_numeral_eq_int
+        bit_if}
     addsimps (get_bit_simps ctxt)
     addsimprocs [mk_arith_simproc ctxt]
 
 fun main_tac ctxt =
     simp_tac (put_simpset HOL_basic_ss ctxt addsimps @{thms imp_to_id word_bit_eq_iff})
     THEN_ALL_NEW simp_tac (main_ss ctxt)
-    THEN_ALL_NEW simp_tac (put_simpset HOL_basic_ss ctxt addsimps @{thms id_apply simp_thms})
+    THEN_ALL_NEW simp_tac (put_simpset HOL_basic_ss ctxt
+        addsimps @{thms id_apply simp_thms carry_simps if_simps})
 
 fun tac ctxt = init_tac ctxt
     THEN_ALL_NEW let_tac ctxt
@@ -264,6 +306,12 @@ fun asm ctxt = full_simp_tac (put_simpset HOL_basic_ss ctxt
 
 fun asm_tac ctxt = asm ctxt THEN_ALL_NEW tac ctxt
 
+fun parse_method s ctxt = Method.SIMPLE_METHOD (
+    if s = "asm" then asm_tac ctxt 1
+    else if s = "" then tac ctxt 1
+    else error ("parse_asm_tac: expected (asm) or none: " ^ s)
+  )
+
 end
 \<close>
 
@@ -272,7 +320,7 @@ method_setup let_dup_word =
   "gather repeated word terms using let-binding"
 
 method_setup word_bitwise_eq =
-  \<open>Scan.succeed (fn ctxt => Method.SIMPLE_METHOD (BW_Alt.tac ctxt 1))\<close>
+  \<open>Scan.lift Parse.parname >> (BW_Alt.parse_method)\<close>
   "decomposer for word equalities and inequalities into bit propositions,
     lifting shared booleans to variables"
 
@@ -292,59 +340,14 @@ lemma (* testing *)
   apply blast
   done
 
-end
-
-
-lemma test_bit_is_slice_check:
-  fixes x :: "('a :: len) word"
-  shows "bit x n = (Word.slice n x = (1 :: 1 word))"
-  unfolding word_bit_eq_iff
-  using bit_imp_le_length[of x n]
-  by (auto simp add: bit_simps simp flip: bit_0)
-
-lemma word_set_bit_to_smt:
-  fixes x :: "('a :: len0) word"
-  shows
-  "set_bit x n b = (x AND NOT (Bits.shiftl 1 n)) OR (Bits.shiftl (if b then 1 else 0) n)"
-  by (auto simp: word_eq_iff test_bit_set_gen word_ops_nth_size nth_shiftl word_size)
-
-lemma slice_up_is_ucast[OF refl, unfolded word_size]:
-  "y = ucast (Bits.shiftr x n) \<Longrightarrow> size x < size y + n \<Longrightarrow> Word.slice n x = y"
-  by (simp add: slice_shiftr)
-
-lemma cast_down_is_slice[OF refl, unfolded word_size]:
-  "y = Word.slice 0 x \<Longrightarrow>
-    size y < size x \<Longrightarrow>
-    ucast x = y \<and> scast x = y"
-  by (simp add: ucast_slice down_cast_same[symmetric] word_size
-    is_down_def source_size_def target_size_def)
-
-named_theorems to_smt_word
-
-lemmas to_smt_word_init[to_smt_word] = test_bit_is_slice_check 
-    word_set_bit_to_smt
-    max_word_def mask_def
-    slice_up_is_ucast[unfolded word_size] cast_down_is_slice
-    One_nat_def[symmetric]
-
-named_theorems to_smt_word_del
-lemmas to_smt_word_del_init[to_smt_word_del] = One_nat_def[to_smt_word_del]
-
-ML \<open>
-fun smt_word_tac ctxt = BW_Alt.let_to_imp_tac ctxt
-    THEN' full_simp_tac (ctxt
-    addsimps Named_Theorems.get ctxt @{named_theorems to_smt_word}
-    delsimps Named_Theorems.get ctxt @{named_theorems to_smt_word_del}
-    |> Splitter.del_split @{thm if_split})
-    THEN' SMT_Solver.smt_tac (ctxt
-        |> Config.put SMT_Systems.z3_extensions true
-        |> Config.put SMT_Config.oracle true
-        |> Config.put SMT_Config.statistics true
-) []
-\<close>
-
-method_setup smt_word =
-  \<open>Scan.succeed (fn ctxt => Method.SIMPLE_METHOD (smt_word_tac ctxt 1))\<close>
-  "wrapper for oracle-based word/bitvector SMT proofs"
+lemma (* more ugly testing *)
+  fixes val :: "30 word"
+  shows "P \<Longrightarrow> bit val 23 = bit (val + incr) 23 \<Longrightarrow>
+    \<not> bit incr 23 \<Longrightarrow>
+    (ucast val AND 16777215) + (ucast incr AND 16777215) \<le> (16777215::64 word)"
+  apply (word_bitwise_eq(asm))
+  apply (intro impI; simp only: carry_def simp_thms)
+  apply argo
+  done
 
 end
