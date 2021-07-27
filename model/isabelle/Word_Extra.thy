@@ -51,6 +51,10 @@ lemma uint_less [simp]:
   shows "uint x \<le> 2 ^ LENGTH('a)"
   using unsigned_less[where w=x, THEN order.strict_implies_order] .
 
+subsection \<open>Bit operations on integers and naturals\<close>
+
+lemmas nat_take_bit_simp[simp] = nat_take_bit_eq[unfolded take_bit_nat_def]
+
 subsection \<open>Exhaustive enumeration of small words\<close>
 
 lemma UNIV_word:
@@ -971,7 +975,7 @@ lemma ucast_word_cat [simp]:
 unfolding ucast_eq word_cat_def 
 unfolding word_ubin.eq_norm 
 using assms
-by (simp add: wi_bintr)
+by (simp add: wi_bintr del: nat_take_bit_simp)
 
 lemma ucast_shiftr:
   shows "(ucast (x >> n) :: ('b :: len) word) = slice n x"
