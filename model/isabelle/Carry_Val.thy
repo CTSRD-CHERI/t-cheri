@@ -8,21 +8,18 @@ begin
 definition
   carry_val :: "('a :: semiring_bit_operations) \<Rightarrow> 'a \<Rightarrow> bool \<Rightarrow> 'a"
   where
-  "carry_val x y c = (x + y + (if c then 1 else 0)) XOR (x XOR y)"
+  "carry_val x y c = (x + y + of_bool c) XOR (x XOR y)"
+
+lemmas xor_even = bit_xor_iff[where n=0, simplified bit_0 Not_eq_iff]
 
 lemma carry_val_even:
   "even (carry_val x y c) = (\<not> c)"
-proof -
-  have "odd (carry_val x y c) = c"
-    by (simp only: carry_val_def bit_0[symmetric] bit_xor_iff, simp)
-  thus ?thesis
-    by blast
-qed
+  by (simp add: carry_val_def xor_even)
 
 definition carry :: "bool \<Rightarrow> bool \<Rightarrow> bool \<Rightarrow> bool"
   where "carry a b c = ((a \<and> (b \<or> c)) \<or> (b \<and> c))"
 
-lemmas xor_div_2 = drop_bit_xor[where n="Suc 0", simplified drop_bit_Suc drop_bit_0, simplified]
+lemmas xor_div_2 = drop_bit_xor[where n="Suc 0", simplified drop_bit_Suc, simplified]
 
 lemma carry_val_int_div_2:
   fixes x :: int
@@ -63,31 +60,22 @@ lemma carry_val_word_eq_eq:
   fixes x :: "('a :: len) word"
   shows "(carry_val x y c = z) = (\<forall>i \<in> set (upt 0 (LENGTH ('a))).
     (case i of 0 \<Rightarrow> c | Suc j \<Rightarrow> carry (bit x j) (bit y j) (bit z j)) = bit z i)"
-  apply (rule iffI[OF _ bit_word_eqI])
-   apply (clarsimp simp: carry_val_word_bit)
-  apply (erule rev_mp[where P="_ < _"])
-  apply (induct_tac n)
-   apply (simp_all add: eq_commute[where b="bit z _"] carry_val_word_bit flip: bit_0)
-  done
-
-lemma carry_val_word_eq_eq_Suc:
-  fixes x :: "('a :: len) word"
-  shows "(carry_val x y c = z) = (bit z 0 = c \<and> (\<forall>i \<in> set (upt 0 (LENGTH ('a) - 1)).
-    (carry (bit x i) (bit y i) (bit z i)) = bit z (Suc i)))"
+  (is "?lhs = ?rhs")
 proof -
-  have set: "set [0..<LENGTH('a)] = insert 0 (Suc ` {0 ..< LENGTH('a) - 1})"
-    by auto
-
-  show ?thesis
-    apply (simp only: carry_val_word_eq_eq set ball_simps nat.simps)
-    apply auto
+  have "?rhs \<Longrightarrow> i < LENGTH('a) \<longrightarrow> bit (carry_val x y c) i = bit z i" for i
+    apply (induct i)
+     apply (simp_all add: eq_commute[where b="bit z _"] carry_val_word_bit flip: bit_0)
     done
+  then have imp1: "?rhs \<Longrightarrow> ?lhs"
+    by (clarsimp intro!: bit_word_eqI)
+  then show ?thesis
+    by (auto simp: carry_val_word_bit)
 qed
 
 lemma arith_via_carry_val:
-  "(x + y) = (let x_nm = x; y_nm = y; c = carry_val x_nm y_nm False in x_nm XOR y_nm XOR c)"
-  "(x - y) = (let x_nm = x; y_inv_nm = NOT y; c = carry_val x_nm y_inv_nm True in x_nm XOR y_inv_nm XOR c)"
-  "(- x) = (let x_inv_nm = NOT x; c = carry_val 0 x_inv_nm True in x_inv_nm XOR c)"
+  "(x + y) = (let add_x = x; add_y = y in add_x XOR add_y XOR carry_val add_x add_y False)"
+  "(x - y) = (let sub_x = x; sub_n_y = NOT y in sub_x XOR sub_n_y XOR carry_val sub_x sub_n_y True)"
+  "(- y) = (let sub_y = NOT y in sub_y XOR carry_val 0 sub_y True)"
   by (simp_all add: carry_val_def ac_simps not_eq_complement)
 
 lemma bit_carry_val_int_position_cong:
@@ -100,32 +88,36 @@ lemma bit_carry_val_int_position_cong:
   apply (simp add: carry_val_int_bit_Suc x y)
   done
 
-lemma word_le_eq_carry:
+lemma word_le_eq_not_sub_bit:
   fixes x :: "('a :: len) word"
-  shows "(x \<le> y) = (let x_inv_nm = NOT x; y_nm = y; c = carry_val y_nm x_inv_nm True in
-    carry (bit y_nm (size x - 1)) (bit x_inv_nm (size x - 1)) (bit c (size x - 1)))"
-  (is "?lhs = ?rhs")
+  shows "(x \<le> y) = (\<not> bit (uint y - uint x) (LENGTH ('a)))"
 proof -
-  have P: "bit (uint y - uint x) n \<Longrightarrow>
-        n \<ge> size x \<longrightarrow> bit (uint y - uint x) (size x)" for n
-    by (rule impI, erule(1) inc_induct)
-      (simp add: arith_via_carry_val Let_def bit_not_iff bit_xor_iff bit_uint_iff
-        carry_val_int_bit_Suc carry_def word_size)
+  let ?sub = "uint y - uint x"
+  (* all "high" bits of the subtraction are the same *)
+  have same: "i \<le> j \<Longrightarrow> LENGTH('a) \<le> i \<Longrightarrow> bit ?sub i = bit ?sub j" for i j
+    by (induct i rule: inc_induct)
+        (simp_all add: arith_via_carry_val Let_def
+            bit_not_iff bit_xor_iff bit_uint_iff carry_val_int_bit_Suc carry_def)
 
-  have eq_bit: "?lhs = (\<not> bit (uint y - uint x) (size x))"
-    apply (simp add: uint_minus_simple_alt uint_word_arith_bintrs)
-    apply (simp add: bit_eq_iff bit_take_bit_iff word_size)
-    apply (auto dest: P simp: word_size)
-    done
-
-  note bit_carry_val_size_x = carry_val_int_bit_Suc[where i="size x - 1", simplified]
-  note adj = bit_carry_val_int_position_cong[of n w w "NOT (uint x)" "uint (NOT x)" for n w]
+  note sameD = same[OF _ order_refl, THEN iffD2, rotated]
 
   show ?thesis
-    by (simp add: eq_bit Let_def arith_via_carry_val bit_not_iff bit_xor_iff
-        bit_carry_val_size_x[simplified word_size] bit_uint_iff word_size
-        carry_val_word_eq_uint bit_word_of_int_iff adj)
+    apply (simp add: uint_minus_simple_alt uint_word_arith_bintrs)
+    apply (simp add: bit_eq_iff bit_take_bit_iff)
+    apply (auto dest: sameD)
+    done
 qed
+
+lemma word_le_eq_carry:
+  fixes x :: "('a :: len) word"
+  shows "(x \<le> y) = (let le_n_x = NOT x; le_y = y in
+    carry (bit le_y (LENGTH('a) - 1)) (bit le_n_x (LENGTH('a) - 1))
+        (bit (carry_val le_y le_n_x True) (LENGTH('a) - 1)))"
+  by (simp add: word_le_eq_not_sub_bit
+        carry_val_int_bit_Suc[where i="LENGTH('a) - 1", simplified]
+        bit_carry_val_int_position_cong[of n w w "NOT (uint x)" "uint (NOT x)" for n w]
+        arith_via_carry_val Let_def bit_not_iff bit_xor_iff bit_uint_iff
+        carry_val_word_eq_uint bit_word_of_int_iff)
 
 lemma signed_take_bit_xor_eq:
   fixes x :: int
@@ -143,8 +135,8 @@ lemma word_sle_xor_eq_le[simplified word_size]:
   apply (simp add: uint_2p word_neq_0_conv[symmetric] bintr_uint)
   done
 
-lemmas word_ineq_via_carry_val = word_le_eq_carry[unfolded word_size]
-    linorder_not_le[of x, symmetric, unfolded word_le_eq_carry word_size]
+lemmas word_ineq_via_carry_val = word_le_eq_carry
+    linorder_not_le[of x, symmetric, unfolded word_le_eq_carry]
     word_sle_xor_eq_le signed.not_le[symmetric]
   for x :: "('a :: len) word"
 
