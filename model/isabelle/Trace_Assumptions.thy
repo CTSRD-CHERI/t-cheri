@@ -1,5 +1,5 @@
 theory Trace_Assumptions
-  imports "Sail.Sail2_state_lemmas" "HOL-Eisbach.Eisbach_Tools" More_Methods
+  imports "Sail.Sail2_state_lemmas" "Sail.Sail2_undefined" "HOL-Eisbach.Eisbach_Tools" More_Methods
 begin
 
 section \<open>Trivia\<close>
@@ -321,11 +321,23 @@ lemma runs_no_reg_writes_to_case_bool[intro, simp, runs_no_reg_writes_toI]:
 lemmas runs_no_reg_writes_to_catch_early_return_case_bool[simp, runs_no_reg_writes_toI] =
   bool.split[where P = "\<lambda>m. runs_no_reg_writes_to Rs (catch_early_return m)" for Rs, THEN iffD2]
 
+lemma no_reg_writes_to_foreachM[simp, no_reg_writes_toI]:
+  assumes "\<And>x vars. no_reg_writes_to Rs (body x vars)"
+  shows "no_reg_writes_to Rs (foreachM xs vars body)"
+  using assms
+  by (induction xs vars body rule: foreachM.induct) auto
+
+lemma runs_no_reg_writes_to_foreachM[simp, runs_no_reg_writes_toI]:
+  assumes "\<And>x vars. runs_no_reg_writes_to Rs (body x vars)"
+  shows "runs_no_reg_writes_to Rs (foreachM xs vars body)"
+  using assms
+  by (induction xs vars body rule: foreachM.induct) (auto intro: no_reg_writes_runs_no_reg_writes)
+
 lemma no_reg_writes_to_choose_regval[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (choose_regval desc)"
   by (auto simp: choose_regval_def no_reg_writes_to_def elim: Traces_cases)
 
-lemma no_reg_writes_to_undefined_value[simp, no_reg_writes_toI]:
+lemma no_reg_writes_to_choose_convert[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (choose_convert of_rv desc)"
   unfolding choose_convert_def maybe_fail_def
   by (auto simp: no_reg_writes_to_def elim: Traces_cases split: option.splits)
@@ -339,29 +351,99 @@ lemma no_reg_writes_to_choose_bool[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (choose_bool RV desc)"
   by (auto simp: choose_bool_def)
 
-lemma no_reg_writes_to_undefined_int[simp, no_reg_writes_toI]:
+lemma no_reg_writes_to_choose_int[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (choose_int RV msg)"
   by (auto simp: choose_int_def)
 
-lemma no_reg_writes_to_undefined_real[simp, no_reg_writes_toI]:
+lemma no_reg_writes_to_choose_real[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (choose_real RV msg)"
   by (auto simp: choose_real_def)
 
-lemma no_reg_writes_to_undefined_string[simp, no_reg_writes_toI]:
+lemma no_reg_writes_to_choose_string[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (choose_string RV msg)"
   by (auto simp: choose_string_def)
 
-lemma no_reg_writes_to_foreachM[simp, no_reg_writes_toI]:
-  assumes "\<And>x vars. no_reg_writes_to Rs (body x vars)"
-  shows "no_reg_writes_to Rs (foreachM xs vars body)"
-  using assms
-  by (induction xs vars body rule: foreachM.induct) auto
+lemma no_reg_writes_to_choose_nat[no_reg_writes_toI, simp]:
+  "no_reg_writes_to Rs (choose_nat RV descr)"
+  by (auto simp: choose_nat_def)
 
-lemma runs_no_reg_writes_to_foreachM[simp, runs_no_reg_writes_toI]:
-  assumes "\<And>x vars. runs_no_reg_writes_to Rs (body x vars)"
-  shows "runs_no_reg_writes_to Rs (foreachM xs vars body)"
+lemma no_reg_writes_to_choose_int_in_range[no_reg_writes_toI, simp]:
+  "no_reg_writes_to Rs (choose_int_in_range RV descr i j)"
+  by (auto simp: choose_int_in_range_def)
+
+lemma no_reg_writes_to_choose_bit[no_reg_writes_toI, simp]:
+  "no_reg_writes_to Rs (choose_bit RV u)"
+  by (auto simp: choose_bit_def)
+
+lemma no_reg_writes_to_genlistM[simp, no_reg_writes_toI]:
+  assumes "\<And>i. no_reg_writes_to Rs (f i)"
+  shows "no_reg_writes_to Rs (genlistM f n)"
   using assms
-  by (induction xs vars body rule: foreachM.induct) (auto intro: no_reg_writes_runs_no_reg_writes)
+  by (auto simp: genlistM_def)
+
+lemma no_reg_writes_to_choose_bools[simp, no_reg_writes_toI]:
+  shows "no_reg_writes_to Rs (choose_bools RV desc n)"
+  by (auto simp: choose_bools_def)
+
+lemma no_reg_writes_to_choose_from_list[simp, no_reg_writes_toI]:
+  shows "no_reg_writes_to Rs (choose_from_list RV desc xs)"
+  by (auto simp: choose_from_list_def split: option.splits)
+
+lemma no_reg_writes_to_choose_bitvector[no_reg_writes_toI, simp]:
+  "no_reg_writes_to Rs (choose_bitvector BC RV descr n)"
+  by (auto simp: choose_bitvector_def)
+
+lemma no_reg_writes_to_undefined_bitvector[no_reg_writes_toI, simp]:
+  "no_reg_writes_to Rs (undefined_bitvector BC RV n)"
+  by (auto simp: undefined_bitvector_def)
+
+lemma no_reg_writes_to_undefined_bits[no_reg_writes_toI, simp]:
+  "no_reg_writes_to Rs (undefined_bits BC RV n)"
+  by (auto simp: undefined_bits_def)
+
+lemma no_reg_writes_to_undefined_bit[no_reg_writes_toI, simp]:
+  "no_reg_writes_to Rs (undefined_bit RV u)"
+  by (auto simp: undefined_bit_def)
+
+lemma no_reg_writes_to_undefined_bool[no_reg_writes_toI, simp]:
+  "no_reg_writes_to Rs (undefined_bool RV u)"
+  by (auto simp: undefined_bool_def)
+
+lemma no_reg_writes_to_undefined_string[no_reg_writes_toI, simp]:
+  "no_reg_writes_to Rs (undefined_string RV u)"
+  by (auto simp: undefined_string_def)
+
+lemma no_reg_writes_to_undefined_unit[no_reg_writes_toI, simp]:
+  "no_reg_writes_to Rs (undefined_unit u)"
+  by (auto simp: undefined_unit_def)
+
+lemma no_reg_writes_to_undefined_vector[no_reg_writes_toI, simp]:
+  "no_reg_writes_to Rs (undefined_vector len v)"
+  by (auto simp: undefined_vector_def)
+
+lemma no_reg_writes_to_undefined_int[no_reg_writes_toI, simp]:
+  "no_reg_writes_to Rs (undefined_int RV u)"
+  by (auto simp: undefined_int_def)
+
+lemma no_reg_writes_to_undefined_nat[no_reg_writes_toI, simp]:
+  "no_reg_writes_to Rs (undefined_nat RV u)"
+  by (auto simp: undefined_nat_def)
+
+lemma no_reg_writes_to_undefined_real[no_reg_writes_toI, simp]:
+  "no_reg_writes_to Rs (undefined_real RV u)"
+  by (auto simp: undefined_real_def)
+
+lemma no_reg_writes_to_undefined_range[no_reg_writes_toI, simp]:
+  "no_reg_writes_to Rs (undefined_range RV i j)"
+  by (auto simp: undefined_range_def)
+
+lemma no_reg_writes_to_undefined_atom[no_reg_writes_toI, simp]:
+  "no_reg_writes_to Rs (undefined_atom n)"
+  by (auto simp: undefined_atom_def)
+
+lemma no_reg_writes_to_internal_pick[no_reg_writes_toI, simp]:
+  "no_reg_writes_to Rs (internal_pick RV xs)"
+  by (auto simp: internal_pick_def)
 
 lemma no_reg_writes_to_bool_of_bitU_nondet[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (bool_of_bitU_nondet RV b)"
@@ -431,20 +513,6 @@ lemma no_reg_writes_to_write_memt[simp, no_reg_writes_toI]:
   "no_reg_writes_to Rs (write_memt BC BC' wk addr bytes value tag)"
   by (auto simp: write_memt_def no_reg_writes_to_def split: option.splits elim: Traces_cases)
 
-lemma no_reg_writes_to_genlistM[simp, no_reg_writes_toI]:
-  assumes "\<And>i. no_reg_writes_to Rs (f i)"
-  shows "no_reg_writes_to Rs (genlistM f n)"
-  using assms
-  by (auto simp: genlistM_def)
-
-lemma no_reg_writes_to_choose_bools[simp, no_reg_writes_toI]:
-  shows "no_reg_writes_to Rs (choose_bools RV desc n)"
-  by (auto simp: choose_bools_def)
-
-lemma no_reg_writes_to_choose_from_list[simp, no_reg_writes_toI]:
-  shows "no_reg_writes_to Rs (choose_from_list RV desc xs)"
-  by (auto simp: choose_from_list_def split: option.splits)
-
 lemma no_reg_writes_to_bools_of_bits_nondet[simp, no_reg_writes_toI]:
   shows "no_reg_writes_to Rs (bools_of_bits_nondet RV bits)"
   by (auto simp: bools_of_bits_nondet_def)
@@ -452,6 +520,10 @@ lemma no_reg_writes_to_bools_of_bits_nondet[simp, no_reg_writes_toI]:
 lemma no_reg_writes_to_of_bits_nondet[simp, no_reg_writes_toI]:
   shows "no_reg_writes_to Rs (of_bits_nondet BC RV bits)"
   by (auto simp: of_bits_nondet_def)
+
+lemma no_reg_writes_to_mword_nondet[no_reg_writes_toI, simp]:
+  "no_reg_writes_to Rs (mword_nondet RV n)"
+  by (auto simp: mword_nondet_def)
 
 definition
   bind_ignore :: "('rv, 'a, 'e) monad \<Rightarrow> ('rv, 'b, 'e) monad \<Rightarrow> ('rv, 'b, 'e) monad"

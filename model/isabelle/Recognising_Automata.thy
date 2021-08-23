@@ -625,6 +625,10 @@ lemma non_mem_exp_early_return[intro!]:
   "non_mem_exp (early_return a)"
   by (auto simp: early_return_def intro!: non_cap_expI[THEN non_cap_exp_non_mem_exp])
 
+lemma non_cap_exp_Fail[non_cap_expI]:
+  "non_cap_exp (Fail msg)"
+  by (auto simp: non_cap_exp_def)
+
 lemma non_cap_exp_assert_exp[non_cap_expI]:
   "non_cap_exp (assert_exp c msg)"
   by (auto simp: assert_exp_def non_cap_exp_def)
@@ -641,11 +645,17 @@ lemma non_mem_exp_foreachM:
   using assms
   by (induction xs vars body rule: foreachM.induct) (auto intro: non_cap_expI[THEN non_cap_exp_non_mem_exp])
 
+lemma non_cap_exp_genlistM:
+  assumes "\<And>n. non_cap_exp (f n)"
+  shows "non_cap_exp (genlistM f n)"
+  using assms
+  by (auto simp: genlistM_def intro!: non_cap_expI)
+
 lemma non_cap_exp_choose_regval[non_cap_expI]:
   "non_cap_exp (choose_regval desc)"
   by (auto simp: choose_regval_def non_cap_exp_def elim: Traces_cases)
 
-lemma non_cap_exp_undefined_value[non_cap_expI]:
+lemma non_cap_exp_choose_convert[non_cap_expI]:
   "non_cap_exp (choose_convert of_rv descr)"
   unfolding choose_convert_def maybe_fail_def
   by (auto simp: non_cap_exp_def elim: Traces_cases split: option.splits)
@@ -659,6 +669,10 @@ lemma non_cap_exp_choose_bool[non_cap_expI]:
   "non_cap_exp (choose_bool RV desc)"
   by (auto simp: choose_bool_def intro: non_cap_expI)
 
+lemma non_cap_exp_choose_bools[non_cap_expI]:
+  "non_cap_exp (choose_bools RV desc n)"
+  by (auto simp: choose_bools_def intro: non_cap_expI non_cap_exp_genlistM)
+
 lemma non_cap_exp_choose_int[non_cap_expI]:
   "non_cap_exp (choose_int RV msg)"
   by (auto simp: choose_int_def intro: non_cap_expI)
@@ -671,14 +685,82 @@ lemma non_cap_exp_choose_string[non_cap_expI]:
   "non_cap_exp (choose_string RV msg)"
   by (auto simp: choose_string_def intro: non_cap_expI)
 
+lemma non_cap_exp_choose_nat[non_cap_expI, simp]:
+  "non_cap_exp (choose_nat RV descr)"
+  by (auto simp: choose_nat_def intro: non_cap_expI)
+
+lemma non_cap_exp_choose_int_in_range[non_cap_expI, simp]:
+  "non_cap_exp (choose_int_in_range RV descr i j)"
+  by (auto simp: choose_int_in_range_def intro: non_cap_expI)
+
+lemma non_cap_exp_choose_bit[non_cap_expI, simp]:
+  "non_cap_exp (choose_bit RV u)"
+  by (auto simp: choose_bit_def intro: non_cap_expI)
+
+lemma non_cap_exp_choose_bitvector[non_cap_expI, simp]:
+  "non_cap_exp (choose_bitvector BC RV descr n)"
+  by (auto simp: choose_bitvector_def intro: non_cap_expI)
+
+lemma non_cap_exp_undefined_bitvector[non_cap_expI]:
+  "non_cap_exp (undefined_bitvector BC RV n)"
+  by (auto simp add: undefined_bitvector_def simp del: repeat.simps intro: non_cap_expI)
+
+lemma non_cap_exp_undefined_bits[non_cap_expI]:
+  "non_cap_exp (undefined_bits BC RV n)"
+  by (auto simp: undefined_bits_def intro: non_cap_expI)
+
+lemma non_cap_exp_undefined_bit[non_cap_expI]:
+  "non_cap_exp (undefined_bit RV u)"
+  by (auto simp: undefined_bit_def intro: non_cap_expI)
+
+lemma non_cap_exp_undefined_bool[non_cap_expI]:
+  "non_cap_exp (undefined_bool RV u)"
+  by (auto simp: undefined_bool_def intro: non_cap_expI)
+
+lemma non_cap_exp_undefined_string[non_cap_expI]:
+  "non_cap_exp (undefined_string RV u)"
+  by (auto simp: undefined_string_def intro: non_cap_expI)
+
+lemma non_cap_exp_undefined_unit[non_cap_expI]:
+  "non_cap_exp (undefined_unit u)"
+  by (auto simp: undefined_unit_def intro: non_cap_expI)
+
+lemma non_cap_exp_undefined_vector[non_cap_expI]:
+  "non_cap_exp (undefined_vector len v)"
+  by (auto simp add: undefined_vector_def simp del: repeat.simps intro: non_cap_expI)
+
+lemma non_cap_exp_undefined_int[non_cap_expI]:
+  "non_cap_exp (undefined_int RV u)"
+  by (auto simp: undefined_int_def intro: non_cap_expI)
+
+lemma non_cap_exp_undefined_nat[non_cap_expI]:
+  "non_cap_exp (undefined_nat RV u)"
+  by (auto simp: undefined_nat_def intro: non_cap_expI)
+
+lemma non_cap_exp_undefined_real[non_cap_expI]:
+  "non_cap_exp (undefined_real RV u)"
+  by (auto simp: undefined_real_def intro: non_cap_expI)
+
+lemma non_cap_exp_undefined_range[non_cap_expI]:
+  "non_cap_exp (undefined_range RV i j)"
+  by (auto simp: undefined_range_def intro: non_cap_expI)
+
+lemma non_cap_exp_undefined_atom[non_cap_expI]:
+  "non_cap_exp (undefined_atom i)"
+  by (auto simp: undefined_atom_def intro: non_cap_expI)
+
+lemma non_cap_exp_choose_from_list[non_cap_expI]:
+  "non_cap_exp (choose_from_list RV desc xs)"
+  by (auto simp: choose_from_list_def intro!: non_cap_expI split: option.splits)
+
+lemma non_cap_exp_internal_pick[non_cap_expI]:
+  "non_cap_exp (internal_pick RV xs)"
+  by (auto simp: internal_pick_def intro: non_cap_expI)
+
 lemma non_cap_exp_bool_of_bitU_nondet[non_cap_expI]:
   "non_cap_exp (bool_of_bitU_nondet RV b)"
   unfolding bool_of_bitU_nondet_def
   by (cases b) (auto intro: non_cap_expI)
-
-lemma non_cap_exp_Fail[non_cap_expI]:
-  "non_cap_exp (Fail msg)"
-  by (auto simp: non_cap_exp_def)
 
 lemma non_cap_exp_maybe_fail[non_cap_expI]:
   "non_cap_exp (maybe_fail msg v)"
@@ -702,27 +784,13 @@ lemma non_cap_exp_of_bits_fail[non_cap_expI]:
   by (auto simp: of_bits_fail_def intro: non_cap_expI)
 
 lemma non_cap_exp_mword_nondet[non_cap_expI]:
-  "non_cap_exp (mword_nondet RV ())"
+  "non_cap_exp (mword_nondet RV u)"
   by (auto simp add: mword_nondet_def intro: non_cap_expI simp del: repeat.simps)
-
-lemma non_cap_exp_genlistM:
-  assumes "\<And>n. non_cap_exp (f n)"
-  shows "non_cap_exp (genlistM f n)"
-  using assms
-  by (auto simp: genlistM_def intro!: non_cap_expI)
-
-lemma non_cap_exp_choose_bools[non_cap_expI]:
-  "non_cap_exp (choose_bools RV desc n)"
-  by (auto simp: choose_bools_def intro: non_cap_expI non_cap_exp_genlistM)
 
 lemma non_cap_exp_exit[non_cap_expI]:
   "non_cap_exp (exit0 ())"
   unfolding exit0_def
   by (rule non_cap_exp_Fail)
-
-lemma non_cap_exp_chooseM[non_cap_expI]:
-  "non_cap_exp (choose_from_list RV desc xs)"
-  by (auto simp: choose_from_list_def intro!: non_cap_expI split: option.splits)
 
 lemma non_cap_exp_and_boolM[intro!]:
   "non_cap_exp (and_boolM m1 m2)" if "non_cap_exp m1" and "non_cap_exp m2"
