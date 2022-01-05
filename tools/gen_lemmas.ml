@@ -42,10 +42,18 @@ let uses rs f = (reads rs f || writes rs f)
 
 let is_cap_typ isa typ =
   let open Type_check in
-  let typ = Env.expand_synonyms isa.type_env typ in
-  List.exists (alpha_equivalent isa.type_env typ) isa.cap_types
+  try
+    let typ = Env.expand_synonyms isa.type_env typ in
+    List.exists (alpha_equivalent isa.type_env typ) isa.cap_types
+  with _ -> false
 
-let base_typ_of isa typ = Type_check.Env.base_typ_of isa.type_env typ
+let base_typ_of isa typ = try Type_check.Env.base_typ_of isa.type_env typ with _ -> typ
+let get_fun_env isa id =
+  try begin
+    let f = Bindings.find id isa.fun_infos in
+    Type_check.Env.add_typquant Parse_ast.Unknown f.typquant isa.type_env
+  end with _ -> isa.type_env
+let try_destruct_bitvector env typ = try Type_check.destruct_bitvector env typ with _ -> None
 
 let returns_cap isa f = is_cap_typ isa f.ret_typ
 let is_cap_fun isa f = has_mem_eff f || uses isa.cap_regs f || reads isa.read_privileged_regs f || writes isa.write_privileged_regs f
@@ -82,7 +90,8 @@ let format_fun_args ?annot_kids:(annot_kids=false) ?extra_renames:(extra_renames
   in
   String.concat " " (List.mapi format_arg f.args)
 let format_fun_call ?annot_kids:(annot_kids=false) ?extra_renames:(extra_renames=Bindings.empty) arch id f =
-  let tannot = match Type_check.destruct_bitvector arch.type_env f.ret_typ with
+  let tannot =
+    match try_destruct_bitvector (get_fun_env arch id) f.ret_typ with
     | Some (Nexp_aux (Nexp_var kid, _), _) when annot_kids ->
        " :: " ^ string_of_kid kid ^ "::len word M"
     | _ -> ""
@@ -306,6 +315,7 @@ let arg_assms_of_typquant arg_kids tq =
 
 let traces_enabled_lemma mem for_fetch isa id =
   let extra_renames = arg_renames ["s"] in
+  let env = get_fun_env isa id in
   let (f, name, call) = get_fun_info ~annot_kids:true ~extra_renames isa id in
   let priv_cap_regs_read =
     if ids_overlap isa.system_access_checks f.trans_calls then IdSet.empty else
@@ -354,7 +364,7 @@ let traces_enabled_lemma mem for_fetch isa id =
            | Some kid ->
               Some (kid, "int LENGTH(" ^ string_of_kid kid ^ ")")
            | _ ->
-              begin match Type_check.destruct_bitvector isa.type_env arg_typ with
+              begin match try_destruct_bitvector env arg_typ with
                 | Some (Nexp_aux (Nexp_var kid, _), _) ->
                    Some (kid, "int (size " ^ mangle_arg_name ~extra_renames isa arg_id ^ ")")
                 | _ -> None
@@ -372,11 +382,11 @@ let traces_enabled_lemma mem for_fetch isa id =
   in
   let (_, arg_kids, eq_assms) = List.fold_left add_arg_kid (0, KBindings.empty, []) f.args in
   let arg_assms = cap_arg_assms @ (arg_assms_of_typquant arg_kids f.typquant) in
-  let is_kid_bitvector kid typ = match Type_check.destruct_bitvector isa.type_env typ with
+  let is_kid_bitvector kid typ = match try_destruct_bitvector env typ with
     | Some (Nexp_aux (Nexp_var kid', _), _) -> Kid.compare kid kid' = 0
     | _ -> false
   in
-  let ret_typ_assm = match Type_check.destruct_bitvector isa.type_env f.ret_typ with
+  let ret_typ_assm = match try_destruct_bitvector env f.ret_typ with
     | Some (Nexp_aux (Nexp_var kid, _), _)
       when KBindings.mem kid arg_kids && not (List.exists (is_kid_bitvector kid) (arg_typs f)) ->
        ["int LENGTH(" ^ string_of_kid kid ^ ") = " ^ KBindings.find kid arg_kids]

@@ -1,1 +1,1 @@
-true: package(sail), package(yojson), package(str)
+true: package(sail), package(yojson), package(str), debug
