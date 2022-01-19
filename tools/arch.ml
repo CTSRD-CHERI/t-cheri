@@ -22,6 +22,7 @@ type isa =
     pcc_regs : IdSet.t;
     idc_regs : IdSet.t;
     footprint_regs : IdSet.t;
+    inv_regs : IdSet.t;
     conf_regs : IdSet.t;
     cap_types : typ list;
     fun_infos : Analyse_sail.fun_info Bindings.t;
@@ -40,7 +41,10 @@ type isa =
 
 let privileged_regs isa = IdSet.union isa.read_privileged_regs isa.write_privileged_regs
 let special_regs isa = IdSet.union (privileged_regs isa) (IdSet.union isa.pcc_regs isa.idc_regs)
-let write_checked_regs isa = IdSet.union isa.footprint_regs (IdSet.union isa.pcc_regs isa.idc_regs)
+let write_checked_regs isa =
+  IdSet.union isa.pcc_regs isa.idc_regs
+  |> IdSet.union isa.footprint_regs
+  |> IdSet.union isa.inv_regs
 
 let lstrip f s =
   let rec idx_from i =
@@ -176,6 +180,7 @@ let load_isa file src_dir =
     pcc_regs = optional_idset (member "pcc" arch);
     idc_regs = optional_idset (member "idc" arch);
     footprint_regs = optional_idset (member "footprint_regs" arch);
+    inv_regs = optional_idset (member "inv_regs" arch);
     conf_regs;
     cap_types;
     fun_infos;

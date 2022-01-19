@@ -510,6 +510,22 @@ let exp_fails_lemma isa id =
     proof = "(auto elim!: Run_bindE Run_ifE Run_letE)" }
   |> apply_lemma_override isa id ("exp_fails")
 
+let preserves_invariant_lemma isa id =
+  let (f, name, call) = get_fun_info isa id in
+  { name = name ^ "_preserves_invariant"; attrs = "[runs_preserve_invariantI]"; assms = [];
+    stmts = ["runs_preserve_invariant (liftS (" ^ call ^ ")) cheri_invariant"];
+    proof = "(unfold " ^ name ^ "_def bind_assoc liftState_simp comp_def, preserves_invariantI)";
+    using = []; unfolding = [] }
+  |> apply_lemma_override isa id "preserves_invariant"
+
+let non_inv_reg_writes_preserve_inv_lemma isa =
+  let stmt r = "\\<And>v. runs_preserve_invariant (liftS (write_reg " ^ mangle_reg_ref isa r ^ " v)) cheri_invariant" in
+  let regs = State.find_registers isa.ast.defs |> List.map snd |> List.filter (fun r -> not (IdSet.mem r isa.inv_regs)) in
+  let stmts = List.map stmt regs in
+  { name = "non_inv_reg_writes_preserve_invariant"; attrs = "";
+    assms = []; unfolding = []; using = []; stmts;
+    proof = "(non_inv_reg_writes_preserve_cheri_invariant)+" }
+
 let output_line chan l =
   output_string chan l;
   output_string chan "\n"
@@ -552,8 +568,6 @@ let output_cap_lemmas chan (isa : isa) =
   filter_funs_for_lemma "no_reg_writes_to" isa (fun id f -> not (IdSet.subset (write_checked_regs isa) f.trans_regs_written) && IdSet.mem id needed_fps)
     |> List.map (no_reg_writes_to_lemma false isa)
     |> List.map format_lemma |> List.iter (output_line chan);
-
-  output_line chan  "";
 
   let output_runs_no_reg_writes_to id f =
     let non_written_regs = IdSet.diff (write_checked_regs isa) f.trans_regs_written in
@@ -731,6 +745,28 @@ let output_fetch_props chan (isa : isa) =
   output_line chan  "";
   output_line chan  "end"
 
+let output_inv_lemmas chan (isa : isa) =
+  let needed_fps = needed_footprints isa in
+  output_line chan  "section \\<open>Invariant preservation\\<close>";
+  output_line chan  "";
+  output_line chan  "theory CHERI_Invariant";
+  output_line chan  "imports CHERI_Lemmas";
+  output_line chan  "begin";
+  output_line chan  "";
+
+  output_line chan (format_lemma (non_inv_reg_writes_preserve_inv_lemma isa));
+  output_line chan  "";
+  output_line chan  "lemmas non_inv_reg_writesS_preserve_invariant[runs_preserve_invariantI] =";
+  output_line chan  "  non_inv_reg_writes_preserve_invariant[unfolded liftState_simp]";
+  output_line chan  "";
+
+  filter_funs_for_lemma "preserves_invariant" isa (fun id f -> effectful f && ids_overlap isa.inv_regs f.trans_regs_written_no_exc && IdSet.mem id needed_fps)
+    |> List.map (preserves_invariant_lemma isa)
+    |> List.map format_lemma |> List.iter (output_line chan);
+
+  output_line chan  "";
+  output_line chan  "end"
+
 let process_isa file =
   let isa = load_isa file !opt_src_dir in
   let out_file name = Filename.concat !opt_out_dir name in
@@ -753,6 +789,13 @@ let process_isa file =
   if not (IdSet.is_empty isa.fetch_funs) then begin
     let chan = open_out (out_file "CHERI_Fetch_Properties.thy") in
     output_fetch_props chan isa;
+    flush chan;
+    close_out chan
+  end;
+
+  if not (IdSet.is_empty isa.inv_regs) then begin
+    let chan = open_out (out_file "CHERI_Invariant.thy") in
+    output_inv_lemmas chan isa;
     flush chan;
     close_out chan
   end
