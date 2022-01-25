@@ -166,7 +166,7 @@ let store_cap_reg_axiom ISA has_ex initial_caps use_mem_caps invoked_caps invoke
   (forall i c r.
      (writes_to_reg_at_idx i t = Just r && c IN (writes_reg_caps_at_idx ISA i t))
      -->
-     (* Only story monotonically derivable capabilities to registers *)
+     (* Only store monotonically derivable capabilities to registers *)
      (cap_derivable (initial_caps union available_caps ISA (invoked_indirect_caps = {} && use_mem_caps) i t) c ||
      (* ... or perform one of the following non-monotonic register writes: *)
      (* Exception *)
