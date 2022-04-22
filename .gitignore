@@ -1,8 +1,8 @@
 _build
 *.native
 *.thy~
-model/isabelle/Capabilities.thy
-model/isabelle/Cheri_axioms.thy
+# model/isabelle/Capabilities.thy
+# model/isabelle/Cheri_axioms.thy
 tools/gen_lemmas
 *.thy#
 *.vo
