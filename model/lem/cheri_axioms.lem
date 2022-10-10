@@ -29,7 +29,13 @@ type isa 'cap 'regval 'instr 'e =
      caps_of_regval : 'regval -> set 'cap;
      trace_uses_mem_caps : isa_trace 'regval 'instr -> bool;
      instr_invokes_indirect_caps : 'instr -> trace 'regval -> set 'cap;
-     instr_invokes_caps : 'instr -> trace 'regval -> set 'cap;
+     instr_invokes_code_caps : 'instr -> trace 'regval -> set 'cap;
+     instr_invokes_data_caps : 'instr -> trace 'regval -> set 'cap;
+     (* Offsets of code and data capabilities, respectively, loaded via
+        points-to-pair indirect sentry capabilities
+        (Section C.9.2 of CHERI ISAv8) *)
+     indirect_pair_sentry_code_offset : nat;
+     indirect_pair_sentry_data_offset : nat;
      trace_raises_ex : isa_trace 'regval 'instr -> bool;
      exception_targets : set 'regval -> set 'cap;
      read_privileged_regs : set register_name;
@@ -62,17 +68,33 @@ let exception_targets_at_idx ISA i t = ISA.exception_targets (read_from_KCC_at_i
 val is_fetch_trace : forall 'regval 'instr. isa_trace 'regval 'instr -> bool
 let is_fetch_trace t = (t.trace_kind = Fetch_Trace)
 
+val instr_invokes_caps : forall 'cap 'regval 'instr 'e. SetType 'cap => isa 'cap 'regval 'instr 'e -> 'instr -> trace 'regval -> set 'cap
+let instr_invokes_caps ISA instr t = ISA.instr_invokes_code_caps instr t union ISA.instr_invokes_data_caps instr t
+
 val trace_invokes_indirect_caps : forall 'cap 'regval 'instr 'e. SetType 'cap => isa 'cap 'regval 'instr 'e -> isa_trace 'regval 'instr -> set 'cap
 let trace_invokes_indirect_caps ISA t = match t.trace_kind with
   | Instr_Trace instr -> ISA.instr_invokes_indirect_caps instr t.trace
   | Fetch_Trace -> Set.empty
 end
 
-val trace_invokes_caps : forall 'cap 'regval 'instr 'e. SetType 'cap => isa 'cap 'regval 'instr 'e -> isa_trace 'regval 'instr -> set 'cap
-let trace_invokes_caps ISA t = match t.trace_kind with
-  | Instr_Trace instr -> ISA.instr_invokes_caps instr t.trace
+val trace_invokes_code_caps : forall 'cap 'regval 'instr 'e. SetType 'cap => isa 'cap 'regval 'instr 'e -> isa_trace 'regval 'instr -> set 'cap
+let trace_invokes_code_caps ISA t = match t.trace_kind with
+  | Instr_Trace instr -> ISA.instr_invokes_code_caps instr t.trace
   | Fetch_Trace -> Set.empty
 end
+
+val trace_invokes_data_caps : forall 'cap 'regval 'instr 'e. SetType 'cap => isa 'cap 'regval 'instr 'e -> isa_trace 'regval 'instr -> set 'cap
+let trace_invokes_data_caps ISA t = match t.trace_kind with
+  | Instr_Trace instr -> ISA.instr_invokes_data_caps instr t.trace
+  | Fetch_Trace -> Set.empty
+end
+
+let ev_writes_pcc_caps ISA = function
+  | E_write_reg r v -> if r IN ISA.PCC then ISA.caps_of_regval v else {}
+  | _ -> {}
+end
+
+let trace_writes_pcc_caps ISA t = List.foldl (union) {} (List.map (ev_writes_pcc_caps ISA) t.trace)
 
 val address_tag_aligned : forall 'cap 'regval 'instr 'e.
   isa 'cap 'regval 'instr 'e -> address -> bool
@@ -184,6 +206,30 @@ let store_cap_mem_axiom ISA initial_caps n t =
      (* Only store monotonically derivable capabilities to memory *)
      (cap_derivable (initial_caps union available_caps ISA i t) c))
 
+val is_invoked_indirect_sentry_at_idx : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
+  isa 'cap 'regval 'instr 'e -> 'cap -> indirect_sentry_type -> isa_trace 'regval 'instr -> nat -> bool
+let is_invoked_indirect_sentry_at_idx ISA c sentry_type t i =
+  (exists c'.
+     c' IN available_reg_caps ISA i t &&
+     is_tagged c' && is_sealed c' &&
+     get_indirect_sentry_type c' = Just sentry_type &&
+     leq_cap c (unseal c') &&
+     c IN trace_invokes_indirect_caps ISA t)
+
+val is_indirectly_invoked_cap_at_idx : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
+  isa 'cap 'regval 'instr 'e -> 'cap -> indirect_sentry_type -> maybe nat -> 'cap -> isa_trace 'regval 'instr -> nat -> bool
+let is_indirectly_invoked_cap_at_idx ISA (sentry : 'cap) sentry_type required_offset (c : 'cap) t i =
+  (exists paddr j.
+     j < i &&
+     is_invoked_indirect_sentry_at_idx ISA sentry sentry_type t j &&
+     (match required_offset with
+      | Just offset ->
+         let vaddr = get_cursor sentry + offset in
+         ISA.translate_address vaddr Load (take j t.trace) = Just paddr
+      | Nothing -> true
+      end) &&
+     reads_mem_cap_at_idx j t = Just (paddr, ISA.tag_granule, c))
+
 val store_cap_reg_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, SetType 'regval, Eq 'cap, Eq 'regval =>
   isa 'cap 'regval 'instr 'e -> set 'cap -> nat -> isa_trace 'regval 'instr -> bool
 let store_cap_reg_axiom ISA initial_caps n t =
@@ -197,39 +243,57 @@ let store_cap_reg_axiom ISA initial_caps n t =
      (ISA.trace_raises_ex t && c IN exception_targets_at_idx ISA i t && r IN ISA.PCC) ||
      (* Capability pair invocation *)
      (exists cc cd.
-        c IN trace_invokes_caps ISA t &&
         cap_derivable (initial_caps union available_caps ISA i t) cc &&
         cap_derivable (initial_caps union available_caps ISA i t) cd &&
         invokable cc cd &&
-        ((leq_cap c (unseal cc) && r IN ISA.PCC) ||
-         (leq_cap c (unseal cd) && r IN ISA.IDC))) ||
+        ((leq_cap c (unseal cc) && c IN trace_invokes_code_caps ISA t && r IN ISA.PCC) ||
+         (leq_cap c (unseal cd) && c IN trace_invokes_data_caps ISA t && r IN ISA.IDC))) ||
      (* Direct sentry invocation *)
      (exists cs.
-        c IN trace_invokes_caps ISA t &&
+        c IN trace_invokes_code_caps ISA t &&
         cap_derivable (initial_caps union available_caps ISA i t) cs &&
         is_sentry cs &&
         is_sealed cs &&
         leq_cap c (unseal cs) &&
         r IN ISA.PCC) ||
-     (* Indirect sentry invocation (writing the unsealed sentry to IDC) *)
-     (exists cs.
-        c IN trace_invokes_indirect_caps ISA t &&
-        cap_derivable (initial_caps union available_reg_caps ISA i t) cs &&
-        is_indirect_sentry cs &&
-        is_sealed cs &&
-        leq_cap c (unseal cs) &&
-        r IN ISA.IDC) ||
-     (* Indirect capability (pair) invocation (writing the loaded capability/capabilities to PCC/IDC) *)
-     (exists c'.
-        c IN trace_invokes_caps ISA t &&
-        trace_invokes_indirect_caps ISA t <> {} && ISA.trace_uses_mem_caps t &&
-        cap_derivable (initial_caps union available_mem_caps ISA i t) c' &&
-        ((leq_cap c (unseal c') && is_sealed c' && is_sentry c' && r IN ISA.PCC) ||
-         (leq_cap c c' && r IN (ISA.PCC union ISA.IDC))))))
+     (* Indirect points-to-PCC sentry (Section C.9.1 of CHERI ISAv8),
+        part 1: writing the loaded capability to PCC *)
+     (exists cs c'.
+        is_indirectly_invoked_cap_at_idx ISA cs Points_to_PCC Nothing c' t i &&
+        (leq_cap c c' || (leq_cap c (unseal c') && is_sealed c' && is_sentry c')) &&
+        c IN trace_invokes_code_caps ISA t &&
+        r IN ISA.PCC) ||
+     (* Indirect points-to-PCC sentry (Section C.9.1 of CHERI ISAv8),
+        part 2: writing the unsealed sentry itself to IDC *)
+     (is_invoked_indirect_sentry_at_idx ISA c Points_to_PCC t i &&
+      c IN trace_invokes_data_caps ISA t &&
+      r IN ISA.IDC) ||
+     (* Indirect points-to-pair sentry (Section C.9.2 of CHERI ISAv8),
+        part 1: writing the loaded code capability to PCC *)
+     (exists c' cs.
+        is_indirectly_invoked_cap_at_idx ISA cs Points_to_Pair (Just ISA.indirect_pair_sentry_code_offset) c' t i &&
+        ISA.trace_uses_mem_caps t &&
+        (leq_cap c c' || (leq_cap c (unseal c') && is_sealed c' && is_sentry c')) &&
+        c IN trace_invokes_code_caps ISA t &&
+        r IN ISA.PCC) ||
+     (* Indirect points-to-pair sentry (Section C.9.2 of CHERI ISAv8),
+        part 2: writing the loaded data capability to IDC *)
+     (exists c' cs.
+        is_indirectly_invoked_cap_at_idx ISA cs Points_to_Pair (Just ISA.indirect_pair_sentry_data_offset) c' t i &&
+        ISA.trace_uses_mem_caps t &&
+        leq_cap c c' &&
+        c IN trace_invokes_data_caps ISA t &&
+        r IN ISA.IDC)))
 
-(* TODO: The above allows writing invoked capabilities to IDC without also
-   setting PCC;  add a requirement that capability invocation either writes
-   only PCC or both PCC and IDC. *)
+(* If a not-normally-derivable capability is written to IDC, then an invoked code capability must be written to PCC *)
+val idc_write_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, SetType 'regval, Eq 'cap, Eq 'regval =>
+  isa 'cap 'regval 'instr 'e -> set 'cap -> isa_trace 'regval 'instr -> bool
+let idc_write_axiom ISA initial_caps t =
+  (forall i c idc.
+     (writes_to_reg_at_idx i t = Just idc && idc IN ISA.IDC && c IN (writes_reg_caps_at_idx ISA i t))
+     -->
+     (cap_derivable (initial_caps union available_caps ISA i t) c ||
+      (exists cc. cc IN trace_invokes_code_caps ISA t && trace_writes_pcc_caps ISA t = {cc})))
 
 val load_mem_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
   isa 'cap 'regval 'instr 'e -> set 'cap -> nat -> isa_trace 'regval 'instr -> bool
@@ -292,4 +356,5 @@ let cheri_axioms ISA initial_caps n t =
   write_reg_axiom ISA n t &&
   load_mem_axiom ISA initial_caps n t &&
   store_tag_axiom ISA n t &&
-  store_mem_axiom ISA initial_caps n t
+  store_mem_axiom ISA initial_caps n t &&
+  idc_write_axiom ISA initial_caps t

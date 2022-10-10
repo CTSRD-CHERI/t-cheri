@@ -1210,10 +1210,13 @@ locale Write_Cap_Automaton = Capability_ISA CC ISA initial_caps
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
     and initial_caps :: "'cap set" +
   fixes ex_traces :: bool and use_mem_caps :: bool
-    and invoked_caps :: "'cap set" and invoked_indirect_caps :: "'cap set"
+    and invoked_code_caps :: "'cap set"
+    and invoked_data_caps :: "'cap set"
+    and invoked_indirect_caps :: "'cap set"
 begin
 
 abbreviation invokes_indirect_caps where "invokes_indirect_caps \<equiv> (invoked_indirect_caps \<noteq> {})"
+abbreviation "invoked_caps \<equiv> invoked_code_caps \<union> invoked_data_caps"
 
 fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool" where
   "enabled s (E_write_reg r v) \<longleftrightarrow>
@@ -1226,7 +1229,7 @@ fun enabled :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Righta
                 is_sentry_method CC cs \<and> is_sealed_method CC cs \<and>
                 leq_cap CC c (unseal_method CC cs) \<and> r \<in> PCC ISA) \<or>
           (\<exists>cs. c \<in> invoked_indirect_caps \<and> cs \<in> derivable (initial_caps \<union> accessed_reg_caps s) \<and>
-                is_indirect_sentry_method CC cs \<and> is_sealed_method CC cs \<and>
+                is_indirect_sentry CC cs \<and> is_sealed_method CC cs \<and>
                 leq_cap CC c (unseal_method CC cs) \<and> r \<in> IDC ISA) \<or>
           (\<exists>cc cd. c \<in> invoked_caps \<and> invokable CC cc cd \<and>
                    cc \<in> derivable (initial_caps \<union> accessed_caps (use_mem_caps \<and> invoked_indirect_caps = {}) s) \<and>
@@ -1254,7 +1257,7 @@ lemma enabled_E_write_reg_cases:
       "is_sentry_method CC cs" and "is_sealed_method CC cs" and
       "leq_cap CC c (unseal_method CC cs)" and "r \<in> PCC ISA"
   | (SentryIndirect) cs where "c \<in> invoked_indirect_caps" and "cs \<in> derivable (initial_caps \<union> accessed_reg_caps s)" and
-      "is_indirect_sentry_method CC cs" and "is_sealed_method CC cs" and
+      "is_indirect_sentry CC cs" and "is_sealed_method CC cs" and
       "leq_cap CC c (unseal_method CC cs)" and "r \<in> IDC ISA"
   | (CCall) cc cd where "c \<in> invoked_caps" and "invokable CC cc cd" and
       "cc \<in> derivable (initial_caps \<union> accessed_caps (use_mem_caps \<and> invoked_indirect_caps = {}) s)" and
@@ -1298,7 +1301,8 @@ end
 locale Write_Cap_Automaton_For_Trace = Write_Cap_Automaton
   where use_mem_caps = "trace_uses_mem_caps ISA t"
     and ex_traces = "trace_raises_ex ISA t"
-    and invoked_caps = "trace_invokes_caps ISA t"
+    and invoked_code_caps = "trace_invokes_code_caps ISA t"
+    and invoked_data_caps = "trace_invokes_data_caps ISA t"
     and invoked_indirect_caps = "trace_invokes_indirect_caps ISA t"
   for t :: "('regval, 'instr) isa_trace"
 begin

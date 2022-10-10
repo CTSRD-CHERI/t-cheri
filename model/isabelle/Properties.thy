@@ -228,7 +228,7 @@ inductive_set reachable_caps :: "'regs sequential_state \<Rightarrow> 'cap set" 
      seal_method CC c' (get_cursor_method CC c'') \<in> reachable_caps s"
 | SealEntry:
     "\<lbrakk>c' \<in> reachable_caps s; \<not>is_sealed_method CC c';
-      is_sentry_method CC (seal_method CC c' otype) \<or> is_indirect_sentry_method CC (seal_method CC c' otype)\<rbrakk> \<Longrightarrow>
+      is_sentry_method CC (seal_method CC c' otype) \<or> is_indirect_sentry CC (seal_method CC c' otype)\<rbrakk> \<Longrightarrow>
      seal_method CC c' otype \<in> reachable_caps s"
 | Unseal:
     "\<lbrakk>c' \<in> reachable_caps s; c'' \<in> reachable_caps s; is_tagged_method CC c'; is_tagged_method CC c'';
@@ -283,7 +283,7 @@ where
      seal_method CC c' (get_cursor_method CC c'') \<in> reachable_caps_plus C s"
 | SealEntry:
     "\<lbrakk>c' \<in> reachable_caps_plus C s; \<not>is_sealed_method CC c';
-      is_sentry_method CC (seal_method CC c' otype) \<or> is_indirect_sentry_method CC (seal_method CC c' otype)\<rbrakk> \<Longrightarrow>
+      is_sentry_method CC (seal_method CC c' otype) \<or> is_indirect_sentry CC (seal_method CC c' otype)\<rbrakk> \<Longrightarrow>
      seal_method CC c' otype \<in> reachable_caps_plus C s"
 | Unseal:
     "\<lbrakk>c' \<in> reachable_caps_plus C s; c'' \<in> reachable_caps_plus C s;
@@ -503,25 +503,44 @@ lemma writes_reg_cap_nth_provenance[consumes 5]:
   | (Exception) v' r' j where "c \<in> exception_targets_at_idx ISA i t" (* "leq_cap CC c c'"*)
     (*and "t ! j = E_read_reg r' v'" and "j < i"*) (*and "c' \<in> caps_of_regval ISA v'"*)
     (*and "r' \<in> KCC ISA"*) and "r \<in> PCC ISA" and "trace_raises_ex ISA t"
-  | (Sentry) cs where "c \<in> trace_invokes_caps ISA t" and "cs \<in> derivable (initial_caps \<union> available_caps CC ISA i t)"
-    and "is_sentry_method CC cs" and "is_sealed_method CC cs"
-    and "leq_cap CC c (unseal_method CC cs)" and "r \<in> PCC ISA"
-  | (IndirectSentry) cs where "c \<in> trace_invokes_indirect_caps ISA t" and "cs \<in> derivable (initial_caps \<union> available_reg_caps CC ISA i t)"
-    and "is_indirect_sentry_method CC cs" and "is_sealed_method CC cs"
-    and "leq_cap CC c (unseal_method CC cs)" and "r \<in> IDC ISA"
-  | (CCall) cc cd where "c \<in> trace_invokes_caps ISA t" and "invokable CC cc cd"
+  | (CCall) cc cd where "invokable CC cc cd"
     and "cc \<in> derivable (initial_caps \<union> available_caps CC ISA i t)"
     and "cd \<in> derivable (initial_caps \<union> available_caps CC ISA i t)"
-    and "(r \<in> PCC ISA \<and> leq_cap CC c (unseal_method CC cc)) \<or>
-         (r \<in> IDC ISA \<and> leq_cap CC c (unseal_method CC cd))"
-  | (Indirect) c' where "c \<in> trace_invokes_caps ISA t"
-    and "c' \<in> derivable (initial_caps \<union> available_mem_caps CC ISA i t)"
+    and "(r \<in> PCC ISA \<and> c \<in> trace_invokes_code_caps ISA t \<and> leq_cap CC c (unseal_method CC cc)) \<or>
+         (r \<in> IDC ISA \<and> c \<in> trace_invokes_data_caps ISA t \<and> leq_cap CC c (unseal_method CC cd))"
+  | (Sentry) cs where "c \<in> trace_invokes_code_caps ISA t" and "cs \<in> derivable (initial_caps \<union> available_caps CC ISA i t)"
+    and "is_sentry_method CC cs" and "is_sealed_method CC cs"
+    and "leq_cap CC c (unseal_method CC cs)" and "r \<in> PCC ISA"
+  (*| (IndirectSentry) cs where "c \<in> trace_invokes_indirect_caps ISA t"
+    and "c \<in> trace_invokes_data_caps ISA t"
+    and "cs \<in> derivable (initial_caps \<union> available_reg_caps CC ISA i t)"
+    and "is_indirect_sentry CC cs" and "is_sealed_method CC cs"
+    and "leq_cap CC c (unseal_method CC cs)" and "r \<in> IDC ISA"
+  | (Indirect) c' cs where "c' \<in> derivable (initial_caps \<union> available_mem_caps CC ISA i t)"
+    and "cs \<in> trace_invokes_indirect_caps ISA t" and "trace_uses_mem_caps ISA t"
     and "(leq_cap CC c c' \<and> r \<in> PCC ISA \<union> IDC ISA) \<or>
-         (leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c' \<and> r \<in> PCC ISA)"
+         (leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c' \<and> r \<in> PCC ISA)"*)
+  | (Indirect_Sentry_Single_Code) cs c' where "r \<in> PCC ISA"
+    and "is_indirectly_invoked_cap_at_idx CC ISA cs Points_to_PCC None c' t i"
+    and "leq_cap CC c c' \<or> (leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c')"
+    and "c \<in> trace_invokes_code_caps ISA t"
+  | (Indirect_Sentry_Single_Data) "r \<in> IDC ISA"
+    and "is_invoked_indirect_sentry_at_idx CC ISA c Points_to_PCC t i"
+    and "c \<in> trace_invokes_data_caps ISA t"
+  | (Indirect_Sentry_Pair_Code) c' cs where "r \<in> PCC ISA"
+    and "is_indirectly_invoked_cap_at_idx CC ISA cs Points_to_Pair (Some (indirect_pair_sentry_code_offset ISA)) c' t i"
+    and "trace_uses_mem_caps ISA t"
+    and "leq_cap CC c c' \<or> (leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c')"
+    and "c \<in> trace_invokes_code_caps ISA t"
+  | (Indirect_Sentry_Pair_Data) c' cs where "r \<in> IDC ISA"
+    and "is_indirectly_invoked_cap_at_idx CC ISA cs Points_to_Pair (Some (indirect_pair_sentry_data_offset ISA)) c' t i"
+    and "trace_uses_mem_caps ISA t"
+    and "leq_cap CC c c'"
+    and "c \<in> trace_invokes_data_caps ISA t"
   using assms
   unfolding cheri_axioms_def
-  by (fastforce elim!: store_cap_reg_axiomE[where i = i]
-                simp:  writes_reg_caps_at_idx_def cap_derivable_iff_derivable eq_commute[where b = "t ! j" for t j])
+  by (elim conjE store_cap_reg_axiomE[where i = i and r = r and c = c];
+      fastforce simp: writes_reg_caps_at_idx_def cap_derivable_iff_derivable eq_commute[where b = "t ! j" for t j])
 
 lemma get_mem_cap_run_trace_cases:
   assumes c: "get_mem_cap addr (tag_granule ISA) s' = Some c"
@@ -888,8 +907,11 @@ proof -
     by (elim s_invariant_holds_weaken) (auto simp: addr_trans_invariant_plus_def)
 qed
 
-abbreviation "invoked_caps t \<equiv> trace_invokes_caps ISA t \<union> trace_invokes_indirect_caps ISA t"
-abbreviation "invoked_instr_caps instr t \<equiv> instr_invokes_caps ISA instr t \<union> instr_invokes_indirect_caps ISA instr t"
+(*abbreviation "invoked_code_caps t \<equiv> trace_invokes_code_caps ISA t \<union> trace_invokes_indirect_caps ISA t"
+abbreviation "invoked_data_caps t \<equiv> trace_invokes_data_caps ISA t \<union> trace_invokes_indirect_caps ISA t"
+abbreviation "invoked_caps t \<equiv> invoked_code_caps t \<union> invoked_data_caps t"*)
+abbreviation "invoked_caps t \<equiv> trace_invokes_code_caps ISA t \<union> trace_invokes_data_caps ISA t \<union> trace_invokes_indirect_caps ISA t"
+abbreviation "invoked_instr_caps instr t \<equiv> instr_invokes_code_caps ISA instr t \<union> instr_invokes_data_caps ISA instr t \<union> instr_invokes_indirect_caps ISA instr t"
 
 lemma get_reg_cap_reachable:
   assumes r: "c \<in> get_reg_caps r s'"
@@ -1335,7 +1357,7 @@ lemma invoked_instrs_caps_Suc:
   shows "invoked_instrs_caps (Suc n) (tf @ ti @ t') =
          invoked_instr_caps instr ti \<union> invoked_instrs_caps n t'"
   using assms
-  by (auto simp: instrs_invoke_caps_Suc instrs_invoke_indirect_caps_Suc)
+  by (auto simp: instrs_invoke_caps_Suc instrs_invoke_indirect_caps_Suc instr_invokes_caps_def)
 
 definition instrs_preserve_state_assms_plus where
   "instrs_preserve_state_assms_plus C s0 \<equiv>
@@ -1457,7 +1479,7 @@ next
         using inv' \<open>t = tf @ t'\<close>
         using instrs_invoke_caps_Suc[OF \<open>Run (instr_fetch ISA) tf instr\<close> *, where t' = "[]"]
         using instrs_invoke_indirect_caps_Suc[OF \<open>Run (instr_fetch ISA) tf instr\<close> *, where t' = "[]"]
-        by (elim s_invariant_holds_weaken addr_trans_invariant_plus_antimono) auto
+        by (elim s_invariant_holds_weaken addr_trans_invariant_plus_antimono) (auto simp: instr_invokes_caps_def)
       have "reachable_caps_plus {} s' \<subseteq> reachable_caps_plus ({} \<union> initial_caps \<union> invoked_instr_caps instr t') s''"
         using * tf t' s'' Bind Suc.prems inv'' ta'' fetch_cap_inv \<open>instr_state_assms instr s''\<close>
         using instrs_raise_ex_Suc[OF \<open>Run (instr_fetch ISA) tf instr\<close> *, where t' = "[]"]

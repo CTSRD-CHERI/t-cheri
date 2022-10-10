@@ -87,7 +87,7 @@ inductive_set derivable :: "'cap set \<Rightarrow> 'cap set" for C :: "'cap set"
 | SealEntry:
     "\<lbrakk>c' \<in> derivable C; is_tagged_method CC c';
       \<not>is_sealed_method CC c';
-      is_sentry_method CC (seal_method CC c' otype) \<or> is_indirect_sentry_method CC (seal_method CC c' otype)\<rbrakk> \<Longrightarrow>
+      is_sentry_method CC (seal_method CC c' otype) \<or> is_indirect_sentry CC (seal_method CC c' otype)\<rbrakk> \<Longrightarrow>
      seal_method CC c' otype \<in> derivable C"
 
 lemma derivable_mono:

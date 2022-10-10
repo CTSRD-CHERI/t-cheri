@@ -11,11 +11,13 @@ abbreviation "instr_trace instr t \<equiv> \<lparr>trace = t, trace_kind = Instr
 abbreviation "fetch_trace t \<equiv> \<lparr>trace = t, trace_kind = Fetch_Trace\<rparr>"
 
 lemma trace_invokes_simps[simp]:
-  "trace_invokes_caps ISA (instr_trace instr t) = instr_invokes_caps ISA instr t"
-  "trace_invokes_caps ISA (fetch_trace t) = {}"
+  "trace_invokes_code_caps ISA (instr_trace instr t) = instr_invokes_code_caps ISA instr t"
+  "trace_invokes_code_caps ISA (fetch_trace t) = {}"
+  "trace_invokes_data_caps ISA (instr_trace instr t) = instr_invokes_data_caps ISA instr t"
+  "trace_invokes_data_caps ISA (fetch_trace t) = {}"
   "trace_invokes_indirect_caps ISA (instr_trace instr t) = instr_invokes_indirect_caps ISA instr t"
   "trace_invokes_indirect_caps ISA (fetch_trace t) = {}"
-  by (auto simp: trace_invokes_caps_def trace_invokes_indirect_caps_def)
+  by (auto simp: trace_invokes_code_caps_def trace_invokes_data_caps_def trace_invokes_indirect_caps_def)
 
 declare event_at_idx_def[simp]
 
@@ -361,7 +363,7 @@ lemma load_mem_axiomE:
   obtains c' vaddr
   where "cap_derivable CC (initial_caps \<union> available_caps CC ISA i t) c'"
     and "is_tagged_method CC c'"
-    and "is_sealed_method CC c' \<longrightarrow> is_indirect_sentry_method CC c' \<and> unseal_method CC c' \<in> trace_invokes_indirect_caps ISA t"
+    and "is_sealed_method CC c' \<longrightarrow> is_indirect_sentry CC c' \<and> unseal_method CC c' \<in> trace_invokes_indirect_caps ISA t"
     and "translate_address ISA vaddr (if is_fetch_trace t then Fetch else Load) (take i (trace t)) = Some paddr"
     and "set (address_range vaddr sz) \<subseteq> get_mem_region CC c'"
     and "if is_fetch_trace t then permits_execute_method CC c' else permits_load_method CC c'"
@@ -379,24 +381,32 @@ lemma store_cap_reg_axiomE:
   obtains (Derivable) "cap_derivable CC (initial_caps \<union> available_caps CC ISA i t) c"
   | (Ex) "trace_raises_ex ISA t" and "r \<in> PCC ISA"
     and "c \<in>  exception_targets_at_idx ISA i t"
-  | (Sentry) cs where "c \<in> trace_invokes_caps ISA t"
+  | (CCall) cc cd where "invokable CC cc cd"
+    and "cap_derivable CC (initial_caps \<union> available_caps CC ISA i t) cc"
+    and "cap_derivable CC (initial_caps \<union> available_caps CC ISA i t) cd"
+    and "(leq_cap CC c (unseal_method CC cc) \<and> c \<in> trace_invokes_code_caps ISA t \<and> r \<in> PCC ISA) \<or>
+         (leq_cap CC c (unseal_method CC cd) \<and> c \<in> trace_invokes_data_caps ISA t \<and> r \<in> IDC ISA)"
+  | (Sentry) cs where "c \<in> trace_invokes_code_caps ISA t"
     and "cap_derivable CC (initial_caps \<union> available_caps CC ISA i t) cs"
     and "is_sentry_method CC cs" and "is_sealed_method CC cs"
     and "leq_cap CC c (unseal_method CC cs)" and "r \<in> PCC ISA"
-  | (IndirectSentry) cs where "c \<in> trace_invokes_indirect_caps ISA t"
-    and "cap_derivable CC (initial_caps \<union> available_reg_caps CC ISA i t) cs"
-    and "is_indirect_sentry_method CC cs" and "is_sealed_method CC cs"
-    and "leq_cap CC c (unseal_method CC cs)" and "r \<in> IDC ISA"
-  | (CCall) cc cd where "c \<in> trace_invokes_caps ISA t"
-    and "cap_derivable CC (initial_caps \<union> available_caps CC ISA i t) cc"
-    and "cap_derivable CC (initial_caps \<union> available_caps CC ISA i t) cd"
-    and "invokable CC cc cd"
-    and "(leq_cap CC c (unseal_method CC cc) \<and> r \<in> PCC ISA) \<or> (leq_cap CC c (unseal_method CC cd) \<and> r \<in> IDC ISA)"
-  | (Indirect) c' where "c \<in> trace_invokes_caps ISA t"
-    and "cap_derivable CC (initial_caps \<union> available_mem_caps CC ISA i t) c'"
-    and "trace_invokes_indirect_caps ISA t\<noteq> {}" and "trace_uses_mem_caps ISA t"
-    and "(leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c' \<and> r \<in> PCC ISA) \<or>
-         (leq_cap CC c c' \<and> r \<in> PCC ISA \<union> IDC ISA)"
+  | (Indirect_Sentry_Single_Code) cs c' where "r \<in> PCC ISA"
+    and "is_indirectly_invoked_cap_at_idx CC ISA cs Points_to_PCC None c' t i"
+    and "leq_cap CC c c' \<or> (leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c')"
+    and "c \<in> trace_invokes_code_caps ISA t"
+  | (Indirect_Sentry_Single_Data) "r \<in> IDC ISA"
+    and "is_invoked_indirect_sentry_at_idx CC ISA c Points_to_PCC t i"
+    and "c \<in> trace_invokes_data_caps ISA t"
+  | (Indirect_Sentry_Pair_Code) c' cs where "r \<in> PCC ISA"
+    and "is_indirectly_invoked_cap_at_idx CC ISA cs Points_to_Pair (Some (indirect_pair_sentry_code_offset ISA)) c' t i"
+    and "trace_uses_mem_caps ISA t"
+    and "leq_cap CC c c' \<or> (leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c')"
+    and "c \<in> trace_invokes_code_caps ISA t"
+  | (Indirect_Sentry_Pair_Data) c' cs where "r \<in> IDC ISA"
+    and "is_indirectly_invoked_cap_at_idx CC ISA cs Points_to_Pair (Some (indirect_pair_sentry_data_offset ISA)) c' t i"
+    and "trace_uses_mem_caps ISA t"
+    and "leq_cap CC c c'"
+    and "c \<in> trace_invokes_data_caps ISA t"
   using assms
   unfolding store_cap_reg_axiom_def
   by (elim allE[where x = i] allE[where x = c] allE[where x = r]) blast
