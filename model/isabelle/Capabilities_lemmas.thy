@@ -70,6 +70,15 @@ locale Capabilities =
     and is_tagged_cap_of_mem_bytes[simp]: "\<And>c bytes tag. cap_of_mem_bytes_method CC bytes tag = Some c \<Longrightarrow> is_tagged_method CC c \<longleftrightarrow> tag = B1"
 begin
 
+abbreviation "is_tagged c \<equiv> is_tagged_method CC c"
+abbreviation "is_sealed c \<equiv> is_sealed_method CC c"
+abbreviation "get_cursor c \<equiv> get_cursor_method CC c"
+abbreviation "seal c t \<equiv> seal_method CC c t"
+abbreviation "unseal c \<equiv> unseal_method CC c"
+abbreviation "clear_global c \<equiv> clear_global_method CC c"
+abbreviation "is_sentry c \<equiv> is_sentry_method CC c"
+abbreviation "get_indirect_sentry_type c \<equiv> get_indirect_sentry_type_method CC c"
+
 inductive_set derivable :: "'cap set \<Rightarrow> 'cap set" for C :: "'cap set" where
   Copy: "c \<in> C \<Longrightarrow> c \<in> derivable C"
 | Restrict: "c' \<in> derivable C \<Longrightarrow> leq_cap CC c c' \<Longrightarrow> c \<in> derivable C"

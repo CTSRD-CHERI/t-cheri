@@ -503,44 +503,12 @@ lemma writes_reg_cap_nth_provenance[consumes 5]:
   | (Exception) v' r' j where "c \<in> exception_targets_at_idx ISA i t" (* "leq_cap CC c c'"*)
     (*and "t ! j = E_read_reg r' v'" and "j < i"*) (*and "c' \<in> caps_of_regval ISA v'"*)
     (*and "r' \<in> KCC ISA"*) and "r \<in> PCC ISA" and "trace_raises_ex ISA t"
-  | (CCall) cc cd where "invokable CC cc cd"
-    and "cc \<in> derivable (initial_caps \<union> available_caps CC ISA i t)"
-    and "cd \<in> derivable (initial_caps \<union> available_caps CC ISA i t)"
-    and "(r \<in> PCC ISA \<and> c \<in> trace_invokes_code_caps ISA t \<and> leq_cap CC c (unseal_method CC cc)) \<or>
-         (r \<in> IDC ISA \<and> c \<in> trace_invokes_data_caps ISA t \<and> leq_cap CC c (unseal_method CC cd))"
-  | (Sentry) cs where "c \<in> trace_invokes_code_caps ISA t" and "cs \<in> derivable (initial_caps \<union> available_caps CC ISA i t)"
-    and "is_sentry_method CC cs" and "is_sealed_method CC cs"
-    and "leq_cap CC c (unseal_method CC cs)" and "r \<in> PCC ISA"
-  (*| (IndirectSentry) cs where "c \<in> trace_invokes_indirect_caps ISA t"
-    and "c \<in> trace_invokes_data_caps ISA t"
-    and "cs \<in> derivable (initial_caps \<union> available_reg_caps CC ISA i t)"
-    and "is_indirect_sentry CC cs" and "is_sealed_method CC cs"
-    and "leq_cap CC c (unseal_method CC cs)" and "r \<in> IDC ISA"
-  | (Indirect) c' cs where "c' \<in> derivable (initial_caps \<union> available_mem_caps CC ISA i t)"
-    and "cs \<in> trace_invokes_indirect_caps ISA t" and "trace_uses_mem_caps ISA t"
-    and "(leq_cap CC c c' \<and> r \<in> PCC ISA \<union> IDC ISA) \<or>
-         (leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c' \<and> r \<in> PCC ISA)"*)
-  | (Indirect_Sentry_Single_Code) cs c' where "r \<in> PCC ISA"
-    and "is_indirectly_invoked_cap_at_idx CC ISA cs Points_to_PCC None c' t i"
-    and "leq_cap CC c c' \<or> (leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c')"
-    and "c \<in> trace_invokes_code_caps ISA t"
-  | (Indirect_Sentry_Single_Data) "r \<in> IDC ISA"
-    and "is_invoked_indirect_sentry_at_idx CC ISA c Points_to_PCC t i"
-    and "c \<in> trace_invokes_data_caps ISA t"
-  | (Indirect_Sentry_Pair_Code) c' cs where "r \<in> PCC ISA"
-    and "is_indirectly_invoked_cap_at_idx CC ISA cs Points_to_Pair (Some (indirect_pair_sentry_code_offset ISA)) c' t i"
-    and "trace_uses_mem_caps ISA t"
-    and "leq_cap CC c c' \<or> (leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c')"
-    and "c \<in> trace_invokes_code_caps ISA t"
-  | (Indirect_Sentry_Pair_Data) c' cs where "r \<in> IDC ISA"
-    and "is_indirectly_invoked_cap_at_idx CC ISA cs Points_to_Pair (Some (indirect_pair_sentry_data_offset ISA)) c' t i"
-    and "trace_uses_mem_caps ISA t"
-    and "leq_cap CC c c'"
-    and "c \<in> trace_invokes_data_caps ISA t"
+  | (Invoked_Code_Cap) "is_invoked_code_cap_at_idx CC ISA c t i" and "r \<in> PCC ISA"
+  | (Invoked_Data_Cap) "is_invoked_data_cap_at_idx CC ISA c t i" and "r \<in> IDC ISA"
   using assms
   unfolding cheri_axioms_def
-  by (elim conjE store_cap_reg_axiomE[where i = i and r = r and c = c];
-      fastforce simp: writes_reg_caps_at_idx_def cap_derivable_iff_derivable eq_commute[where b = "t ! j" for t j])
+  by (elim conjE store_cap_reg_axiomE[where i = i and r = r and c = c])
+     (auto simp: cap_derivable_iff_derivable)
 
 lemma get_mem_cap_run_trace_cases:
   assumes c: "get_mem_cap addr (tag_granule ISA) s' = Some c"
@@ -913,6 +881,20 @@ abbreviation "invoked_caps t \<equiv> invoked_code_caps t \<union> invoked_data_
 abbreviation "invoked_caps t \<equiv> trace_invokes_code_caps ISA t \<union> trace_invokes_data_caps ISA t \<union> trace_invokes_indirect_caps ISA t"
 abbreviation "invoked_instr_caps instr t \<equiv> instr_invokes_code_caps ISA instr t \<union> instr_invokes_data_caps ISA instr t \<union> instr_invokes_indirect_caps ISA instr t"
 
+lemmas invoked_code_cap_at_idx_defs =
+  is_invoked_code_cap_at_idx_def is_invoked_pair_code_cap_at_idx_def is_invoked_direct_sentry_at_idx_def
+  is_indirectly_invoked_single_code_cap_at_idx_def is_indirectly_invoked_pair_code_cap_at_idx_def
+
+lemmas invoked_data_cap_at_idx_defs =
+  is_invoked_data_cap_at_idx_def is_invoked_pair_data_cap_at_idx_def
+  is_indirectly_invoked_single_data_cap_at_idx_def is_indirectly_invoked_pair_data_cap_at_idx_def
+
+lemma is_invoked_cap_at_idx_in_invoked_caps:
+  "is_invoked_code_cap_at_idx CC ISA c t i \<Longrightarrow> c \<in> trace_invokes_code_caps ISA t"
+  "is_invoked_data_cap_at_idx CC ISA c t i \<Longrightarrow> c \<in> trace_invokes_data_caps ISA t"
+  unfolding invoked_code_cap_at_idx_defs invoked_data_cap_at_idx_defs
+  by auto
+
 lemma get_reg_cap_reachable:
   assumes r: "c \<in> get_reg_caps r s'"
     (*and t: "hasTrace t (instr_sem ISA instr)"*) and s': "s_run_trace (trace t) s = Some s'"
@@ -967,7 +949,7 @@ proof -
       then have "c \<in> derivable (initial_caps \<union> available_caps CC ISA j t)"
         using axioms tag \<open>j < length (trace t)\<close> c_not_inv C
         unfolding cheri_axioms_def
-        by (auto elim!: store_cap_reg_axiomE simp: cap_derivable_iff_derivable)
+        by (auto elim!: store_cap_reg_axiomE dest: is_invoked_cap_at_idx_in_invoked_caps simp: cap_derivable_iff_derivable)
       moreover have "derivable (initial_caps \<union> available_caps CC ISA j t) \<subseteq> reachable_caps_plus initial_caps s"
         using axioms s' \<open>j < length (trace t)\<close>
         by (intro derivable_available_caps_subseteq_reachable_caps[where m = "length (trace t)"]) auto
