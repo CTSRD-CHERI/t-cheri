@@ -1231,40 +1231,40 @@ definition is_invoked_pair_code_cap where
      (\<exists>cc cd. cc \<in> accessed_caps (use_mem_caps \<and> \<not>invokes_indirect_caps) s \<and>
               cd \<in> accessed_caps (use_mem_caps \<and> \<not>invokes_indirect_caps) s \<and>
               invokable CC cc cd \<and>
-              leq_cap CC c (unseal cc) \<and> c \<in> invoked_code_caps)"
+              leq_cap CC c (unseal_method CC cc) \<and> c \<in> invoked_code_caps)"
 
 definition is_invoked_pair_data_cap where
   "is_invoked_pair_data_cap c s \<equiv>
      (\<exists>cc cd. cc \<in> accessed_caps (use_mem_caps \<and> \<not>invokes_indirect_caps) s \<and>
               cd \<in> accessed_caps (use_mem_caps \<and> \<not>invokes_indirect_caps) s \<and>
               invokable CC cc cd \<and>
-              leq_cap CC c (unseal cd) \<and> c \<in> invoked_data_caps)"
+              leq_cap CC c (unseal_method CC cd) \<and> c \<in> invoked_data_caps)"
 
 definition is_invoked_direct_sentry where
   "is_invoked_direct_sentry c s \<equiv>
      (\<exists>cs. cs \<in> accessed_caps (use_mem_caps \<and> \<not>invokes_indirect_caps) s \<and>
-           is_tagged cs \<and> is_sealed cs \<and> is_sentry cs \<and>
-           leq_cap CC c (unseal cs) \<and> c \<in> invoked_code_caps)"
+           is_tagged_method CC cs \<and> is_sealed_method CC cs \<and> is_sentry_method CC cs \<and>
+           leq_cap CC c (unseal_method CC cs) \<and> c \<in> invoked_code_caps)"
 
 definition is_invoked_indirect_sentry where
   "is_invoked_indirect_sentry c type s \<equiv>
      (\<exists>c' \<in> accessed_caps (use_mem_caps \<and> \<not>invokes_indirect_caps) s.
-        is_tagged c' \<and> is_sealed c' \<and>
-        get_indirect_sentry_type c' = Some type \<and>
-        leq_cap CC c (unseal c') \<and> c \<in> invoked_indirect_caps)"
+        is_tagged_method CC c' \<and> is_sealed_method CC c' \<and>
+        get_indirect_sentry_type_method CC c' = Some type \<and>
+        leq_cap CC c (unseal_method CC c') \<and> c \<in> invoked_indirect_caps)"
 
 definition is_indirectly_invoked_cap where
   "is_indirectly_invoked_cap sentry sentry_type required_offset c s \<equiv>
      (\<exists>paddr. is_invoked_indirect_sentry sentry sentry_type s \<and>
          (\<forall>offset. required_offset = Some offset \<longrightarrow>
-             translate_address ISA (get_cursor sentry + offset) Load [] = Some paddr) \<and>
+             translate_address ISA (get_cursor_method CC sentry + offset) Load [] = Some paddr) \<and>
          use_mem_caps \<and>
          (paddr, c) \<in> mem_cap_loads s)"
 
 definition is_indirectly_invoked_single_code_cap where
   "is_indirectly_invoked_single_code_cap c s \<equiv>
      (\<exists>cs c'. is_indirectly_invoked_cap cs Points_to_PCC None c' s \<and>
-        (leq_cap CC c c' \<or> (leq_cap CC c (unseal c') \<and> is_sealed c' \<and> is_sentry c')) \<and>
+        (leq_cap CC c c' \<or> (leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c')) \<and>
         c \<in> invoked_code_caps)"
 
 definition is_indirectly_invoked_single_data_cap where
@@ -1274,7 +1274,7 @@ definition is_indirectly_invoked_single_data_cap where
 definition is_indirectly_invoked_pair_code_cap where
   "is_indirectly_invoked_pair_code_cap c s \<equiv>
      (\<exists>cs c'. is_indirectly_invoked_cap cs Points_to_Pair (Some (indirect_pair_sentry_code_offset ISA)) c' s \<and>
-        (leq_cap CC c c' \<or> (leq_cap CC c (unseal c') \<and> is_sealed c' \<and> is_sentry c')) \<and>
+        (leq_cap CC c c' \<or> (leq_cap CC c (unseal_method CC c') \<and> is_sealed_method CC c' \<and> is_sentry_method CC c')) \<and>
         c \<in> invoked_code_caps)"
 
 definition is_indirectly_invoked_pair_data_cap where
