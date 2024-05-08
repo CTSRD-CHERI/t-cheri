@@ -392,19 +392,23 @@ let traces_enabled_lemma mem for_fetch isa id =
        ["int LENGTH(" ^ string_of_kid kid ^ ") = " ^ KBindings.find kid arg_kids]
     | _ -> []
   in
-  let invoked_reg_assms = match Bindings.find_opt id isa.invoked_regs with
-    | Some regs when not mem -> List.map (fun r -> r ^ " \\<in> invoked_regs") regs
+  let invoked_code_reg_assms = match Bindings.find_opt id isa.invoked_code_reg with
+    | Some reg when not mem -> ["invoked_code_reg = " ^ reg]
     | _ -> []
   in
-  let invoked_indirect_assms = match Bindings.find_opt id isa.invoked_indirect_regs with
-    | Some regs -> List.map (fun r -> r ^ " \\<in> invoked_indirect_regs") regs
+  let invoked_data_reg_assms = match Bindings.find_opt id isa.invoked_data_reg with
+    | Some reg when not mem -> ["invoked_data_reg = " ^ reg]
+    | _ -> []
+  in
+  let invoked_indirect_assms = match Bindings.find_opt id isa.invoked_indirect_reg with
+    | Some reg -> ["invoked_indirect_reg = " ^ reg]
     | None -> if IdSet.disjoint f.trans_calls isa.cap_load_funs then [] else ["\\<not>invokes_indirect_caps"]
   in
-  let load_auth_assms = match Bindings.find_opt id isa.load_auths with
-    | Some regs -> List.map (fun r -> r ^ " \\<in> load_auths") regs
+  let load_auth_assms = match Bindings.find_opt id isa.load_auth with
+    | Some reg -> ["load_auth = Some (" ^ reg ^ ")"]
     | None -> []
   in
-  let assms = cap_assm @ asr_assm @ arg_assms @ eq_assms @ ret_typ_assm @ invoked_reg_assms @ invoked_indirect_assms @ load_auth_assms in
+  let assms = cap_assm @ asr_assm @ arg_assms @ eq_assms @ ret_typ_assm @ invoked_code_reg_assms @ invoked_data_reg_assms @ invoked_indirect_assms @ load_auth_assms in
   let using = if assms = [] then "" else " assms: assms" in
   let override =
     let base = "traces_enabled" ^ (if mem then "_mem" else "") in
