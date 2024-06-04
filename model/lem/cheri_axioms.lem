@@ -139,9 +139,9 @@ let rec accessed_mem_caps_at_idx ISA i t = match i with
      let cap_loads_of e =
        (* Collect capabilities read from memory *)
        match reads_mem_cap e with
-         | Just (addr, _, c) ->
+         | Just (addr, sz, c) ->
             (* ... but ignore memory loads that happen as part of address translation *)
-            if ISA.is_translation_event e then Set.empty else Set.singleton (addr, c)
+            if ISA.is_translation_event e || sz <> ISA.tag_granule then Set.empty else Set.singleton (addr, c)
          | Nothing -> Set.empty
        end
      in

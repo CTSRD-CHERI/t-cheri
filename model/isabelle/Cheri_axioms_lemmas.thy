@@ -207,7 +207,7 @@ fun mem_cap_loads_of_ev :: "'regval event \<Rightarrow> (nat * 'cap) set" where
   "mem_cap_loads_of_ev (E_read_memt rk addr sz val) =
      (case cap_of_mem_bytes_method CC (fst val) (snd val) of
         Some c \<Rightarrow>
-         if is_tagged_method CC c \<and> \<not>is_translation_event ISA (E_read_memt rk addr sz val) then {(addr, c)} else {}
+         if is_tagged_method CC c \<and> \<not>is_translation_event ISA (E_read_memt rk addr sz val) \<and> sz = tag_granule ISA then {(addr, c)} else {}
       | None \<Rightarrow> {})"
 | "mem_cap_loads_of_ev _ = {}"
 
@@ -215,7 +215,7 @@ fun accessed_mem_caps_of_ev :: "'regval event \<Rightarrow> 'cap set" where
   "accessed_mem_caps_of_ev (E_read_memt rk a sz val) =
      (case cap_of_mem_bytes_method CC (fst val) (snd val) of
         Some c \<Rightarrow>
-         if is_tagged_method CC c \<and> \<not>is_translation_event ISA (E_read_memt rk a sz val) then {c} else {}
+         if is_tagged_method CC c \<and> \<not>is_translation_event ISA (E_read_memt rk a sz val) \<and> sz = tag_granule ISA then {c} else {}
       | None \<Rightarrow> {})"
 | "accessed_mem_caps_of_ev _ = {}"
 
