@@ -37,6 +37,7 @@ type isa 'cap 'regval 'instr 'e =
      indirect_pair_sentry_code_offset : nat;
      indirect_pair_sentry_data_offset : nat;
      trace_raises_ex : isa_trace 'regval 'instr -> bool;
+     trace_has_assertion_failure : isa_trace 'regval 'instr -> bool;
      exception_targets : set 'regval -> set 'cap;
      read_privileged_regs : set register_name;
      write_privileged_regs : set register_name;
@@ -95,6 +96,13 @@ let ev_writes_pcc_caps ISA = function
 end
 
 let trace_writes_pcc_caps ISA t = List.foldl (union) {} (List.map (ev_writes_pcc_caps ISA) t.trace)
+
+let ev_writes_idc_caps ISA = function
+  | E_write_reg r v -> if r IN ISA.IDC then ISA.caps_of_regval v else {}
+  | _ -> {}
+end
+
+let trace_writes_idc_caps ISA t = List.foldl (union) {} (List.map (ev_writes_idc_caps ISA) t.trace)
 
 let ev_reads_pcc_caps ISA = function
   | E_read_reg r v -> if r IN ISA.PCC then ISA.caps_of_regval v else {}
@@ -311,14 +319,31 @@ let store_cap_reg_axiom ISA initial_caps n t =
      (is_invoked_data_cap_at_idx ISA c t i && r IN ISA.IDC)))
 
 (* If a not-normally-derivable capability is written to IDC, then an invoked code capability must be written to PCC *)
-val idc_write_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, SetType 'regval, Eq 'cap, Eq 'regval =>
-  isa 'cap 'regval 'instr 'e -> set 'cap -> isa_trace 'regval 'instr -> bool
-let idc_write_axiom ISA initial_caps t =
+
+val idc_write_axiom' : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, SetType 'regval, Eq 'cap, Eq 'regval =>
+  isa 'cap 'regval 'instr 'e -> set 'cap -> nat -> isa_trace 'regval 'instr -> bool
+let idc_write_axiom' ISA initial_caps n t =
   (forall i c idc.
-     (writes_to_reg_at_idx i t = Just idc && idc IN ISA.IDC && c IN (writes_reg_caps_at_idx ISA i t))
+     (i < n && writes_to_reg_at_idx i t = Just idc && idc IN ISA.IDC && c IN (writes_reg_caps_at_idx ISA i t))
      -->
      (cap_derivable (initial_caps union available_caps ISA i t) c ||
-      (exists cc. cc IN trace_invokes_code_caps ISA t && trace_writes_pcc_caps ISA t = {cc})))
+      (exists cc. trace_writes_pcc_caps ISA t = {cc} && (is_tagged cc --> cc IN trace_invokes_code_caps ISA t))))
+
+(* Another property with a similar goal to the previous one, but stronger in a
+sense:  invocation of code and data capabilities always happens together.
+If invocation fails, e.g. because the object types of a pair of sealed
+capabilities don't match, instructions are allowed to either raise an
+exception or write untagged or still sealed capabilities to PCC/IDC. *)
+
+let idc_write_axiom ISA t =
+  (trace_invokes_data_caps ISA t = {} ||
+   (exists cc cd.
+      cc IN trace_invokes_code_caps ISA t && trace_writes_pcc_caps ISA t = {cc} &&
+      cd IN trace_invokes_data_caps ISA t && trace_writes_idc_caps ISA t = {cd}) ||
+   ((forall cc. cc IN trace_writes_pcc_caps ISA t --> not (is_tagged cc) || is_sealed cc) &&
+    (forall cd. cd IN trace_writes_idc_caps ISA t --> not (is_tagged cd) || is_sealed cd)) ||
+   (ISA.trace_raises_ex t && trace_writes_idc_caps ISA t = {}) ||
+   ISA.trace_has_assertion_failure t)
 
 val fetch_pcc_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, SetType 'regval, Eq 'cap, Eq 'regval =>
   isa 'cap 'regval 'instr 'e -> isa_trace 'regval 'instr -> bool
@@ -392,5 +417,5 @@ let cheri_axioms ISA initial_caps n t =
   load_mem_axiom ISA initial_caps n t &&
   store_tag_axiom ISA n t &&
   store_mem_axiom ISA initial_caps n t &&
-  idc_write_axiom ISA initial_caps t &&
+  idc_write_axiom ISA t &&
   fetch_pcc_axiom ISA t
