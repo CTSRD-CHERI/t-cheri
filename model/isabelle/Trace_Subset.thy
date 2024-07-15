@@ -2,6 +2,7 @@ theory Trace_Subset
 
 imports
   "Sail.Sail2_state_lemmas"
+  "Sail.Sail2_undefined"
   "HOL-Eisbach.Eisbach_Tools"
   "Bound_UntilM"
 
@@ -125,6 +126,25 @@ lemma read_mem_monad_trace_subset[monad_trace_subset]:
     (read_mem dict_Sail2_values_Bitvector_a dict_Sail2_values_Bitvector_b rk addr_sz addr sz)"
   apply (simp add: read_mem_def read_mem_bytes_def maybe_fail_def[symmetric])
   apply (monad_trace_subsetI rules: Read_mem_monad_trace_subset)
+  done
+
+lemma Read_memt_monad_trace_subset:
+  "(\<forall>x. monad_trace_subset {} (f x)) \<Longrightarrow>
+    monad_trace_subset (range (\<lambda>(rk, addr, val, sz). E_read_memt rk addr sz val))
+        (Read_memt rk x sz f)"
+  apply (clarsimp simp: monad_trace_subset_def)
+  apply (erule Traces.cases; clarsimp)
+  apply (erule T.cases; clarsimp)
+  apply fastforce
+  done
+
+lemma read_memt_monad_trace_subset[monad_trace_subset]:
+  "monad_trace_subset (range (\<lambda>(rk, addr, val, sz). E_read_memt rk addr sz val))
+    (read_memt dict_Sail2_values_Bitvector_a dict_Sail2_values_Bitvector_b rk addr sz)"
+  unfolding read_memt_def read_memt_bytes_def bind_assoc bind.simps
+  apply (rule monad_trace_subset_weaken[where S = "{} \<union> (range (\<lambda>(rk, addr, val, sz). E_read_memt rk addr sz val))"])
+   apply (intro monad_trace_subset_bind allI impI monad_trace_subset Read_memt_monad_trace_subset)
+   apply (auto split: option.splits intro: monad_trace_subset)
   done
 
 lemma Write_mem_monad_trace_subset:
@@ -332,20 +352,30 @@ fun install_recs thys = fold (install_rec thys)
 end
 \<close>
 
+lemma choose_convert_default_monad_trace_subset[monad_trace_subset]:
+  "monad_trace_subset (range (E_choose s)) (choose_convert_default of_rv x s)"
+  unfolding choose_convert_default_def
+  by (rule monad_trace_subset_Choose_return)
+
+lemma choose_convert_monad_trace_subset[monad_trace_subset]:
+  "monad_trace_subset (range (E_choose s)) (choose_convert of_rv s)"
+  unfolding choose_convert_def
+  using monad_trace_subset_Choose[where S = "{}" and cont = "\<lambda>rv. maybe_fail s (of_rv rv)" and nm = s]
+  by (auto simp: monad_trace_subset_maybe_fail)
+
 lemma choose_bool_monad_trace_subset[monad_trace_subset]:
-  "monad_trace_subset (range (E_choose s)) (choose_bool s)"
-  apply (simp add: choose_bool_def)
-  apply (rule monad_trace_subset_Choose_return)
-  done
+  "monad_trace_subset (range (E_choose s)) (choose_bool RV s)"
+  unfolding choose_bool_def
+  by (rule choose_convert_default_monad_trace_subset)
 
 lemma bool_of_bitU_nondet_monad_trace_subset[monad_trace_subset]:
-  "monad_trace_subset (range (E_choose ''bool_of_bitU'')) (bool_of_bitU_nondet bitU)"
+  "monad_trace_subset (range (E_choose ''bool_of_bitU'')) (bool_of_bitU_nondet RV bitU)"
   by (cases bitU, simp_all add: bool_of_bitU_nondet_def, monad_trace_subsetI)
 
 setup \<open>Monad_Trace_Subset_Exploration.install_recs
   ["Sail2_prompt_monad", "Sail2_prompt"]
   @{thms early_return_def exit0_def assert_exp_def
-    undefined_bool_def internal_pick_def
+    undefined_bool_def undefined_bitvector_def undefined_int_def internal_pick_def
     of_bits_nondet_def}
 \<close>
 

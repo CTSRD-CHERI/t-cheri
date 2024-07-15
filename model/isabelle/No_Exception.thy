@@ -2,6 +2,7 @@ theory No_Exception
 
 imports
   "Sail.Sail2_state_lemmas"
+  "Sail.Sail2_undefined"
   "HOL-Eisbach.Eisbach_Tools"
   "Bound_UntilM"
 
@@ -88,8 +89,8 @@ definition
   "sum_right_restrict S = ((Inr ` S) \<union> range Inl)"
 
 lemma sum_right_restrict_simps[simp]:
-  "Inl x \<in> sum_right_restrict S"
-  "(Inr x \<in> sum_right_restrict S) = (x \<in> S)"
+  "\<And>S x. Inl x \<in> sum_right_restrict S"
+  "\<And>S x. (Inr x \<in> sum_right_restrict S) = (x \<in> S)"
   by (auto simp add: sum_right_restrict_def)
 
 lemma catch_early_return_no_exception:
@@ -195,6 +196,22 @@ lemma read_mem_monad_no_exception[monad_no_exception]:
   apply (monad_no_exceptionI rules: Read_mem_monad_no_exception)
   done
 
+lemma Read_memt_monad_no_exception:
+  "(\<forall>x. monad_no_exception {} (f x)) \<Longrightarrow>
+    monad_no_exception {} (Read_memt rk x sz f)"
+  apply (clarsimp simp: monad_no_exception_def)
+  apply (erule Traces.cases; clarsimp)
+  apply (erule T.cases; clarsimp)
+  apply fastforce
+  done
+
+lemma read_memt_monad_no_exception[monad_no_exception]:
+  "monad_no_exception {}
+    (read_memt dict_Sail2_values_Bitvector_a dict_Sail2_values_Bitvector_b rk addr sz)"
+  apply (simp add: read_memt_def read_memt_bytes_def maybe_fail_def[symmetric])
+  apply (monad_no_exceptionI rules: Read_memt_monad_no_exception)
+  done
+
 lemma Write_mem_monad_no_exception:
   "(\<forall>x. monad_no_exception {} (f x)) \<Longrightarrow>
     monad_no_exception {} (Write_mem wk x sz v f)"
@@ -292,6 +309,15 @@ fun dest_eq2 t = Logic.dest_equals t
 fun is_monadT (Type (@{type_name monad}, _)) = true
   | is_monadT _ = false
 
+fun is_sumT (Type (@{type_name sum}, _)) = true
+  | is_sumT _ = false
+
+fun is_early_return_monadT (Type (@{type_name monad}, [_, _, t])) = is_sumT t
+  | is_early_return_monadT _ = false
+
+fun is_sum_setT (Type (@{type_name set}, [t])) = is_sumT t
+  | is_sum_setT _ = false
+
 val is_meta_monadT = is_monadT o snd o strip_type
 
 fun is_monad_const t = let
@@ -319,12 +345,31 @@ fun fetch_by_term ctxt extras term = let
 fun dest (Const (@{const_name monad_no_exception}, _) $ S $ m) = (S, m)
   | dest t = raise TERM ("monad_no_exception dest", [t])
 
+fun strip_un (Const (@{const_name "Lattices.sup"}, _) $ x $ y) = maps strip_un [x, y]
+  | strip_un t = [t]
+
+fun mk_un [] = raise TERM ("monad_no_exception mk_un: empty", [])
+  | mk_un (x :: xs) = let
+    val ty = fastype_of x
+    val c = Const (@{const_name "Lattices.sup"}, ty --> ty --> ty)
+  in foldr1 (fn (x, y) => c $ x $ y) (x :: xs) end
+
 fun get_prop ctxt tm sub_thm_concls = let
-    val _ = not (null sub_thm_concls) orelse raise TERM ("get_prop: no sub thms", [tm])
-    val S_ty = dest (hd sub_thm_concls) |> fst |> fastype_of
-    val S = Const (@{const_name bot}, S_ty)
+    val ss = map (dest #> fst) sub_thm_concls
+        |> maps strip_un
+        (* FIXME: There might be subsets with a different type due to the early-return monad.
+           Most of these shouldn't matter (actual early returns using Inl, and sum-typed
+           empty set expressions coming from `read_reg` et al), but actual exceptions thrown
+           inside a `catch_early_return` would need handling.  They don't seem to be common,
+           though, so ignore for now. *)
+        |> filter (fn t => not (is_sum_setT (fastype_of t)))
+        |> sort_distinct Term_Ord.fast_term_ord
+    val ss_frees = fold Term.add_vars ss []
+    val _ = null ss_frees orelse raise TERM ("monad_no_exception get_prop", ss)
+    val _ = not (null ss) orelse raise TERM ("monad_no_exception get_prop: subthms", sub_thm_concls)
+    val st = mk_un ss
     val inst = Drule.infer_instantiate ctxt
-        [(("m", 0), Thm.cterm_of ctxt tm), (("S", 0), Thm.cterm_of ctxt S)] triv
+        [(("m", 0), Thm.cterm_of ctxt tm), (("S", 0), Thm.cterm_of ctxt st)] triv
   in Thm.concl_of inst end
 
 fun prove ctxt extras defn = let
@@ -344,8 +389,8 @@ fun prove ctxt extras defn = let
         THEN_ALL_NEW simp_tac subset_ss
         THEN_ALL_NEW simp_tac ctxt
     val nms = Term.add_frees prop [] |> map fst
-    fun tr ctxt = Syntax.pretty_term ctxt term
-      |> (fn p => Pretty.block [Pretty.str "proving monad_no_exception for: ", p])
+    fun tr ctxt = Syntax.pretty_term ctxt prop
+      |> (fn p => Pretty.block [Pretty.str "proving: ", p])
       |> Pretty.writeln
   in Goal.prove ctxt nms [] prop (fn r => (tr (#context r); tac 1))
   end
@@ -379,20 +424,26 @@ fun install_recs thys = fold (install_rec thys)
 end
 \<close>
 
+lemma choose_convert_default_monad_no_exception[monad_no_exception]:
+  "monad_no_exception {} (choose_convert_default of_rv x desc)"
+  by (auto simp: choose_convert_default_def intro: monad_no_exception_Choose_return)
+
+lemma choose_convert_monad_no_exception[monad_no_exception]:
+  "monad_no_exception {} (choose_convert of_rv desc)"
+  by (auto simp: choose_convert_def intro: monad_no_exception_Choose monad_no_exception)
+
 lemma choose_bool_monad_no_exception[monad_no_exception]:
-  "monad_no_exception {} (choose_bool s)"
-  apply (simp add: choose_bool_def)
-  apply (rule monad_no_exception_Choose_return)
-  done
+  "monad_no_exception {} (choose_bool RV s)"
+  by (auto simp: choose_bool_def intro: choose_convert_default_monad_no_exception)
 
 lemma bool_of_bitU_nondet_monad_no_exception[monad_no_exception]:
-  "monad_no_exception {} (bool_of_bitU_nondet bitU)"
+  "monad_no_exception {} (bool_of_bitU_nondet RV bitU)"
   by (cases bitU, simp_all add: bool_of_bitU_nondet_def, monad_no_exceptionI)
 
 setup \<open>Monad_No_Exception_Exploration.install_recs
   ["Sail2_prompt_monad", "Sail2_prompt"]
   @{thms exit0_def assert_exp_def
-    undefined_bool_def internal_pick_def
+    undefined_bool_def internal_pick_def undefined_bitvector_def undefined_int_def internal_pick_def
     of_bits_nondet_def}\<close>
 
 end
