@@ -338,11 +338,9 @@ exception or write untagged or still sealed capabilities to PCC/IDC. *)
 let idc_write_axiom ISA t =
   (trace_invokes_data_caps ISA t = {} ||
    (exists cc cd.
-      cc IN trace_invokes_code_caps ISA t && trace_writes_pcc_caps ISA t = {cc} &&
-      cd IN trace_invokes_data_caps ISA t && trace_writes_idc_caps ISA t = {cd}) ||
-   ((forall cc. cc IN trace_writes_pcc_caps ISA t --> not (is_tagged cc) || is_sealed cc) &&
-    (forall cd. cd IN trace_writes_idc_caps ISA t --> not (is_tagged cd) || is_sealed cd)) ||
-   (ISA.trace_raises_ex t && trace_writes_idc_caps ISA t = {}) ||
+      trace_writes_pcc_caps ISA t = {cc} && (is_tagged cc --> cc IN trace_invokes_code_caps ISA t) &&
+      trace_writes_idc_caps ISA t = {cd} && (is_tagged cd --> cd IN trace_invokes_data_caps ISA t)) ||
+   (exists cc. ISA.trace_raises_ex t && trace_writes_pcc_caps ISA t = {cc} && trace_writes_idc_caps ISA t = {}) ||
    ISA.trace_has_assertion_failure t)
 
 val fetch_pcc_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, SetType 'regval, Eq 'cap, Eq 'regval =>
