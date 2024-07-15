@@ -333,13 +333,15 @@ let idc_write_axiom' ISA initial_caps n t =
 sense:  invocation of code and data capabilities always happens together.
 If invocation fails, e.g. because the object types of a pair of sealed
 capabilities don't match, instructions are allowed to either raise an
-exception or write untagged or still sealed capabilities to PCC/IDC. *)
+exception or write an untagged capability to PCC (or IDC, but in the case of
+an untagged data capability, `trace_invokes_data_caps` should be empty, which
+is covered by the first clause). *)
 
 let idc_write_axiom ISA t =
   (trace_invokes_data_caps ISA t = {} ||
    (exists cc cd.
       trace_writes_pcc_caps ISA t = {cc} && (is_tagged cc --> cc IN trace_invokes_code_caps ISA t) &&
-      trace_writes_idc_caps ISA t = {cd} && (is_tagged cd --> cd IN trace_invokes_data_caps ISA t)) ||
+      trace_writes_idc_caps ISA t = {cd} && cd IN trace_invokes_data_caps ISA t) ||
    (exists cc. ISA.trace_raises_ex t && trace_writes_pcc_caps ISA t = {cc} && trace_writes_idc_caps ISA t = {}) ||
    ISA.trace_has_assertion_failure t)
 
