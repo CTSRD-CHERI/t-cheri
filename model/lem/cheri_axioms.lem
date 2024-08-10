@@ -28,6 +28,7 @@ type isa 'cap 'regval 'instr 'e =
      IDC : set register_name;
      caps_of_regval : 'regval -> set 'cap;
      trace_uses_mem_caps : isa_trace 'regval 'instr -> bool;
+     trace_load_auth_caps : isa_trace 'regval 'instr -> set 'cap;
      instr_invokes_indirect_caps : 'instr -> trace 'regval -> set 'cap;
      instr_invokes_code_caps : 'instr -> trace 'regval -> set 'cap;
      instr_invokes_data_caps : 'instr -> trace 'regval -> set 'cap;
@@ -365,6 +366,7 @@ let load_mem_axiom ISA initial_caps n t =
      (* Only perform memory loads (outside address translation) with a suitable authorising capability *)
      (exists c' vaddr.
         cap_derivable (initial_caps union available_caps ISA i t) c' && is_tagged c' &&
+        c' IN ISA.trace_load_auth_caps t &&
         (is_sealed c' --> is_indirect_sentry c' && unseal c' IN trace_invokes_indirect_caps ISA t) &&
         ISA.translate_address vaddr (if is_fetch_trace t then Fetch else Load) (take i t.trace) = Just paddr &&
         Set.fromList (address_range vaddr sz) subset (get_mem_region c') &&
