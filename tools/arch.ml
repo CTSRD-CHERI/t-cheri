@@ -37,6 +37,7 @@ type isa =
     invoked_data_reg : string Bindings.t;
     invoked_indirect_reg : string Bindings.t;
     load_auth : string Bindings.t;
+    load_funs : IdSet.t;
     cap_load_funs : IdSet.t;
   }
 
@@ -196,5 +197,6 @@ let load_isa file src_dir =
     invoked_data_reg = optional_bindings (member "invoked_data_reg" arch) |> Bindings.map to_string;
     invoked_indirect_reg = optional_bindings (member "invoked_indirect_reg" arch) |> Bindings.map to_string;
     load_auth = optional_bindings (member "load_auth" arch) |> Bindings.map to_string;
+    load_funs = optional_idset (member "load_funs" arch);
     cap_load_funs = optional_idset (member "cap_load_funs" arch);
   }

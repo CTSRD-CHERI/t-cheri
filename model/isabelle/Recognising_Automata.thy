@@ -3004,6 +3004,7 @@ locale Mem_Automaton = Capability_ISA_Fixed_Translation CC ISA initial_caps tran
     and initial_caps :: "'cap set"
     and translation_assms :: "'regval event \<Rightarrow> bool" +
   fixes is_fetch :: bool and use_mem_caps :: bool
+    and load_auth_caps :: "'cap set"
     and invoked_indirect_caps :: "'cap set"
 begin
 
@@ -3040,6 +3041,7 @@ definition access_enabled :: "('cap, 'regval) axiom_state \<Rightarrow> acctype 
        (\<exists>c' \<in> derivable (initial_caps \<union> accessed_caps (use_mem_caps \<and> invoked_indirect_caps = {}) s).
           let is_cap = tag \<noteq> B0 in
           let is_local_cap = mem_val_is_local_cap CC ISA v tag \<and> tag = B1 in
+          (acctype = Store \<or> c' \<in> load_auth_caps) \<and>
           authorises_access c' acctype is_cap is_local_cap vaddr paddr sz)))"
 
 lemmas access_enabled_defs = access_enabled_def authorises_access_def addrs_in_mem_region_def
@@ -3086,6 +3088,7 @@ end
 locale Mem_Automaton_For_Trace = Mem_Automaton
   where is_fetch = "is_fetch_trace t"
     and use_mem_caps = "trace_uses_mem_caps ISA t"
+    and load_auth_caps = "trace_load_auth_caps ISA t"
     and invoked_indirect_caps = "trace_invokes_indirect_caps ISA t"
   for t :: "('regval, 'instr) isa_trace"
 begin
@@ -3127,12 +3130,13 @@ end
 
 locale Mem_Assm_Automaton =
   Capability_Invariant_ISA CC ISA initial_caps cap_invariant +
-  Mem_Automaton CC ISA initial_caps translation_assms is_fetch use_mem_caps invoked_indirect_caps
+  Mem_Automaton CC ISA initial_caps translation_assms is_fetch use_mem_caps load_auth_caps invoked_indirect_caps
   for CC :: "'cap Capability_class" and ISA :: "('cap, 'regval, 'instr, 'e) isa"
     and initial_caps :: "'cap set"
     and cap_invariant :: "'cap \<Rightarrow> bool"
     and translation_assms :: "'regval event \<Rightarrow> bool"
     and is_fetch :: bool and ex_traces :: bool and use_mem_caps :: bool
+    and load_auth_caps :: "'cap set"
     and invoked_indirect_caps :: "'cap set" +
   fixes is_isa_exception :: "'e \<Rightarrow> bool"
     and ev_assms :: "('cap, 'regval) axiom_state \<Rightarrow> 'regval event \<Rightarrow> bool"
@@ -3206,6 +3210,7 @@ locale Mem_Assm_Automaton_For_Trace = Mem_Assm_Automaton
   where is_fetch = "is_fetch_trace t"
     and ex_traces = "trace_raises_ex ISA t"
     and use_mem_caps = "trace_uses_mem_caps ISA t"
+    and load_auth_caps = "trace_load_auth_caps ISA t"
     and invoked_indirect_caps = "trace_invokes_indirect_caps ISA t"
   for t :: "('regval, 'instr) isa_trace"
 begin

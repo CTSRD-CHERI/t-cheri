@@ -408,7 +408,7 @@ let traces_enabled_lemma mem for_fetch isa id =
   in
   let load_auth_assms = match Bindings.find_opt id isa.load_auth with
     | Some reg -> ["load_auth = Some (" ^ reg ^ ")"]
-    | None -> []
+    | None -> if IdSet.disjoint f.trans_calls (IdSet.union isa.load_funs isa.cap_load_funs) then [] else ["load_auth = None"]
   in
   let assms = cap_assm @ asr_assm @ arg_assms @ eq_assms @ ret_typ_assm @ invoked_code_reg_assms @ invoked_data_reg_assms @ invoked_indirect_assms @ load_auth_assms in
   let using = if assms = [] then "" else " assms: assms" in
