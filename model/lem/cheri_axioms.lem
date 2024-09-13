@@ -369,6 +369,7 @@ let load_mem_axiom ISA initial_caps n t =
         c' IN ISA.trace_load_auth_caps t &&
         (is_sealed c' --> is_indirect_sentry c' && unseal c' IN trace_invokes_indirect_caps ISA t) &&
         ISA.translate_address vaddr (if is_fetch_trace t then Fetch else Load) (take i t.trace) = Just paddr &&
+        vaddr IN get_mem_region c' &&
         Set.fromList (address_range vaddr sz) subset (get_mem_region c') &&
         (if is_fetch_trace t then permits_execute c' else permits_load c') &&
         (is_fetch_trace t --> tag = B0) &&
@@ -404,6 +405,7 @@ let store_mem_axiom ISA initial_caps n t =
      (exists c' vaddr.
         cap_derivable (initial_caps union available_caps ISA i t) c' && is_tagged c' && not (is_sealed c') &&
         ISA.translate_address vaddr Store (take i t.trace) = Just paddr &&
+        vaddr IN get_mem_region c' &&
         Set.fromList (address_range vaddr sz) subset (get_mem_region c') &&
         permits_store c' &&
         ((mem_val_is_cap ISA v tag && tag = B1) --> permits_store_cap c') &&

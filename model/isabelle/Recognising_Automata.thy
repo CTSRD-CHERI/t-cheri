@@ -3012,7 +3012,8 @@ abbreviation invokes_indirect_caps where "invokes_indirect_caps \<equiv> (invoke
 
 definition addrs_in_mem_region :: "'cap \<Rightarrow> acctype \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> bool" where
   "addrs_in_mem_region c acctype vaddr paddr sz =
-     (set (address_range vaddr sz) \<subseteq> get_mem_region CC c \<and>
+     (vaddr \<in> get_mem_region CC c \<and>
+      set (address_range vaddr sz) \<subseteq> get_mem_region CC c \<and>
       translate_address ISA vaddr acctype [] = Some paddr)"
 
 definition has_access_permission :: "'cap \<Rightarrow> acctype \<Rightarrow> bool \<Rightarrow> bool \<Rightarrow> bool" where
