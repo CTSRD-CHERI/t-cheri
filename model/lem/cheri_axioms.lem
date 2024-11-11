@@ -341,8 +341,8 @@ is covered by the first clause). *)
 let idc_write_axiom ISA t =
   (trace_invokes_data_caps ISA t = {} ||
    (exists cc cd.
-      trace_writes_pcc_caps ISA t = {cc} && (is_tagged cc --> cc IN trace_invokes_code_caps ISA t) &&
-      trace_writes_idc_caps ISA t = {cd} && cd IN trace_invokes_data_caps ISA t) ||
+      trace_writes_pcc_caps ISA t = {cc} && trace_writes_idc_caps ISA t = {cd} &&
+      (is_tagged cc --> cc IN trace_invokes_code_caps ISA t && cd IN trace_invokes_data_caps ISA t)) ||
    (exists cc. ISA.trace_raises_ex t && trace_writes_pcc_caps ISA t = {cc} && trace_writes_idc_caps ISA t = {}) ||
    ISA.trace_has_assertion_failure t)
 
