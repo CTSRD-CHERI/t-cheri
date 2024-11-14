@@ -346,15 +346,20 @@ let idc_write_axiom ISA t =
    (exists cc. ISA.trace_raises_ex t && trace_writes_pcc_caps ISA t = {cc} && trace_writes_idc_caps ISA t = {}) ||
    ISA.trace_has_assertion_failure t)
 
+val reads_valid_pcc : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, SetType 'regval, Eq 'cap, Eq 'regval =>
+  isa 'cap 'regval 'instr 'e -> trace 'regval -> bool
+let reads_valid_pcc ISA t =
+  (match List.map (ev_reads_pcc_caps ISA) t with
+     | cs :: _ -> (forall c. c IN cs --> is_tagged c && not (is_sealed c) && permits_execute c)
+     | [] -> false
+   end)
+
 val fetch_pcc_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, SetType 'regval, Eq 'cap, Eq 'regval =>
   isa 'cap 'regval 'instr 'e -> isa_trace 'regval 'instr -> bool
 let fetch_pcc_axiom ISA t =
-  (is_fetch_trace t
+  (is_fetch_trace t && not (ISA.trace_has_assertion_failure t)
    -->
-   (match List.map (ev_reads_pcc_caps ISA) t.trace with
-      | cs :: _ -> (forall c. c IN cs --> is_tagged c && not (is_sealed c) && permits_execute c) || ISA.trace_raises_ex t
-      | [] -> false
-    end))
+   reads_valid_pcc ISA t.trace || ISA.trace_raises_ex t)
 
 val load_mem_axiom : forall 'cap 'regval 'instr 'e. Capability 'cap, SetType 'cap, Eq 'cap =>
   isa 'cap 'regval 'instr 'e -> set 'cap -> nat -> isa_trace 'regval 'instr -> bool
@@ -421,5 +426,4 @@ let cheri_axioms ISA initial_caps n t =
   load_mem_axiom ISA initial_caps n t &&
   store_tag_axiom ISA n t &&
   store_mem_axiom ISA initial_caps n t &&
-  idc_write_axiom ISA t &&
-  fetch_pcc_axiom ISA t
+  idc_write_axiom ISA t
